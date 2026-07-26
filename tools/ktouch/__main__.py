@@ -1,4 +1,4 @@
-"""Point d'entrée : `python -m ktouch <sauvegarde.bin>`."""
+"""Point d'entrée : `python ktouch.py <sauvegarde.bin>` depuis la racine."""
 
 import sys
 
@@ -7,10 +7,15 @@ from ktouch.dump import inspect_dump
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print("usage : python -m ktouch <sauvegarde.bin>", file=sys.stderr)
+        print("usage : python ktouch.py <sauvegarde.bin>", file=sys.stderr)
         return 2
-    with open(argv[1], "rb") as handle:
-        report = inspect_dump(handle.read())
+    try:
+        with open(argv[1], "rb") as handle:
+            data = handle.read()
+    except OSError as erreur:
+        print(f"lecture impossible : {erreur}", file=sys.stderr)
+        return 2
+    report = inspect_dump(data)
     print(report.format())
     return 0 if report.safe_to_flash else 1
 

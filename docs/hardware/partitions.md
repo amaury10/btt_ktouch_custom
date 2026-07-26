@@ -21,7 +21,9 @@ La K-Touch supporte deux slots d'application (`app0` et `app1`), permettant une 
 
 ### Structure de l'otadata
 
-La partition `otadata` (8 Kio à l'adresse 0xE000) contient deux copies identiques de 32 octets chacune :
+La partition `otadata` (8 Kio à l'adresse 0xE000) contient **deux copies indépendantes** de 32 octets, une au début de chaque secteur de 4 Kio — donc aux adresses absolues **0xE000** et **0xF000**, et non aux octets 0-31 et 32-63 d'un seul bloc. Ces deux copies ne sont normalement **pas** identiques : c'est justement la différence d'`ota_seq` entre elles qui porte tout le mécanisme de sélection.
+
+Disposition d'une entrée (32 octets) :
 
 - **Octets 0-3** : `ota_seq` — nombre de séquence (incrémenté à chaque mise à jour)
 - **Octets 4-23** : `seq_label` — étiquette de séquence (20 octets, généralement 0xFF)
@@ -30,17 +32,18 @@ La partition `otadata` (8 Kio à l'adresse 0xE000) contient deux copies identiqu
   - `0x00000003` (INVALID) : slot invalide, à ignorer
   - `0x00000004` (ABORTED) : mise à jour avortée, à ignorer
   - `0xFFFFFFFF` (UNDEFINED) : non initialisé
-- **Octets 28-31** : CRC-32-LE calculé **uniquement sur les 4 octets d'`ota_seq`**
+  - à noter : `0x00000001` est PENDING_VERIFY, pas VALID — à ne pas confondre
+- **Octets 28-31** : `crc` — CRC-32-LE calculé **uniquement sur les 4 octets d'`ota_seq`**, pas sur l'entrée entière
 
-Le slot actif est déterminé par la formule : **slot = (ota_seq - 1) % 2**
+Le bootloader retient, parmi les entrées dont le CRC est correct, celle qui a le `ota_seq` le plus élevé, et démarre le slot **`(ota_seq - 1) % 2`**.
 
 Lorsqu'une mise à jour OTA arrive :
-1. Le nouvel application est écrit dans le slot inactif avec `ota_state = 0x00000001` (PENDING_VERIFY)
-2. Un nouvel `ota_seq` (le plus élevé des deux copies + 1) est écrit dans `otadata`
-3. À la prochaine validation du boot, le bootloader accepte le nouveau slot et met à jour `ota_state` à VALID
-4. Si le boot échoue avant la validation, le bootloader revient au slot précédent et marque le nouveau avec ABORTED
+1. Le nouveau firmware est écrit dans le slot inactif, et l'updater écrit une nouvelle entrée `otadata` avec `ota_state = NEW` (0x0, si le rollback automatique est activé) ou `UNDEFINED` (0xFFFFFFFF, si le rollback est désactivé), avec le `ota_seq` le plus élevé des deux copies + 1.
+2. Au redémarrage, c'est le **bootloader** qui effectue la transition NEW → PENDING_VERIFY avant de sauter dans le nouveau slot.
+3. Une fois démarrée, c'est l'**application** elle-même qui doit s'auto-valider en appelant `esp_ota_mark_app_valid_cancel_rollback()` ; c'est cet appel qui fait passer l'état à VALID.
+4. Si l'application ne s'auto-valide pas (crash, watchdog, appel jamais atteint) avant le prochain redémarrage, le bootloader considère la tentative comme un échec, revient au slot précédent et marque le nouveau comme ABORTED.
 
-Chaque copie de la structure de 32 octets possède son propre CRC ; une structure avec un CRC invalide est ignorée. Si les deux copies sont invalides ou absentes, le démarrage échoue.
+**Si aucune entrée n'est valide, le démarrage n'échoue pas.** Le bootloader se rabat sur la partition `factory` ; la K-Touch n'en ayant pas, il démarre alors le premier slot OTA — c'est-à-dire le firmware d'origine dans `app0`. C'est le chemin de secours du projet : **effacer l'`otadata` ramène au firmware stock, ça ne brique jamais l'appareil.**
 
 ## Règles de sécurité critiques
 
@@ -57,8 +60,10 @@ Toute erreur d'écriture à ces adresses rend l'appareil inutilisable.
 Avant toute opération de programmation, une sauvegarde complète de 16 Mio est créée et vérifiée à l'aide de :
 
 ```bash
-python -m ktouch dump.bin
+python ktouch.py dump.bin
 ```
+
+(à lancer depuis la racine du dépôt — le lanceur `ktouch.py` rend le paquet `tools/ktouch` accessible sans manipuler `PYTHONPATH`.)
 
 Cette commande :
 1. Vérifie que la taille est exactement 16 Mio

@@ -15,9 +15,10 @@ from ktouch.image import (
     NotAnEspImage,
     Partition,
     parse_app_desc,
+    parse_image_header,
     parse_partition_table,
 )
-from ktouch.otadata import OTADATA_SIZE, active_slot as read_active_slot
+from ktouch.otadata import active_slot as read_active_slot
 
 FLASH_SIZE = 0x1000000  # 16 Mio
 PARTITION_TABLE_OFFSET = 0x8000
@@ -34,12 +35,13 @@ STOCK_PARTITIONS = [
 ]
 
 OTADATA_OFFSET = 0xE000
+OTADATA_SIZE = 0x2000
 
 
 @dataclass(frozen=True)
 class DumpReport:
     size_ok: bool
-    partitions: list[Partition]
+    partitions: tuple[Partition, ...]
     partitions_match_stock: bool
     app0: AppDesc | None
     app1: AppDesc | None
@@ -47,8 +49,15 @@ class DumpReport:
 
     @property
     def safe_to_flash(self) -> bool:
-        """Vrai si la sauvegarde permet une restauration intégrale."""
-        return self.size_ok and self.partitions_match_stock
+        """Vrai si la sauvegarde permet une restauration intégrale.
+
+        Exiger un `app0` lisible n'est pas de la coquetterie : une K-Touch
+        d'origine en contient toujours un. S'il est illisible alors que la
+        table de partitions est intacte, c'est le signe d'une lecture
+        corrompue — précisément la sauvegarde sur laquelle il ne faut pas
+        compter comme filet de secours.
+        """
+        return self.size_ok and self.partitions_match_stock and self.app0 is not None
 
     def format(self) -> str:
         lines = [
@@ -70,21 +79,31 @@ class DumpReport:
 
 
 def _app_desc_at(data: bytes, offset: int) -> AppDesc | None:
+    """Lit le descripteur d'application à `offset`, ou None si absent.
+
+    `parse_app_desc` ne vérifie que le mot magique du descripteur, à +32
+    octets ; des données arbitraires porteuses de ce mot seraient donc
+    signalées à tort comme un firmware. On exige d'abord un en-tête d'image
+    ESP32 valide (octet magique `0xE9`), présent au début de tout slot
+    d'application réel.
+    """
+    chunk = data[offset:offset + 0x1000]
     try:
-        return parse_app_desc(data[offset:offset + 0x1000])
+        parse_image_header(chunk)
+        return parse_app_desc(chunk)
     except NotAnEspImage:
         return None
 
 
 def inspect_dump(data: bytes) -> DumpReport:
     table = data[PARTITION_TABLE_OFFSET:PARTITION_TABLE_OFFSET + PARTITION_TABLE_SIZE]
-    partitions = parse_partition_table(table)
+    partitions = tuple(parse_partition_table(table))
     otadata = data[OTADATA_OFFSET:OTADATA_OFFSET + OTADATA_SIZE]
     slot = read_active_slot(otadata) if len(otadata) == OTADATA_SIZE else None
     return DumpReport(
         size_ok=len(data) == FLASH_SIZE,
         partitions=partitions,
-        partitions_match_stock=partitions == STOCK_PARTITIONS,
+        partitions_match_stock=partitions == tuple(STOCK_PARTITIONS),
         app0=_app_desc_at(data, 0x10000),
         app1=_app_desc_at(data, 0x490000),
         active_slot=slot,

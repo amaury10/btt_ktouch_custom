@@ -1,5 +1,9 @@
 """Tests de la vérification d'une sauvegarde complète du flash (16 Mio)."""
 
+import struct
+
+import pytest
+
 from ktouch.dump import FLASH_SIZE, STOCK_PARTITIONS, inspect_dump
 from ktouch.otadata import build_otadata
 
@@ -31,6 +35,16 @@ def test_sauvegarde_conforme_est_declaree_sure():
 def test_taille_incorrecte_est_rejetee():
     report = inspect_dump(make_dump(size=0x800000))
     assert report.size_ok is False
+    assert report.safe_to_flash is False
+
+
+def test_app0_illisible_rend_la_sauvegarde_inexploitable():
+    """Une K-Touch d'origine a toujours un app0 : son absence trahit une lecture
+    corrompue, même si la taille et le partitionnement semblent corrects."""
+    report = inspect_dump(make_dump(app0=False))
+    assert report.size_ok is True
+    assert report.partitions_match_stock is True
+    assert report.app0 is None
     assert report.safe_to_flash is False
 
 

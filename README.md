@@ -24,4 +24,5 @@ les outils de ce dépôt vérifient chaque sauvegarde avant toute écriture.
 
 MIT pour le code de ce dépôt. Le support matériel provient du composant
 [`bigtreetech/PandaTouch_IDF`](https://github.com/bigtreetech/PandaTouch_IDF),
-référencé en sous-module et non redistribué ici.
+qui n'est pas encore intégré à ce dépôt (prévu en sous-module dans un jalon
+ultérieur) et ne sera de toute façon jamais redistribué ici.
