@@ -692,14 +692,15 @@ git commit -m "feat(tools): lecture et fabrication de la partition otadata"
 
 **Files:**
 - Create: `tools/ktouch/dump.py`
-- Create: `tools/ktouch/__main__.py`
-- Create: `ktouch.py` (lanceur à la racine du dépôt)
+- Create: `tools/ktouch/cli.py`
+- Create: `tools/ktouch/__main__.py` (enveloppe de trois lignes autour de `cli.main`)
+- Create: `ktouch-cli.py` (lanceur à la racine du dépôt — le tiret est délibéré, voir plus bas)
 - Create: `docs/hardware/partitions.md`
 - Test: `tests/test_dump.py`
 
 **Interfaces:**
 - Consumes: `ktouch.image.{parse_app_desc, parse_partition_table, Partition, NotAnEspImage}` et `ktouch.otadata.active_slot` des tâches 1 et 2.
-- Produces: `ktouch.dump.STOCK_PARTITIONS: list[Partition]`, `ktouch.dump.FLASH_SIZE = 0x1000000`, `ktouch.dump.inspect_dump(data: bytes) -> DumpReport`, et la dataclasse gelée `DumpReport(size_ok: bool, partitions: list[Partition], partitions_match_stock: bool, app0: AppDesc | None, app1: AppDesc | None, active_slot: int | None)` avec la propriété `safe_to_flash: bool` (vraie seulement si la taille est bonne, le partitionnement identique au stock **et** `app0` lisible) et la méthode `format() -> str`. Plus le lanceur `ktouch.py` à la racine, qui rend `python ktouch.py <sauvegarde.bin>` utilisable depuis le dépôt sans manipuler `PYTHONPATH`.
+- Produces: `ktouch.dump.STOCK_PARTITIONS: list[Partition]`, `ktouch.dump.FLASH_SIZE = 0x1000000`, `ktouch.dump.inspect_dump(data: bytes) -> DumpReport`, et la dataclasse gelée `DumpReport(size_ok: bool, partitions: list[Partition], partitions_match_stock: bool, app0: AppDesc | None, app1: AppDesc | None, active_slot: int | None)` avec la propriété `safe_to_flash: bool` (vraie seulement si la taille est bonne, le partitionnement identique au stock **et** `app0` lisible) et la méthode `format() -> str`. Plus le lanceur `ktouch-cli.py` à la racine, qui expose trois sous-commandes utilisables depuis le dépôt sans manipuler `PYTHONPATH` : `verify <sauvegarde.bin>`, `otadata <fichier.bin>` et `make-otadata <slot> <sortie.bin>`.
 
 C'est le filet de sécurité : aucune écriture sur l'appareil n'aura lieu tant que ce rapport ne confirme pas que la sauvegarde est complète et conforme.
 
@@ -796,6 +797,100 @@ def test_le_rapport_texte_mentionne_les_deux_slots():
     rendu = inspect_dump(make_dump(app1=True)).format()
     assert "app0" in rendu and "app1" in rendu
     assert "K-Touch" in rendu and "ktouch-custom" in rendu
+```
+
+`tests/test_cli.py` — les sous-commandes sont ce que l'opérateur tape devant un
+appareil branché, donc leurs codes de sortie et leur robustesse aux mauvais
+arguments comptent autant que la logique qu'elles appellent :
+
+```python
+"""Tests des sous-commandes en ligne de commande."""
+
+from pathlib import Path
+
+import pytest
+
+from ktouch.cli import main
+from ktouch.otadata import OTADATA_SIZE, active_slot
+
+from test_dump import make_dump
+
+
+@pytest.fixture
+def sauvegarde(tmp_path: Path) -> Path:
+    chemin = tmp_path / "dump.bin"
+    chemin.write_bytes(make_dump())
+    return chemin
+
+
+@pytest.mark.parametrize("argv", [
+    ["ktouch-cli.py"],
+    ["ktouch-cli.py", "inconnue"],
+    ["ktouch-cli.py", "verify"],
+    ["ktouch-cli.py", "verify", "a", "b"],
+    ["ktouch-cli.py", "make-otadata", "1"],
+])
+def test_arguments_invalides_rendent_2(argv):
+    assert main(argv) == 2
+
+
+def test_fichier_absent_rend_2_sans_trace_d_appel(tmp_path):
+    assert main(["ktouch-cli.py", "verify", str(tmp_path / "absent.bin")]) == 2
+
+
+def test_verify_rend_0_sur_une_sauvegarde_conforme(sauvegarde):
+    assert main(["ktouch-cli.py", "verify", str(sauvegarde)]) == 0
+
+
+def test_verify_rend_1_sur_une_sauvegarde_tronquee(tmp_path):
+    chemin = tmp_path / "court.bin"
+    chemin.write_bytes(make_dump()[:0x800000])
+    assert main(["ktouch-cli.py", "verify", str(chemin)]) == 1
+
+
+def test_otadata_accepte_une_sauvegarde_complete(sauvegarde, capsys):
+    assert main(["ktouch-cli.py", "otadata", str(sauvegarde)]) == 0
+    assert "slot actif : app0" in capsys.readouterr().out
+
+
+def test_make_otadata_produit_un_fichier_relisible(tmp_path):
+    sortie = tmp_path / "otadata.bin"
+    assert main(["ktouch-cli.py", "make-otadata", "1", str(sortie)]) == 0
+    contenu = sortie.read_bytes()
+    assert len(contenu) == OTADATA_SIZE
+    assert active_slot(contenu) == 1
+
+
+@pytest.mark.parametrize("slot", ["2", "-1", "abc"])
+def test_make_otadata_refuse_un_slot_invalide(slot, tmp_path):
+    assert main(["ktouch-cli.py", "make-otadata", slot, str(tmp_path / "x.bin")]) == 2
+
+
+def test_image_identifie_un_binaire_applicatif(tmp_path, capsys):
+    from test_image import make_app_desc, make_image
+
+    chemin = tmp_path / "app.bin"
+    chemin.write_bytes(make_image() + make_app_desc(project=b"ktouch-custom"))
+    assert main(["ktouch-cli.py", "image", str(chemin)]) == 0
+    sortie = capsys.readouterr().out
+    assert "ESP32-S3" in sortie and "ktouch-custom" in sortie
+
+
+def test_image_rejette_un_fichier_quelconque(tmp_path):
+    chemin = tmp_path / "bidon.bin"
+    chemin.write_bytes(b"\x00" * 4096)
+    assert main(["ktouch-cli.py", "image", str(chemin)]) == 1
+
+
+def test_le_lanceur_racine_ne_masque_pas_le_paquet():
+    """Régression : un `ktouch.py` à la racine masquait `tools/ktouch/`.
+
+    Le nom du lanceur doit rester non importable — un tiret garantit qu'aucun
+    `import ktouch` ne puisse le trouver à la place du paquet.
+    """
+    racine = Path(__file__).resolve().parent.parent
+    assert not (racine / "ktouch.py").exists()
+    assert (racine / "ktouch-cli.py").exists()
 ```
 
 - [ ] **Step 2: Lancer les tests pour vérifier qu'ils échouent**
@@ -909,54 +1004,172 @@ def inspect_dump(data: bytes) -> DumpReport:
     )
 ```
 
-`tools/ktouch/__main__.py` :
+`tools/ktouch/cli.py` :
 
 ```python
-"""Point d'entrée : `python ktouch.py <sauvegarde.bin>` depuis la racine."""
+"""Interface en ligne de commande de l'outillage K-Touch.
+
+Trois sous-commandes, qui couvrent tout ce dont les étapes sur matériel ont
+besoin. Elles existent pour qu'aucune manipulation d'`otadata` ne passe par un
+`python -c` tapé à la main : c'est l'opération qui, mal faite, empêche
+l'appareil de démarrer, et une ligne recopiée de travers au mauvais moment est
+un risque réel.
+"""
 
 import sys
 
-from ktouch.dump import inspect_dump
+from ktouch.dump import FLASH_SIZE, OTADATA_OFFSET, inspect_dump
+from ktouch.image import NotAnEspImage, parse_app_desc, parse_image_header
+from ktouch.otadata import OTADATA_SIZE, active_slot, build_otadata, parse_otadata, seq_crc
+
+APP_SLOT_SIZE = 0x480000  # taille d'un slot OTA de la K-Touch
+
+USAGE = """usage :
+  python ktouch-cli.py verify <sauvegarde.bin>        vérifie une sauvegarde de 16 Mio
+  python ktouch-cli.py otadata <fichier.bin>          détaille l'otadata (blob de 8 Kio
+                                                      ou sauvegarde complète)
+  python ktouch-cli.py make-otadata <slot> <sortie>   fabrique une otadata démarrant <slot>
+  python ktouch-cli.py image <firmware.bin>           identifie une image applicative
+"""
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage : python ktouch.py <sauvegarde.bin>", file=sys.stderr)
-        return 2
+def _read(chemin: str) -> bytes | None:
     try:
-        with open(argv[1], "rb") as handle:
-            data = handle.read()
+        with open(chemin, "rb") as handle:
+            return handle.read()
     except OSError as erreur:
         print(f"lecture impossible : {erreur}", file=sys.stderr)
+        return None
+
+
+def _cmd_verify(chemin: str) -> int:
+    data = _read(chemin)
+    if data is None:
         return 2
     report = inspect_dump(data)
     print(report.format())
     return 0 if report.safe_to_flash else 1
 
 
+def _cmd_otadata(chemin: str) -> int:
+    """Accepte indifféremment un blob d'otadata ou une sauvegarde complète."""
+    data = _read(chemin)
+    if data is None:
+        return 2
+    if len(data) == FLASH_SIZE:
+        data = data[OTADATA_OFFSET:OTADATA_OFFSET + OTADATA_SIZE]
+        print(f"sauvegarde complète : otadata extraite à 0x{OTADATA_OFFSET:x}")
+    if len(data) < OTADATA_SIZE:
+        print(f"taille inattendue : {len(data)} octets", file=sys.stderr)
+        return 2
+    for index, entree in enumerate(parse_otadata(data)):
+        attendu = seq_crc(entree.ota_seq)
+        print(
+            f"  copie {index} : ota_seq={entree.ota_seq} "
+            f"state=0x{entree.ota_state:08x} crc=0x{entree.crc:08x} "
+            f"attendu=0x{attendu:08x} valide={entree.valid}"
+        )
+    slot = active_slot(data)
+    print(f"slot actif : {'aucun' if slot is None else f'app{slot}'}")
+    return 0
+
+
+def _cmd_make_otadata(slot_texte: str, sortie: str) -> int:
+    try:
+        slot = int(slot_texte)
+    except ValueError:
+        print(f"slot invalide : {slot_texte}", file=sys.stderr)
+        return 2
+    try:
+        contenu = build_otadata(slot)
+    except ValueError as erreur:
+        print(str(erreur), file=sys.stderr)
+        return 2
+    try:
+        with open(sortie, "wb") as handle:
+            handle.write(contenu)
+    except OSError as erreur:
+        print(f"écriture impossible : {erreur}", file=sys.stderr)
+        return 2
+    print(f"{len(contenu)} octets écrits dans {sortie} — démarrera sur app{slot}")
+    return 0
+
+
+def _cmd_image(chemin: str) -> int:
+    """Identifie une image applicative — sert à valider un binaire fraîchement
+    compilé avec les mêmes analyseurs que ceux qui liront le vrai matériel."""
+    data = _read(chemin)
+    if data is None:
+        return 2
+    try:
+        entete = parse_image_header(data)
+        desc = parse_app_desc(data)
+    except NotAnEspImage as erreur:
+        print(f"pas une image ESP32 exploitable : {erreur}", file=sys.stderr)
+        return 1
+    print(f"puce        : {entete.chip}")
+    print(f"flash       : {entete.flash_size}, {entete.segment_count} segments")
+    print(f"projet      : {desc.project_name}")
+    print(f"version     : {desc.version}")
+    print(f"compilation : {desc.date} {desc.time}, IDF {desc.idf_ver}")
+    marge = APP_SLOT_SIZE - len(data)
+    print(f"taille      : {len(data)} octets sur {APP_SLOT_SIZE} ({marge} libres)")
+    return 0 if marge >= 0 else 1
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) >= 2:
+        commande, arguments = argv[1], argv[2:]
+        if commande == "verify" and len(arguments) == 1:
+            return _cmd_verify(arguments[0])
+        if commande == "otadata" and len(arguments) == 1:
+            return _cmd_otadata(arguments[0])
+        if commande == "make-otadata" and len(arguments) == 2:
+            return _cmd_make_otadata(arguments[0], arguments[1])
+        if commande == "image" and len(arguments) == 1:
+            return _cmd_image(arguments[0])
+    print(USAGE, file=sys.stderr)
+    return 2
+
+
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
 ```
 
-`ktouch.py`, à la racine du dépôt — sans lui, `python -m ktouch` échoue avec
-`No module named ktouch`, car le paquet vit sous `tools/` et le `pythonpath` de
-`pytest.ini` ne s'applique qu'à pytest :
+`tools/ktouch/__main__.py`, pour que `python -m ktouch` reste utilisable depuis
+`tools/` :
 
 ```python
-"""Lanceur : rend le paquet `ktouch` accessible depuis la racine du dépôt.
+"""Permet `python -m ktouch <sous-commande>` depuis le dossier `tools`."""
 
-Le paquet vit sous `tools/` pour ne pas encombrer la racine, ce qui le rend
-invisible à `python -m ktouch`. Ce lanceur ajoute `tools/` au chemin de
-recherche pour que la commande de vérification, qui est le garde-fou de tout
-le projet, s'exécute telle qu'elle est documentée.
-"""
+import sys
+
+from ktouch.cli import main
+
+raise SystemExit(main([__spec__.name.split(".")[0], *sys.argv[1:]]))
+```
+
+`ktouch-cli.py`, à la racine du dépôt. Le paquet vit sous `tools/` pour ne pas
+encombrer la racine, ce qui le rend invisible à `python -m ktouch` — le
+`pythonpath` de `pytest.ini` ne s'applique qu'à pytest. Ce lanceur ajoute
+`tools/` au chemin de recherche.
+
+**Le tiret dans le nom est délibéré et load-bearing.** Un fichier `ktouch.py` à
+la racine masquerait le paquet `tools/ktouch/` dès qu'un interpréteur est lancé
+depuis le dépôt : `import ktouch` trouverait le module racine, pas le paquet, et
+toute commande d'inspection échouerait sur `'ktouch' is not a package`. Un nom
+comportant un tiret n'est pas un identifiant Python valide, donc il ne peut pas
+être importé — le conflit devient structurellement impossible.
+
+```python
+"""Lanceur : rend le paquet `ktouch` accessible depuis la racine du dépôt."""
 
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "tools"))
 
-from ktouch.__main__ import main  # noqa: E402  (après ajustement du chemin)
+from ktouch.cli import main  # noqa: E402  (après ajustement du chemin)
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
@@ -969,7 +1182,7 @@ Expected: PASS — les tests des trois tâches, aucun échec.
 
 - [ ] **Step 5: Écrire la documentation du partitionnement**
 
-`docs/hardware/partitions.md` — reprend le tableau des six partitions avec offsets et tailles, explique le mécanisme des deux slots OTA et de l'`otadata`, et énonce la règle de sécurité : ne jamais écrire à `0x0`, `0x8000` ni `0x10000`. Indique que ces valeurs proviennent de `K-Touch_v1.1.0_partition.bin` du dépôt officiel BTT, et comment les revérifier avec `python ktouch.py <sauvegarde.bin>`.
+`docs/hardware/partitions.md` — reprend le tableau des six partitions avec offsets et tailles, explique le mécanisme des deux slots OTA et de l'`otadata`, et énonce la règle de sécurité : ne jamais écrire à `0x0`, `0x8000` ni `0x10000`. Indique que ces valeurs proviennent de `K-Touch_v1.1.0_partition.bin` du dépôt officiel BTT, et comment les revérifier avec `python ktouch-cli.py verify <sauvegarde.bin>`.
 
 Ce document sert à relire un vidage hexadécimal à la main : ses offsets doivent donc être exacts. Points à énoncer sans approximation.
 
@@ -982,7 +1195,7 @@ Le bootloader retient l'entrée valide au plus grand `ota_seq` et démarre le sl
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tools/ktouch/dump.py tools/ktouch/__main__.py tests/test_dump.py docs/hardware/partitions.md
+git add tools/ktouch/dump.py tools/ktouch/cli.py tools/ktouch/__main__.py ktouch-cli.py tests/ docs/hardware/partitions.md
 git commit -m "feat(tools): verification des sauvegardes de flash et CLI"
 ```
 
@@ -1211,10 +1424,10 @@ Expected: la compilation aboutit et affiche la taille du binaire ainsi que l'esp
 - [ ] **Step 5: Vérifier le binaire produit avec notre propre outillage**
 
 ```powershell
-python -c "from ktouch.image import parse_image_header, parse_app_desc; d=open(r'firmware/build/ktouch-custom.bin','rb').read(); print(parse_image_header(d)); print(parse_app_desc(d)); print('taille', len(d), 'limite', 0x480000)"
+python ktouch-cli.py image firmware/build/ktouch-custom.bin
 ```
 
-Expected: `chip='ESP32-S3'`, `flash_size='16MB'`, `project_name='ktouch-custom'`, et une taille très inférieure à `4718592`.
+Expected: `puce : ESP32-S3`, `flash : 16MB`, `projet : ktouch-custom`, et une taille très inférieure aux 4 718 592 octets du slot.
 
 > Cette étape n'est pas décorative : elle prouve que la bibliothèque des tâches 1 à 3 lit correctement un binaire réel, et pas seulement les fixtures synthétiques.
 
@@ -1234,7 +1447,7 @@ git commit -m "feat(firmware): projet ESP-IDF minimal de preuve de vie"
 - Create: `backups/` (ignoré par Git — contient le MAC et la NVS de l'appareil)
 
 **Interfaces:**
-- Consumes: `python ktouch.py` de la tâche 3.
+- Consumes: `python ktouch-cli.py` de la tâche 3.
 - Produces: `backups/ktouch-stock-<date>.bin`, une sauvegarde de 16 777 216 octets vérifiée, et la réponse à la question ouverte de la spec : quel firmware se trouve réellement sur l'appareil.
 
 Première tâche nécessitant le matériel. Elle n'écrit rien : elle ne fait que lire.
@@ -1281,7 +1494,7 @@ Expected: `Read 16777216 bytes`, en deux à trois minutes. Ne rien débrancher p
 - [ ] **Step 5: Vérifier la sauvegarde**
 
 ```powershell
-python ktouch.py backups/ktouch-stock-2026-07-26.bin
+python ktouch-cli.py verify backups/ktouch-stock-2026-07-26.bin
 ```
 
 Expected: `Taille : 16 Mio, conforme`, `Partitionnement : identique au stock`, et `Sauvegarde exploitable : OUI`. Le rapport indique aussi le contenu de chaque slot.
@@ -1323,7 +1536,7 @@ git commit -m "docs(hardware): procedure de sauvegarde et de restauration du fla
 Avant d'écrire quoi que ce soit, vérifier que notre calcul de CRC correspond à celui du bootloader, en le confrontant à l'`otadata` réellement présente dans la sauvegarde :
 
 ```powershell
-python -c "from ktouch.otadata import parse_otadata, seq_crc; d=open(r'backups/ktouch-stock-2026-07-26.bin','rb').read()[0xe000:0x10000]; [print(f'seq={e.ota_seq} state=0x{e.ota_state:08x} crc=0x{e.crc:08x} attendu=0x{seq_crc(e.ota_seq):08x} valide={e.valid}') for e in parse_otadata(d)]"
+python ktouch-cli.py otadata backups/ktouch-stock-2026-07-26.bin
 ```
 
 Expected: au moins une entrée dont `crc` égale `attendu` et dont `valide` vaut `True`.
@@ -1341,7 +1554,7 @@ Expected: `Hash of data verified.` L'offset `0x490000` est le début de `app1`. 
 - [ ] **Step 3: Générer et écrire l'otadata qui sélectionne app1**
 
 ```powershell
-python -c "from ktouch.otadata import build_otadata; open(r'firmware/build/otadata-app1.bin','wb').write(build_otadata(1))"
+python ktouch-cli.py make-otadata 1 firmware/build/otadata-app1.bin
 python -m esptool --port <PORT> --baud 460800 write_flash 0xe000 firmware/build/otadata-app1.bin
 ```
 
@@ -1361,10 +1574,10 @@ Expected: les traces `demarrage du firmware de preuve de vie`, puis `interface c
 
 ```powershell
 python -m esptool --port <PORT> --baud 460800 read_flash 0xe000 0x2000 firmware/build/otadata-relu.bin
-python -c "from ktouch.otadata import active_slot; print('slot actif :', active_slot(open(r'firmware/build/otadata-relu.bin','rb').read()))"
+python ktouch-cli.py otadata firmware/build/otadata-relu.bin
 ```
 
-Expected: `slot actif : 1`.
+Expected: `slot actif : app1`.
 
 - [ ] **Step 6: Constater la preuve de vie**
 
@@ -1408,7 +1621,7 @@ Prouver la réversibilité fait partie des critères de succès de la spec : un 
 - [ ] **Step 1: Revenir au slot app0**
 
 ```powershell
-python -c "from ktouch.otadata import build_otadata; open(r'firmware/build/otadata-app0.bin','wb').write(build_otadata(0))"
+python ktouch-cli.py make-otadata 0 firmware/build/otadata-app0.bin
 python -m esptool --port <PORT> --baud 460800 write_flash 0xe000 firmware/build/otadata-app0.bin
 python -m esptool --port <PORT> run
 ```
@@ -1419,10 +1632,10 @@ Expected: l'appareil redémarre sur le firmware d'origine, avec son interface ha
 
 ```powershell
 python -m esptool --port <PORT> --baud 460800 read_flash 0xe000 0x2000 firmware/build/otadata-verif.bin
-python -c "from ktouch.otadata import active_slot; print('slot actif :', active_slot(open(r'firmware/build/otadata-verif.bin','rb').read()))"
+python ktouch-cli.py otadata firmware/build/otadata-verif.bin
 ```
 
-Expected: `slot actif : 0`.
+Expected: `slot actif : app0`.
 
 > Si l'appareil ne redémarre plus du tout, la restauration intégrale documentée à la tâche 5 reprend la main :
 > `python -m esptool --port <PORT> --baud 460800 write_flash 0x0 backups/ktouch-stock-2026-07-26.bin`
