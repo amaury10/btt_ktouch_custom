@@ -8,7 +8,7 @@
 
 **Accès à l'appareil : WiFi uniquement.** Le port USB-C de la K-Touch n'est pas exploitable dans ce montage, donc `esptool` est hors jeu et **aucune sauvegarde des 16 Mo n'est possible**. Le filet de sécurité initial — dumper puis restaurer octet par octet — est remplacé par trois mécanismes embarqués dans le firmware lui-même, construits à la tâche 5 : un sauvetage automatique qui rebascule sur le firmware d'origine si le réseau ne répond pas, un retour manuel par `/revert`, et une mise à jour par `/update` pour itérer sans câble. La bibliothèque Python reste utile pour analyser les images et fabriquer une `otadata`, mais elle ne pilote plus l'appareil.
 
-**Tech Stack:** Python 3.14 + pytest 9 (déjà installés) · esptool · ESP-IDF v5.5.5 (déjà installée) · LVGL 9 · ESP32-S3.
+**Tech Stack:** Python 3.14 + pytest 9 (déjà installés) · ESP-IDF v5.5.5 (déjà installée) · LVGL 9 · ESP32-S3 · HTTP sur le réseau local pour tout dialogue avec l'appareil.
 
 ## Global Constraints
 
@@ -19,6 +19,7 @@ Ces contraintes s'appliquent à **toutes** les tâches, sans rappel.
 - **La table de partitions stock n'est jamais modifiée.** Valeurs exactes, vérifiées dans le binaire officiel : `nvs` data/nvs `0x9000`/`0x5000` · `otadata` data/ota `0xe000`/`0x2000` · `app0` app/ota_0 `0x10000`/`0x480000` · `app1` app/ota_1 `0x490000`/`0x480000` · `spiffs` data/spiffs `0x910000`/`0x6e0000` · `coredump` data/coredump `0xff0000`/`0x10000`.
 - **Le firmware d'origine n'est jamais écrasé.** Il occupe un slot OTA que nous ne touchons pas, et c'est la seule façon de revenir en arrière sans accès série. En pratique : n'écrire que dans le slot rendu par `esp_ota_get_next_update_partition(NULL)`, jamais à un offset calculé à la main. Les zones `0x0` (bootloader), `0x8000` (table de partitions) et le slot du firmware d'origine sont interdites en écriture.
 - **Aucun identifiant WiFi n'est commité.** Ils vivent dans `sdkconfig`, déjà exclu par `.gitignore`, et sont saisis par `idf.py menuconfig`.
+- **Interdiction absolue de viser un port série.** La K-Touch n'est joignable qu'en WiFi, par son adresse IP. Les ports COM présents sur cette machine appartiennent à **d'autres projets** de l'utilisateur : un ESP32 tiers a déjà été vu énuméré sur COM6. Aucune commande `esptool`, `idf.py flash`, `idf.py monitor` ou équivalente ne doit être lancée contre un port série dans ce projet — une écriture se ferait sur la mauvaise carte, et le fait qu'un ESP32 réponde ne prouve en rien que c'est le bon. `esptool` reste dans `tools/requirements.txt` uniquement pour un usage futur, si un accès série à la K-Touch redevenait possible.
 - **Aucun binaire BTT n'est commité.** Ils sont sans licence explicite. `.gitignore` les exclut déjà.
 - **Aucune ligne de code issue de `nomadsgalaxy/Prusa-Connect-Touch`** (licence OCL v1.1 + SWAtt, attribution héritée dans l'UI et le code).
 - **`PandaTouch_IDF` est un sous-module, jamais une copie.** Le dépôt amont n'a pas de fichier `LICENSE` ; on n'en redistribue donc rien.
