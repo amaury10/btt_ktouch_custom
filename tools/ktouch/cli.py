@@ -1,6 +1,6 @@
 """Interface en ligne de commande de l'outillage K-Touch.
 
-Trois sous-commandes, qui couvrent tout ce dont les étapes sur matériel ont
+Quatre sous-commandes, qui couvrent tout ce dont les étapes sur matériel ont
 besoin. Elles existent pour qu'aucune manipulation d'`otadata` ne passe par un
 `python -c` tapé à la main : c'est l'opération qui, mal faite, empêche
 l'appareil de démarrer, et une ligne recopiée de travers au mauvais moment est

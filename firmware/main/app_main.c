@@ -88,8 +88,28 @@ void app_main(void)
          * que soit l'objet touché ou ses drapeaux : s'abonner ici capture
          * donc chaque appui, y compris sur les repères de coin qui
          * garantissent que les 800x480 sont bien balayés jusqu'aux bords. */
+        /* pt_display_init() avale une éventuelle défaillance tactile : si
+         * pt_lvgl_touch_init() échoue en interne (GT911 muet), la fonction
+         * ignore la valeur de retour (voir pandatouch_display.c) et rend
+         * quand même ESP_OK — ESP_ERROR_CHECK ne se déclenche donc jamais
+         * dans ce cas. lv_indev_get_next(NULL) renvoie alors NULL, et un
+         * NULL ici signale une puce tactile silencieuse, pas une erreur de
+         * programmation : il ne faut pas retirer ce test. Sans lui,
+         * lv_indev_add_event_cb() ferait échouer LV_ASSERT_NULL, qui boucle
+         * indéfiniment (LV_USE_ASSERT_NULL=y par défaut) — en tenant le
+         * verrou LVGL, donc sans jamais afficher la mire déjà construite.
+         * Un pinout tactile faux ou une puce GT911 non répondante étant
+         * justement l'hypothèse la plus probable de ce jalon, on dégrade
+         * ici plutôt que de tout bloquer : la mire reste visible et
+         * seul le retour tactile est absent, ce qui distingue clairement
+         * « l'écran marche, pas le tactile » de « rien ne marche ». */
         lv_indev_t *touch_indev = lv_indev_get_next(NULL);
-        lv_indev_add_event_cb(touch_indev, on_touch, LV_EVENT_PRESSED, NULL);
+        if (touch_indev != NULL) {
+            lv_indev_add_event_cb(touch_indev, on_touch, LV_EVENT_PRESSED, NULL);
+        } else {
+            ESP_LOGW(TAG, "aucun peripherique tactile enregistre : le GT911 n'a pas repondu");
+            ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
+        }
     }
 
     ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
