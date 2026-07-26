@@ -364,9 +364,11 @@ git commit -m "feat(tools): lecture des structures d'images ESP32"
 
 **Interfaces:**
 - Consumes: rien de la tâche 1.
-- Produces: `ktouch.otadata.esp_crc32_le(init: int, data: bytes) -> int`, `seq_crc(ota_seq: int) -> int`, `parse_otadata(data: bytes) -> list[OtaEntry]`, `active_slot(data: bytes, ota_slots: int = 2) -> int | None`, `build_otadata(slot: int, ota_slots: int = 2) -> bytes` (rend exactement 8192 octets), la dataclasse gelée `OtaEntry(ota_seq: int, ota_state: int, crc: int)` avec la propriété `valid: bool`, et les constantes `SECTOR_SIZE = 0x1000`, `OTADATA_SIZE = 0x2000`.
+- Produces: `ktouch.otadata.esp_crc32_le(init: int, data: bytes) -> int`, `seq_crc(ota_seq: int) -> int`, `parse_otadata(data: bytes) -> list[OtaEntry]` (lève `ValueError` sur un tampon tronqué), `active_slot(data: bytes, ota_slots: int = 2) -> int | None`, `build_otadata(slot: int, ota_slots: int = 2) -> bytes` (rend exactement 8192 octets), la dataclasse gelée `OtaEntry(ota_seq: int, ota_state: int, crc: int)` avec la propriété `valid: bool`, et les constantes `SECTOR_SIZE = 0x1000`, `OTADATA_SIZE = 0x2000`, `ENTRY_SIZE = 32`, plus les états `ESP_OTA_IMG_NEW`, `ESP_OTA_IMG_PENDING_VERIFY`, `ESP_OTA_IMG_VALID`, `ESP_OTA_IMG_INVALID`, `ESP_OTA_IMG_ABORTED`, `ESP_OTA_IMG_UNDEFINED`.
 
 C'est la tâche la plus délicate du jalon : une `otadata` mal formée empêche l'appareil de démarrer. D'où deux garde-fous. Le CRC est vérifié contre une implémentation bit-à-bit indépendante, et non contre lui-même. Et la tâche 5 confrontera cette implémentation à l'`otadata` réelle lue sur l'appareil avant toute écriture.
+
+**Le piège de convention, à ne pas retraverser.** `esp_rom_crc32_le` inverse le registre CRC *avant et après* le traitement, comme l'indique son en-tête `esp_rom_crc.h` : « These helpers invert the CRC register before and after processing each call. » Il est donc **identique à `zlib.crc32(data, init)`**, sans aucune compensation. Une première rédaction de ce plan appliquait une compensation `^ 0xFFFFFFFF` de part et d'autre, ce qui rend le registre brut au lieu du CRC — et la référence bit-à-bit censée la valider avait été écrite sans les inversions, donc elle confirmait l'erreur au lieu de la détecter. La référence de test ci-dessous inverse bien le registre en entrée et en sortie ; c'est ce qui la rend réellement indépendante. Contrôle de sanité disponible à tout moment : `zlib.crc32(b"123456789")` doit valoir `0xCBF43926`, la valeur de contrôle standard du CRC-32.
 
 - [ ] **Step 1: Écrire les tests qui échouent**
 
@@ -384,6 +386,9 @@ import struct
 import pytest
 
 from ktouch.otadata import (
+    ENTRY_SIZE,
+    ESP_OTA_IMG_ABORTED,
+    ESP_OTA_IMG_INVALID,
     OTADATA_SIZE,
     SECTOR_SIZE,
     OtaEntry,
@@ -395,20 +400,24 @@ from ktouch.otadata import (
 )
 
 
-def reference_crc32(data: bytes, register: int = 0xFFFFFFFF) -> int:
-    """CRC-32 réfléchi bit à bit, sans inversion finale.
+def reference_crc32(crc: int, data: bytes) -> int:
+    """CRC-32 réfléchi bit à bit, avec inversion du registre avant et après.
 
     Implémentation volontairement naïve et indépendante de zlib : elle sert de
     témoin pour prouver que `esp_crc32_le` reproduit bien `esp_rom_crc32_le`.
+    Les deux inversions ne sont pas décoratives — ce sont elles que documente
+    `esp_rom_crc.h`, et les omettre rendrait ce témoin complice de l'erreur
+    qu'il est censé détecter.
     """
+    register = (~crc) & 0xFFFFFFFF
     for byte in data:
         register ^= byte
         for _ in range(8):
             register = (register >> 1) ^ (0xEDB88320 if register & 1 else 0)
-    return register
+    return (~register) & 0xFFFFFFFF
 
 
-def make_entry(ota_seq, ota_state=0x00000001, crc=None):
+def make_entry(ota_seq, ota_state=0x00000002, crc=None):
     if crc is None:
         crc = seq_crc(ota_seq)
     return struct.pack("<I20sII", ota_seq, b"\xff" * 20, ota_state, crc)
@@ -424,19 +433,41 @@ def make_otadata(sector0=b"", sector1=b""):
 @pytest.mark.parametrize("seq", [0, 1, 2, 3, 17, 0xFFFF])
 def test_esp_crc32_le_reproduit_l_implementation_bit_a_bit(seq):
     payload = struct.pack("<I", seq)
-    assert esp_crc32_le(0xFFFFFFFF, payload) == reference_crc32(payload)
+    assert esp_crc32_le(0xFFFFFFFF, payload) == reference_crc32(0xFFFFFFFF, payload)
+
+
+@pytest.mark.parametrize("init", [0x00000000, 0x12345678, 0xFFFFFFFF])
+def test_esp_crc32_le_honore_la_valeur_initiale(init):
+    """L'argument `init` doit être réellement pris en compte, pas ignoré."""
+    payload = b"K-Touch"
+    assert esp_crc32_le(init, payload) == reference_crc32(init, payload)
+
+
+def test_esp_crc32_le_donne_la_valeur_de_controle_standard():
+    """Ancrage externe : CRC-32("123456789") vaut 0xCBF43926 par définition.
+
+    `esp_rom_crc32_le` inversant le registre en entrée, il faut lui passer
+    l'inverse de la valeur initiale du CRC-32 standard, soit 0.
+    """
+    assert esp_crc32_le(0x00000000, b"123456789") == 0xCBF43926
 
 
 def test_seq_crc_valeurs_connues():
-    """Vecteurs calculés puis recoupés avec l'implémentation bit à bit."""
-    assert seq_crc(1) == 0x66074786
-    assert seq_crc(2) == 0x74B2E868
+    """Vecteurs recoupés avec l'implémentation bit à bit et la valeur de contrôle."""
+    assert seq_crc(1) == 0x4743989A
+    assert seq_crc(2) == 0x55F63774
 
 
 def test_parse_otadata_lit_les_deux_copies():
     entries = parse_otadata(make_otadata(make_entry(1), make_entry(4)))
-    assert entries[0] == OtaEntry(ota_seq=1, ota_state=1, crc=seq_crc(1))
-    assert entries[1] == OtaEntry(ota_seq=4, ota_state=1, crc=seq_crc(4))
+    assert entries[0] == OtaEntry(ota_seq=1, ota_state=2, crc=seq_crc(1))
+    assert entries[1] == OtaEntry(ota_seq=4, ota_state=2, crc=seq_crc(4))
+
+
+def test_parse_otadata_refuse_un_buffer_trop_court():
+    """Une lecture flash tronquée doit donner un message lisible, pas struct.error."""
+    with pytest.raises(ValueError):
+        parse_otadata(b"\xff" * 64)
 
 
 def test_entree_avec_crc_faux_est_invalide():
@@ -447,6 +478,22 @@ def test_entree_avec_crc_faux_est_invalide():
 def test_entree_effacee_est_invalide():
     """Une partition vierge (0xFF partout) ne désigne aucun slot."""
     assert parse_otadata(make_otadata())[0].valid is False
+
+
+@pytest.mark.parametrize("state", [ESP_OTA_IMG_INVALID, ESP_OTA_IMG_ABORTED])
+def test_entree_marquee_invalide_ou_abandonnee_est_rejetee(state):
+    """Le bootloader écarte ces deux états même si le CRC est bon.
+
+    C'est l'état d'un appareil qui vient de subir un retour arrière : croire
+    une telle entrée valide ferait prédire le mauvais slot.
+    """
+    entry = parse_otadata(make_otadata(make_entry(3, ota_state=state)))[0]
+    assert entry.valid is False
+
+
+def test_active_slot_ignore_une_entree_abandonnee_meme_plus_recente():
+    data = make_otadata(make_entry(1), make_entry(2, ota_state=ESP_OTA_IMG_ABORTED))
+    assert active_slot(data) == 0
 
 
 @pytest.mark.parametrize("seq,attendu", [(1, 0), (2, 1), (3, 0), (4, 1)])
@@ -480,6 +527,14 @@ def test_build_otadata_a_la_taille_exacte_de_la_partition():
 def test_build_otadata_ne_laisse_qu_une_entree_valide():
     entries = parse_otadata(build_otadata(1))
     assert [e.valid for e in entries] == [True, False]
+
+
+def test_build_otadata_efface_reellement_tout_le_reste():
+    """Le second secteur doit être vierge, pas seulement porteur d'un CRC faux.
+
+    C'est ce qui empêche une ancienne séquence plus élevée de l'emporter.
+    """
+    assert build_otadata(1)[ENTRY_SIZE:] == b"\xff" * (OTADATA_SIZE - ENTRY_SIZE)
 
 
 @pytest.mark.parametrize("slot", [-1, 2, 99])
@@ -525,16 +580,27 @@ ENTRY_FORMAT = "<I20sII"
 ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)  # 32
 ERASED = 0xFFFFFFFF
 
-ESP_OTA_IMG_VALID = 0x00000001
+# esp_ota_img_states_t, dans esp_flash_partitions.h. Attention : 0x1 est
+# PENDING_VERIFY, pas VALID — s'y tromper déclenche un retour arrière vers
+# l'autre slot au second démarrage lorsque le rollback est actif.
+ESP_OTA_IMG_NEW = 0x00000000
+ESP_OTA_IMG_PENDING_VERIFY = 0x00000001
+ESP_OTA_IMG_VALID = 0x00000002
+ESP_OTA_IMG_INVALID = 0x00000003
+ESP_OTA_IMG_ABORTED = 0x00000004
+ESP_OTA_IMG_UNDEFINED = 0xFFFFFFFF
 
 
 def esp_crc32_le(init: int, data: bytes) -> int:
-    """Reproduit `esp_rom_crc32_le` : CRC-32 réfléchi sans inversion finale.
+    """Reproduit `esp_rom_crc32_le`.
 
-    zlib inverse le registre en entrée et en sortie ; on compense des deux côtés
-    pour retrouver la valeur brute attendue par le bootloader.
+    Cette fonction de la ROM inverse le registre CRC avant et après traitement,
+    exactement comme `zlib.crc32` : les deux sont donc identiques, et toute
+    « compensation » supplémentaire donnerait le registre brut au lieu du CRC.
+    Ancrage : `esp_crc32_le(0, b"123456789")` vaut `0xCBF43926`, la valeur de
+    contrôle standard du CRC-32.
     """
-    return zlib.crc32(data, init ^ 0xFFFFFFFF) ^ 0xFFFFFFFF
+    return zlib.crc32(data, init) & 0xFFFFFFFF
 
 
 def seq_crc(ota_seq: int) -> int:
@@ -550,11 +616,25 @@ class OtaEntry:
 
     @property
     def valid(self) -> bool:
-        return self.ota_seq != ERASED and self.crc == seq_crc(self.ota_seq)
+        """Reproduit `bootloader_common_ota_select_invalid`, inversé.
+
+        Le bootloader écarte une entrée effacée, mais aussi une entrée marquée
+        INVALID ou ABORTED — l'état dans lequel se trouve un appareil qui vient
+        de subir un retour arrière.
+        """
+        if self.ota_seq == ERASED:
+            return False
+        if self.ota_state in (ESP_OTA_IMG_INVALID, ESP_OTA_IMG_ABORTED):
+            return False
+        return self.crc == seq_crc(self.ota_seq)
 
 
 def parse_otadata(data: bytes) -> list[OtaEntry]:
     """Lit les deux copies de l'entrée, une par secteur."""
+    if len(data) < SECTOR_SIZE + ENTRY_SIZE:
+        raise ValueError(
+            f"otadata tronquée : {len(data)} octets, il en faut {OTADATA_SIZE}"
+        )
     entries = []
     for sector in (0, 1):
         ota_seq, _label, ota_state, crc = struct.unpack_from(
@@ -596,7 +676,7 @@ def build_otadata(slot: int, ota_slots: int = 2) -> bytes:
 - [ ] **Step 4: Lancer les tests pour vérifier qu'ils passent**
 
 Run: `python -m pytest tests/test_otadata.py -v`
-Expected: PASS — 24 tests (les cas paramétrés comptent séparément).
+Expected: PASS, aucun échec, sortie sans avertissement (les cas paramétrés comptent séparément).
 
 - [ ] **Step 5: Commit**
 
