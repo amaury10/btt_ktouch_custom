@@ -6,13 +6,14 @@
 
 **Architecture:** Deux moitiés indépendantes. Une bibliothèque Python côté PC (`tools/ktouch/`) qui sait lire les structures ESP32 — en-têtes d'images, table de partitions, `otadata` — et qui est développée en TDD pur, sans matériel. Un projet ESP-IDF (`firmware/`) qui s'appuie sur le composant `PandaTouch_IDF` de BTT référencé en sous-module Git. Le matériel n'intervient qu'à partir de la tâche 5, une fois l'outillage validé, ce qui garantit qu'on ne touche jamais à l'appareil avec du code non testé.
 
-**Tech Stack:** Python 3.14 + pytest 9 (déjà installés) · esptool · ESP-IDF v5.3.x · LVGL 9 · ESP32-S3.
+**Tech Stack:** Python 3.14 + pytest 9 (déjà installés) · esptool · ESP-IDF v5.5.5 (déjà installée) · LVGL 9 · ESP32-S3.
 
 ## Global Constraints
 
 Ces contraintes s'appliquent à **toutes** les tâches, sans rappel.
 
-- **ESP-IDF v5.3.x**, cible `esp32s3`. Le plancher déclaré par le BSP est 5.1, mais son `sdkconfig.defaults` a été généré sous 5.3.1 et son code utilise les API LVGL 9.
+- **ESP-IDF v5.5.5**, cible `esp32s3` — installée et vérifiée sur la machine, dans `<chemin-vers-esp-idf>`. Le BSP déclare un plancher à 5.1 et son `sdkconfig.defaults` a été généré sous 5.3.1, mais la compatibilité a été contrôlée point par point contre les sources de la 5.5.5 : le pilote RGB existe (il a seulement déménagé en `components/esp_lcd/rgb/`) et tous les champs de `esp_lcd_rgb_panel_config_t` que le BSP renseigne sont présents. La v6.0 est écartée pour ce jalon : c'est une version majeure à changements incompatibles, sortie en mars 2026, alors que le BSP n'a pas bougé depuis septembre 2025 — personne ne l'a jamais compilé contre elle.
+- **Avertissement de compilation attendu, à ne pas corriger :** le BSP renseigne `psram_trans_align = 64`, champ marqué `deprecated` en 5.5.5 au profit de `dma_burst_size`. La compilation aboutit et émet un avertissement de dépréciation venant du sous-module. C'est normal. Le sous-module appartient à BTT et n'est jamais modifié ici.
 - **La table de partitions stock n'est jamais modifiée.** Valeurs exactes, vérifiées dans le binaire officiel : `nvs` data/nvs `0x9000`/`0x5000` · `otadata` data/ota `0xe000`/`0x2000` · `app0` app/ota_0 `0x10000`/`0x480000` · `app1` app/ota_1 `0x490000`/`0x480000` · `spiffs` data/spiffs `0x910000`/`0x6e0000` · `coredump` data/coredump `0xff0000`/`0x10000`.
 - **Offsets interdits en écriture sur l'appareil :** `0x0` (bootloader), `0x8000` (table de partitions), `0x10000` (app0, firmware d'origine). Toute commande `write_flash` visant ces offsets est un bug du plan.
 - **Aucun binaire BTT n'est commité.** Ils sont sans licence explicite. `.gitignore` les exclut déjà.
@@ -1006,19 +1007,27 @@ git commit -m "feat(tools): verification des sauvegardes de flash et CLI"
 
 Aucun matériel n'est nécessaire pour cette tâche : elle s'arrête à la compilation.
 
-- [ ] **Step 1: Installer ESP-IDF v5.3.x**
+- [ ] **Step 1: Activer ESP-IDF v5.5.5**
 
-Rien n'est installé sur cette machine — ni `idf.py`, ni `cmake`, ni `ninja` (vérifié). Télécharger l'installeur Windows hors-ligne d'ESP-IDF v5.3.x depuis `https://dl.espressif.com/dl/esp-idf/`, l'exécuter, et cocher la cible ESP32-S3. Il installe la chaîne de compilation, CMake, Ninja et un Python dédié.
+**Déjà fait.** ESP-IDF v5.5.5 est installée et fonctionnelle, avec la cible `esp32s3`, la chaîne Xtensa, CMake et Ninja. Il n'y a rien à télécharger.
 
-Vérification, dans le raccourci « ESP-IDF PowerShell » créé par l'installeur :
+Il n'existe pas de raccourci « ESP-IDF PowerShell » dans le menu Démarrer sur cette machine ; l'environnement s'active en sourçant le script d'export, ce qui doit être fait **dans chaque session PowerShell** avant toute commande `idf.py` :
 
 ```powershell
-idf.py --version
+& "<chemin-vers-esp-idf>\export.ps1"
 ```
 
-Expected: une version commençant par `v5.3`.
+Expected: `Done! You can now compile ESP-IDF projects.`
 
-> Toutes les commandes `idf.py` des étapes suivantes doivent être lancées depuis ce shell : il positionne `IDF_PATH` et le `PATH` de la chaîne de compilation.
+Vérification de la version réelle du framework — noter que `idf.py --version` renvoie sur Windows la version du lanceur `idf-exe` (`v1.0.3`) et non celle d'ESP-IDF, ce qui prête à confusion :
+
+```powershell
+git -C "<chemin-vers-esp-idf>" describe --tags
+```
+
+Expected: `v5.5.5`.
+
+> Le framework réside sous `Downloads`. Ça fonctionne, mais c'est un emplacement que les outils de nettoyage et de sauvegarde traitent parfois à part : si la chaîne disparaît un jour sans raison apparente, c'est la première piste. Le déplacer se fait en relançant `install.ps1` depuis le nouvel emplacement.
 
 - [ ] **Step 2: Ajouter le BSP en sous-module**
 
@@ -1097,7 +1106,7 @@ idf_component_register(SRCS "app_main.c" INCLUDE_DIRS ".")
 
 ```yaml
 dependencies:
-  idf: ">=5.3"
+  idf: ">=5.5"
   lvgl/lvgl: "~9.2.0"
 ```
 

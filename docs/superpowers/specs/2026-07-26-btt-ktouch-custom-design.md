@@ -190,13 +190,16 @@ doit pouvoir évoluer sans casser les applications.
 Le premier jalon valide la chaîne complète et répond empiriquement à la question
 du pinout, avant tout investissement dans le désassemblage.
 
-**Contenu.** Sauvegarder l'intégralité des 16 Mo de flash de l'appareil. Mettre
-en place la chaîne de compilation **ESP-IDF v5.3.x** — le BSP déclare un plancher
-à 5.1, mais son `sdkconfig.defaults` a été généré sous 5.3.1 et son code utilise
-les API LVGL 9 (`lv_display_t`), donc 5.3 est la version sur laquelle il a
-réellement été validé. Ce choix est indépendant de l'IDF v5.1.1 du firmware
-stock, que nous ne recompilons pas. Construire ensuite un firmware minimal
-s'appuyant sur le BSP, en partant du pinout Panda Touch. L'installer dans le
+**Contenu.** Sauvegarder l'intégralité des 16 Mo de flash de l'appareil. Utiliser
+la chaîne **ESP-IDF v5.5.5**, déjà installée et vérifiée. Le BSP déclare un
+plancher à 5.1 et a été validé sous 5.3.1, mais sa compatibilité avec la 5.5.5 a
+été contrôlée dans les sources : le pilote RGB y est présent, simplement déplacé,
+et tous les champs de configuration que le BSP renseigne existent encore. Le seul
+écart est un champ déprécié qui produira un avertissement de compilation attendu.
+La v6.0 est écartée pour ce jalon — version majeure à changements incompatibles,
+postérieure au dernier commit du BSP. Ce choix est indépendant de l'IDF v5.1.1 du
+firmware stock, que nous ne recompilons pas. Construire ensuite un firmware
+minimal s'appuyant sur le BSP, en partant du pinout Panda Touch. L'installer dans le
 slot `app1` et le rendre actif. Constater que l'écran s'allume et que le tactile
 répond.
 
