@@ -60,10 +60,10 @@ Toute erreur d'écriture à ces adresses rend l'appareil inutilisable.
 Avant toute opération de programmation, une sauvegarde complète de 16 Mio est créée et vérifiée à l'aide de :
 
 ```bash
-python ktouch.py dump.bin
+python ktouch-cli.py verify <sauvegarde.bin>
 ```
 
-(à lancer depuis la racine du dépôt — le lanceur `ktouch.py` rend le paquet `tools/ktouch` accessible sans manipuler `PYTHONPATH`.)
+(à lancer depuis la racine du dépôt — le lanceur `ktouch-cli.py` rend le paquet `tools/ktouch` accessible sans manipuler `PYTHONPATH`. Le tiret dans son nom est délibéré : il rend le fichier non importable comme module Python, ce qui empêche structurellement qu'il masque le paquet `tools/ktouch/`.)
 
 Cette commande :
 1. Vérifie que la taille est exactement 16 Mio

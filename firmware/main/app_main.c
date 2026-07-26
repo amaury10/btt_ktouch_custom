@@ -53,8 +53,6 @@ static void build_test_pattern(void)
         lv_obj_set_style_bg_color(marker, lv_color_hex(0xFFFF00), LV_PART_MAIN);
         lv_obj_set_style_border_width(marker, 0, LV_PART_MAIN);
     }
-
-    lv_obj_add_event_cb(screen, on_touch, LV_EVENT_PRESSED, NULL);
 }
 
 void app_main(void)
@@ -74,6 +72,24 @@ void app_main(void)
 
     PT_LVGL_SCOPE_LOCK() {
         build_test_pattern();
+
+        /* Le rappel est enregistré sur le périphérique d'entrée tactile
+         * lui-même, et non sur un widget précis. lv_obj_create() donne par
+         * défaut LV_OBJ_FLAG_CLICKABLE à chaque objet créé, y compris les
+         * huit objets décoratifs de la mire (barres de couleur, repères de
+         * coin) : lv_indev_search_obj() les désigne donc comme cible de
+         * l'appui à la place de l'écran, et l'événement ne remonterait au
+         * parent que si l'enfant portait LV_OBJ_FLAG_EVENT_BUBBLE — ce
+         * qu'aucun d'eux ne fait. Un rappel posé sur l'écran (comme avant)
+         * ne recevait donc rien pour un appui sur une barre ou un repère de
+         * coin. lv_indev_send_event() envoie LV_EVENT_PRESSED aux rappels du
+         * périphérique AVANT de le distribuer à l'objet ciblé (voir
+         * send_event() dans lv_indev.c des sources LVGL vendues ici), quel
+         * que soit l'objet touché ou ses drapeaux : s'abonner ici capture
+         * donc chaque appui, y compris sur les repères de coin qui
+         * garantissent que les 800x480 sont bien balayés jusqu'aux bords. */
+        lv_indev_t *touch_indev = lv_indev_get_next(NULL);
+        lv_indev_add_event_cb(touch_indev, on_touch, LV_EVENT_PRESSED, NULL);
     }
 
     ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");

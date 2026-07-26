@@ -1,24 +1,7 @@
-"""Point d'entrée : `python ktouch.py <sauvegarde.bin>` depuis la racine."""
+"""Permet `python -m ktouch <sous-commande>` depuis le dossier `tools`."""
 
 import sys
 
-from ktouch.dump import inspect_dump
+from ktouch.cli import main
 
-
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("usage : python ktouch.py <sauvegarde.bin>", file=sys.stderr)
-        return 2
-    try:
-        with open(argv[1], "rb") as handle:
-            data = handle.read()
-    except OSError as erreur:
-        print(f"lecture impossible : {erreur}", file=sys.stderr)
-        return 2
-    report = inspect_dump(data)
-    print(report.format())
-    return 0 if report.safe_to_flash else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+raise SystemExit(main([__spec__.name.split(".")[0], *sys.argv[1:]]))
