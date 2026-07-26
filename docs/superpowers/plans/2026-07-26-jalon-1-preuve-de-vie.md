@@ -1451,4 +1451,20 @@ Relecture du plan face à la spec, effectuée après rédaction.
 
 **Cohérence des noms.** `parse_app_desc`, `parse_partition_table`, `parse_image_header` et `NotAnEspImage` sont définis à la tâche 1 et consommés tels quels aux tâches 3 et 4. `active_slot`, `build_otadata`, `parse_otadata` et `seq_crc` sont définis à la tâche 2 et consommés aux tâches 3, 6 et 7. `STOCK_PARTITIONS` et `FLASH_SIZE` sont définis à la tâche 3 et utilisés par ses propres tests. `tests/test_dump.py` importe ses fixtures depuis `test_image.py`, ce que rend possible le `pythonpath`/`testpaths` de `pytest.ini`.
 
+**Reports cosmétiques, à traiter au prochain jalon.** La vague de correction
+finale a réintroduit deux points que le tour de correction de la tâche 3 avait
+justement supprimés : `tests/test_dump.py` réimporte `struct` et `pytest` sans
+les utiliser, et `tools/ktouch/dump.py` redéclare `OTADATA_SIZE` localement au
+lieu de l'importer de `ktouch.otadata`. Les valeurs concordent, donc rien ne
+casse ; c'est une régression de propreté, pas de comportement. Le processus
+n'autorisant qu'une seule vague de correction après la revue finale, ces deux
+points sont consignés ici plutôt que corrigés à chaud.
+
+**Trois points mineurs assumés depuis les revues de tâches.** `PARTITION_MD5_MAGIC`
+est défini mais inutilisé dans `image.py`, le magic de partition y est dépaqueté
+deux fois, et le message d'erreur de troncature d'`otadata` annonce 8192 octets
+alors que le minimum réellement accepté est 4128. La revue finale a jugé les
+trois différables : dans chaque cas la direction d'échec est sûre, une table
+tronquée faisant échouer la comparaison exacte avec le stock.
+
 **Seule inconnue d'API assumée.** Le nom exact de la fonction d'initialisation du tactile (`pt_lvgl_touch_init`) doit être confirmé dans l'en-tête du BSP après l'ajout du sous-module ; la tâche 4, étape 3 le signale explicitement plutôt que de le supposer. C'est la seule dépendance du plan à un fichier qui n'est pas encore présent dans l'arborescence.
