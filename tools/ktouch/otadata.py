@@ -25,16 +25,27 @@ ENTRY_FORMAT = "<I20sII"
 ENTRY_SIZE = struct.calcsize(ENTRY_FORMAT)  # 32
 ERASED = 0xFFFFFFFF
 
-ESP_OTA_IMG_VALID = 0x00000001
+# esp_ota_img_states_t, dans esp_flash_partitions.h. Attention : 0x1 est
+# PENDING_VERIFY, pas VALID — s'y tromper déclenche un retour arrière vers
+# l'autre slot au second démarrage lorsque le rollback est actif.
+ESP_OTA_IMG_NEW = 0x00000000
+ESP_OTA_IMG_PENDING_VERIFY = 0x00000001
+ESP_OTA_IMG_VALID = 0x00000002
+ESP_OTA_IMG_INVALID = 0x00000003
+ESP_OTA_IMG_ABORTED = 0x00000004
+ESP_OTA_IMG_UNDEFINED = 0xFFFFFFFF
 
 
 def esp_crc32_le(init: int, data: bytes) -> int:
-    """Reproduit `esp_rom_crc32_le` : CRC-32 réfléchi sans inversion finale.
+    """Reproduit `esp_rom_crc32_le`.
 
-    zlib inverse le registre en entrée et en sortie ; on compense des deux côtés
-    pour retrouver la valeur brute attendue par le bootloader.
+    Cette fonction de la ROM inverse le registre CRC avant et après traitement,
+    exactement comme `zlib.crc32` : les deux sont donc identiques, et toute
+    « compensation » supplémentaire donnerait le registre brut au lieu du CRC.
+    Ancrage : `esp_crc32_le(0, b"123456789")` vaut `0xCBF43926`, la valeur de
+    contrôle standard du CRC-32.
     """
-    return zlib.crc32(data, init ^ 0xFFFFFFFF) ^ 0xFFFFFFFF
+    return zlib.crc32(data, init) & 0xFFFFFFFF
 
 
 def seq_crc(ota_seq: int) -> int:
@@ -50,11 +61,25 @@ class OtaEntry:
 
     @property
     def valid(self) -> bool:
-        return self.ota_seq != ERASED and self.crc == seq_crc(self.ota_seq)
+        """Reproduit `bootloader_common_ota_select_invalid`, inversé.
+
+        Le bootloader écarte une entrée effacée, mais aussi une entrée marquée
+        INVALID ou ABORTED — l'état dans lequel se trouve un appareil qui vient
+        de subir un retour arrière.
+        """
+        if self.ota_seq == ERASED:
+            return False
+        if self.ota_state in (ESP_OTA_IMG_INVALID, ESP_OTA_IMG_ABORTED):
+            return False
+        return self.crc == seq_crc(self.ota_seq)
 
 
 def parse_otadata(data: bytes) -> list[OtaEntry]:
     """Lit les deux copies de l'entrée, une par secteur."""
+    if len(data) < SECTOR_SIZE + ENTRY_SIZE:
+        raise ValueError(
+            f"otadata tronquée : {len(data)} octets, il en faut {OTADATA_SIZE}"
+        )
     entries = []
     for sector in (0, 1):
         ota_seq, _label, ota_state, crc = struct.unpack_from(
