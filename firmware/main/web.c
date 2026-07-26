@@ -121,15 +121,16 @@ static esp_err_t gestion_log(httpd_req_t *req)
 
 static esp_err_t gestion_revert(httpd_req_t *req)
 {
-    esp_err_t erreur = rescue_switch_to_other_slot();
-    if (erreur != ESP_OK) {
-        return httpd_resp_send_500(req);
-    }
-    httpd_resp_sendstr(req, "bascule effectuee, redemarrage\n");
-    /* Laisser la réponse partir avant de couper le réseau. */
+    /* La bascule proprement dite (vérification SHA-256 de l'image cible,
+     * éventuel effacement d'otadata en dernier recours, esp_restart() qui
+     * invoque esp_wifi_stop) est déléguée à rescue_switch_now(), donc à la
+     * tâche dédiée de rescue.c : la pile de la tâche httpd n'a pas vocation
+     * à porter ce travail-là. On répond d'abord, pour que le client reçoive
+     * confirmation avant que le réseau ne soit coupé. */
+    httpd_resp_sendstr(req, "bascule demandee, redemarrage\n");
     vTaskDelay(pdMS_TO_TICKS(500));
-    esp_restart();
-    return ESP_OK; /* jamais atteint */
+    rescue_switch_now();
+    return ESP_OK;
 }
 
 static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)

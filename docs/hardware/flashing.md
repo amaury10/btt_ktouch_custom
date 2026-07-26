@@ -71,6 +71,12 @@ Le serveur écoute sur le port 80, à l'adresse IP journalisée au démarrage
 navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait
 l'appareil.
 
+Le compteur de démarrages rapporté par `/status` est un instantané pris une
+seule fois au démarrage (juste après `rescue_count_boot()`), pas une valeur
+relue en direct : il ne change pas entre deux requêtes sur un même
+démarrage, même si une connexion WiFi réussit entre-temps et le remet à zéro
+en coulisse pour le prochain démarrage.
+
 ## Revenir au firmware d'origine (le WiFi marche, l'affichage est raté)
 
 C'est le cas couvert par `/revert` : le firmware custom a démarré, le WiFi a
@@ -102,18 +108,43 @@ Le seul endroit du firmware qui désarme ce minuteur est le gestionnaire de
 `IP_EVENT_STA_GOT_IP` dans `wifi.c`, c'est-à-dire une connexion WiFi
 effectivement réussie (adresse IP obtenue). Rien d'autre ne le désarme.
 
-**Le compteur de démarrages** couvre tout ce que le minuteur ne voit pas : une
-panne plus rapide que 90 secondes — panique, chien de garde, débordement de
-pile, échec d'initialisation de la PSRAM. Il vit en mémoire RTC
-(`RTC_NOINIT_ATTR`), donc survit à un redémarrage logiciel comme à une
-panique, mais pas à une coupure d'alimentation. Incrémenté tout au début
-d'`app_main`, avant même le minuteur, il bascule immédiatement l'appareil sur
-l'autre slot dès qu'il dépasse trois démarrages consécutifs sans qu'une
-adresse IP n'ait jamais été obtenue. Une connexion WiFi réussie le remet à
-zéro, au même endroit que le minuteur.
+**Le compteur de démarrages** couvre presque tout ce que le minuteur ne voit
+pas : une panne plus rapide que 90 secondes — panique, chien de garde,
+débordement de pile — **à condition qu'elle survienne après l'entrée dans
+`app_main`**. Il vit en mémoire RTC (`RTC_NOINIT_ATTR`), donc survit à un
+redémarrage logiciel comme à une panique, mais pas à une coupure
+d'alimentation. Incrémenté tout au début d'`app_main`, avant même le
+minuteur, il bascule immédiatement l'appareil sur l'autre slot dès qu'il
+dépasse trois démarrages consécutifs sans qu'une adresse IP n'ait jamais été
+obtenue — après avoir d'abord remis lui-même le compteur à zéro (sinon,
+retenter d'installer ce même firmware par-dessus repartirait déjà au-delà du
+seuil et basculerait sans jamais tenter de démarrer). Une connexion WiFi
+réussie le remet à zéro, au même endroit que le minuteur.
 
 Dans les deux cas, aucune intervention n'est nécessaire : il suffit d'attendre
 que l'appareil se rétablisse de lui-même.
+
+**Ce que ni le minuteur ni le compteur ne couvrent : un échec de la PSRAM.**
+`esp_psram_chip_init()` tourne depuis `cpu_start.c`, avant l'ordonnanceur et
+avant `app_main` : un échec y déclenche un `abort()` alors qu'aucune ligne du
+code de secours n'a encore eu la moindre chance de s'exécuter — ni compteur,
+ni minuteur, ni serveur HTTP. Comme `otadata` désigne toujours ce même slot,
+une coupure de courant ne change rien : l'appareil recommencerait
+indéfiniment. C'est la seule classe de pannes qui rendrait l'appareil
+définitivement injoignable, et elle ne se traite pas dans le code
+(impossible : rien n'a encore tourné) mais en amont, dans
+`firmware/sdkconfig.defaults`. `CONFIG_SPIRAM_IGNORE_NOTFOUND=y` y est
+délibérément activé pour que ce jalon soit exactement le terrain où cette
+question doit se poser : une PSRAM absente ou incompatible avec la K-Touch
+5 pouces (les réglages de départ viennent du BSP du Panda Touch 7 pouces)
+n'abat plus le démarrage — elle fait simplement échouer l'allocation du
+tampon LVGL dans le BSP, donc `pt_display_init()` rend une erreur, et l'on
+retombe dans le cas déjà géré plus haut : écran mort, WiFi et `/revert` bien
+vivants. Le code et les constantes ne sont plus placés en PSRAM non plus
+(`CONFIG_SPIRAM_FETCH_INSTRUCTIONS`/`CONFIG_SPIRAM_RODATA` retirés), pour
+qu'un timing marginal se traduise par un échec d'allocation propre plutôt que
+par un plantage sur une lecture d'instruction. Ce n'est pas gratuit : ce
+sont des marges qu'une preuve de vie n'a pas besoin d'exploiter.
 
 ## Itérer sur le pinout (le cas d'usage principal de ce jalon)
 

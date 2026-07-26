@@ -74,17 +74,31 @@ void app_main(void)
 {
     /* Tout au début, avant même le sauvetage : le compteur de démarrages
      * couvre les pannes trop rapides pour que le minuteur les voie (panique,
-     * chien de garde, débordement de pile, échec d'initialisation de la
-     * PSRAM...). Il survit aux redémarrages en mémoire RTC. Au-delà de
+     * chien de garde, débordement de pile), à condition qu'elles surviennent
+     * après cette ligne. Il NE couvre PAS un échec d'initialisation de la
+     * PSRAM : esp_psram_chip_init() tourne depuis cpu_start.c, avant
+     * l'ordonnanceur et avant app_main — la seule parade à cette classe de
+     * pannes est dans sdkconfig.defaults (CONFIG_SPIRAM_IGNORE_NOTFOUND), pas
+     * ici. Le compteur survit aux redémarrages en mémoire RTC. Au-delà de
      * RESCUE_DEMARRAGES_MAX tentatives consécutives, on ne tente plus rien :
      * bascule immédiate, sans même armer le minuteur. */
     uint32_t compteur_demarrages = rescue_count_boot();
-    ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
-             compteur_demarrages, RESCUE_DEMARRAGES_MAX);
     if (compteur_demarrages > RESCUE_DEMARRAGES_MAX) {
-        ESP_LOGE(TAG, "boucle de redemarrage detectee, bascule immediate vers l'autre slot");
-        rescue_switch_to_other_slot();
-        esp_restart();
+        /* La remise à zéro n'est pas une coquetterie : esp_restart() est une
+         * réinitialisation logicielle, la mémoire RTC survit donc jusque
+         * dans le firmware d'origine, qui n'y touche jamais. Sans elle, le
+         * compteur resterait à compteur_demarrages ; au prochain flash de ce
+         * firmware par-dessus, il repartirait déjà au-delà du seuil et
+         * basculerait sans jamais avoir tenté de démarrer, cassant la boucle
+         * d'itération décrite dans flashing.md jusqu'à une coupure secteur. */
+        rescue_reset_boot_count();
+        rescue_switch_now();
+        /* rescue_switch_now() délègue à une tâche dédiée et ne bloque pas :
+         * on attend ici, sans rien tenter d'autre, qu'elle redémarre
+         * l'appareil. */
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
     }
 
     /* Le compte à rebours est armé ensuite, avant l'écran, avant le WiFi,
@@ -94,6 +108,17 @@ void app_main(void)
      * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
      * depuis le gestionnaire de IP_EVENT_STA_GOT_IP, dans wifi.c. */
     ESP_ERROR_CHECK(rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS));
+
+    /* Le journal réseau doit être en place avant même les deux lignes de log
+     * qui suivent : sans port série, /log est le seul endroit où les relire
+     * après coup, et ce sont les toutes premières choses à y vérifier. */
+    esp_err_t erreur = netlog_init();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "netlog_init a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
+             compteur_demarrages, RESCUE_DEMARRAGES_MAX);
 
     /* Première chose à vérifier dans le journal : ce firmware doit tourner
      * depuis app1, jamais depuis app0 qui n'est jamais réécrit. */
@@ -114,13 +139,6 @@ void app_main(void)
         erreur_nvs = nvs_flash_init();
     }
     ESP_ERROR_CHECK(erreur_nvs);
-
-    /* Le journal réseau doit être en place avant le WiFi, pour capturer ses
-     * propres logs de connexion (ou d'échec) dans /log. */
-    esp_err_t erreur = netlog_init();
-    if (erreur != ESP_OK) {
-        ESP_LOGE(TAG, "netlog_init a echoue : %s", esp_err_to_name(erreur));
-    }
 
     /* Un échec ici n'est volontairement pas fatal : c'est justement le cas
      * que le sauvetage automatique couvre. Si le WiFi ne se connecte

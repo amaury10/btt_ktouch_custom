@@ -6,15 +6,27 @@ CONFIG_PARTITION_TABLE_OFFSET=0x8000
 
 CONFIG_BOOTLOADER_FLASH_DC_AWARE=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
-CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+# Notre application tourne sous le bootloader d'origine, que nous ne
+# remplaçons pas et dont nous n'avons pas vérifié qu'il accepte 120 MHz :
+# 80 MHz pour le premier vol.
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
+# --- PSRAM : seule parade au trou pré-app_main (voir rescue.c) ---
+# Ces réglages viennent du BSP du Panda Touch 7 pouces ; toute la question de
+# ce jalon est de savoir si la K-Touch 5 pouces lui ressemble. Sans
+# IGNORE_NOTFOUND, une PSRAM absente ou incompatible est fatale dans
+# cpu_start.c, avant l'ordonnanceur et avant app_main — donc avant que le
+# compteur de démarrages, le minuteur ou le serveur HTTP n'aient tourné une
+# seule fois. Avec IGNORE_NOTFOUND, ce même défaut se traduit à la place par
+# un échec propre de l'allocation du tampon LVGL dans le BSP, donc par un
+# pt_display_init() qui rend une erreur : on retombe dans le cas déjà géré
+# (écran mort, WiFi et /revert bien vivants), au lieu d'un appareil perdu.
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
-CONFIG_SPIRAM_RODATA=y
-CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y

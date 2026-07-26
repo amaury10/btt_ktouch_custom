@@ -97,6 +97,16 @@ esp_err_t wifi_start(void)
         return erreur;
     }
 
+    /* Le mode doit être fixé avant tout esp_wifi_get_config()/
+     * esp_wifi_set_config() : esp_wifi.h documente que ces deux appels ne
+     * fonctionnent que si l'interface est activée, sous peine de
+     * ESP_ERR_WIFI_IF. Rester après esp_wifi_set_storage() ne change rien à
+     * la sécurité NVS, puisque le stockage est déjà en RAM. */
+    erreur = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (erreur != ESP_OK) {
+        return erreur;
+    }
+
     erreur = esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &sur_evenement, NULL, NULL);
     if (erreur != ESP_OK) {
         return erreur;
@@ -135,11 +145,6 @@ esp_err_t wifi_start(void)
     } else {
         ESP_LOGW(TAG, "aucun SSID disponible (ni NVS de l'appareil, ni secours Kconfig)");
         ESP_LOGW(TAG, "le sauvetage automatique se declenchera faute de connexion");
-    }
-
-    erreur = esp_wifi_set_mode(WIFI_MODE_STA);
-    if (erreur != ESP_OK) {
-        return erreur;
     }
 
     erreur = esp_wifi_start();

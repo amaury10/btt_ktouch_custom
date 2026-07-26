@@ -10,14 +10,21 @@
  * SHA-256 de l'image cible (dans esp_ota_set_boot_partition), puis en dernier
  * recours une écriture flash, avant un esp_restart() qui appelle des
  * gestionnaires d'arrêt eux-mêmes bloquants (dont esp_wifi_stop). Tout ce
- * travail est donc délégué à une tâche dédiée : le rappel se contente de la
- * réveiller.
+ * travail est donc délégué à une tâche dédiée, réveillée par
+ * rescue_switch_now() — jamais exécuté sur la pile de l'appelant, qu'il
+ * s'agisse du rappel du minuteur, de la tâche httpd (web.c) ou d'app_main.
  *
  * Un minuteur seul ne couvre que les pannes plus lentes que son échéance. Le
- * compteur de démarrages en mémoire RTC, plus bas, ferme le reste : panique,
- * chien de garde, débordement de pile, échec d'initialisation de la PSRAM —
- * tout ce qui redémarre l'appareil en moins de 90 secondes, avant que le
- * minuteur n'ait la moindre chance de se déclencher. */
+ * compteur de démarrages en mémoire RTC, plus bas, ferme presque tout le
+ * reste : panique, chien de garde, débordement de pile — tout ce qui
+ * redémarre l'appareil en moins de 90 secondes, À CONDITION que ce soit après
+ * l'entrée dans app_main. Ce qu'il NE couvre PAS : un échec d'initialisation
+ * de la PSRAM. esp_psram_chip_init() est appelée depuis cpu_start.c, avant
+ * l'ordonnanceur et avant app_main — un échec y déclenche un abort() alors
+ * qu'aucune ligne de ce fichier n'a encore tourné, et comme otadata désigne
+ * toujours ce même slot, une coupure de courant ne change rien : la seule
+ * parade est en amont, dans sdkconfig.defaults (CONFIG_SPIRAM_IGNORE_NOTFOUND
+ * notamment). */
 
 #include "rescue.h"
 
@@ -94,14 +101,14 @@ static esp_err_t effacer_otadata(void)
     return esp_partition_erase_range(ota, 0, ota->size);
 }
 
-/* Fait le travail réel, hors du contexte étroit du rappel esp_timer. Ne rend
+/* Fait le travail réel, hors du contexte étroit de tout appelant. Ne rend
  * jamais la main : soit la bascule réussit et esp_restart() coupe tout, soit
  * elle échoue et l'effacement d'otadata en dernier recours en fait autant. */
 static void tache_sur_echeance(void *arg)
 {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        ESP_LOGE(TAG, "reseau injoignable dans le delai imparti");
+        ESP_LOGE(TAG, "bascule demandee");
         if (rescue_switch_to_other_slot() != ESP_OK) {
             effacer_otadata();
         }
@@ -109,24 +116,51 @@ static void tache_sur_echeance(void *arg)
     }
 }
 
-static void sur_echeance(void *arg)
-{
-    /* Ne rien faire de lourd ici : la tâche dédiée, créée par rescue_arm(),
-     * fait tout le travail. */
-    if (tache_execution != NULL) {
-        xTaskNotifyGive(tache_execution);
-    }
-}
-
-esp_err_t rescue_arm(uint32_t delai_ms)
+/* Crée la tâche dédiée si elle n'existe pas encore. Appelée à la fois par
+ * rescue_arm() (armement normal) et par rescue_switch_now() (chemin du
+ * compteur de démarrages, appelé avant même rescue_arm()) : idempotente,
+ * peu importe laquelle des deux s'exécute en premier. */
+static void assurer_tache_dediee(void)
 {
     if (tache_execution == NULL) {
         BaseType_t cree = xTaskCreate(tache_sur_echeance, "rescue_exec", 8192, NULL,
                                        tskIDLE_PRIORITY + 5, &tache_execution);
         if (cree != pdPASS) {
-            return ESP_ERR_NO_MEM;
+            tache_execution = NULL;
         }
     }
+}
+
+void rescue_switch_now(void)
+{
+    assurer_tache_dediee();
+    if (tache_execution != NULL) {
+        xTaskNotifyGive(tache_execution);
+        return;
+    }
+    /* Dernier recours si même la tâche dédiée n'a pas pu être créée (mémoire
+     * épuisée) : tenter la bascule ici, sur la pile de l'appelant. Pire que
+     * la tâche dédiée si cette pile est étroite, mais mieux que ne rien
+     * tenter — et un dépassement de pile ici resterait rattrapable par le
+     * chien de garde (CONFIG_ESP_TASK_WDT_PANIC) ou par la détection de
+     * dépassement de pile de FreeRTOS, tous deux configurés pour redémarrer
+     * plutôt que geler. */
+    ESP_LOGE(TAG, "tache de sauvetage indisponible, bascule en direct");
+    if (rescue_switch_to_other_slot() != ESP_OK) {
+        effacer_otadata();
+    }
+    esp_restart();
+}
+
+static void sur_echeance(void *arg)
+{
+    ESP_LOGE(TAG, "reseau injoignable dans le delai imparti");
+    rescue_switch_now();
+}
+
+esp_err_t rescue_arm(uint32_t delai_ms)
+{
+    assurer_tache_dediee();
 
     const esp_timer_create_args_t args = {
         .callback = sur_echeance,
