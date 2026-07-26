@@ -4,7 +4,9 @@
 
 **Goal:** Faire tourner un firmware compilé par nous sur la BTT K-Touch, dans le slot OTA `app1`, écran allumé et tactile réactif, sans jamais écraser le firmware d'origine et en prouvant le retour en arrière.
 
-**Architecture:** Deux moitiés indépendantes. Une bibliothèque Python côté PC (`tools/ktouch/`) qui sait lire les structures ESP32 — en-têtes d'images, table de partitions, `otadata` — et qui est développée en TDD pur, sans matériel. Un projet ESP-IDF (`firmware/`) qui s'appuie sur le composant `PandaTouch_IDF` de BTT référencé en sous-module Git. Le matériel n'intervient qu'à partir de la tâche 5, une fois l'outillage validé, ce qui garantit qu'on ne touche jamais à l'appareil avec du code non testé.
+**Architecture:** Deux moitiés indépendantes. Une bibliothèque Python côté PC (`tools/ktouch/`) qui sait lire les structures ESP32 — en-têtes d'images, table de partitions, `otadata` — et qui est développée en TDD pur, sans matériel. Un projet ESP-IDF (`firmware/`) qui s'appuie sur le composant `PandaTouch_IDF` de BTT référencé en sous-module Git. Le matériel n'intervient qu'à partir de la tâche 6, une fois l'outillage validé et le firmware rendu réversible, ce qui garantit qu'on ne touche jamais à l'appareil avec du code non testé.
+
+**Accès à l'appareil : WiFi uniquement.** Le port USB-C de la K-Touch n'est pas exploitable dans ce montage, donc `esptool` est hors jeu et **aucune sauvegarde des 16 Mo n'est possible**. Le filet de sécurité initial — dumper puis restaurer octet par octet — est remplacé par trois mécanismes embarqués dans le firmware lui-même, construits à la tâche 5 : un sauvetage automatique qui rebascule sur le firmware d'origine si le réseau ne répond pas, un retour manuel par `/revert`, et une mise à jour par `/update` pour itérer sans câble. La bibliothèque Python reste utile pour analyser les images et fabriquer une `otadata`, mais elle ne pilote plus l'appareil.
 
 **Tech Stack:** Python 3.14 + pytest 9 (déjà installés) · esptool · ESP-IDF v5.5.5 (déjà installée) · LVGL 9 · ESP32-S3.
 
@@ -15,7 +17,8 @@ Ces contraintes s'appliquent à **toutes** les tâches, sans rappel.
 - **ESP-IDF v5.5.5**, cible `esp32s3` — installée et vérifiée sur la machine, dans `<chemin-vers-esp-idf>`. Le BSP déclare un plancher à 5.1 et son `sdkconfig.defaults` a été généré sous 5.3.1, mais la compatibilité a été contrôlée point par point contre les sources de la 5.5.5 : le pilote RGB existe (il a seulement déménagé en `components/esp_lcd/rgb/`) et tous les champs de `esp_lcd_rgb_panel_config_t` que le BSP renseigne sont présents. La v6.0 est écartée pour ce jalon : c'est une version majeure à changements incompatibles, sortie en mars 2026, alors que le BSP n'a pas bougé depuis septembre 2025 — personne ne l'a jamais compilé contre elle.
 - **Avertissement de compilation attendu, à ne pas corriger :** le BSP renseigne `psram_trans_align = 64`, champ marqué `deprecated` en 5.5.5 au profit de `dma_burst_size`. La compilation aboutit et émet un avertissement de dépréciation venant du sous-module. C'est normal. Le sous-module appartient à BTT et n'est jamais modifié ici.
 - **La table de partitions stock n'est jamais modifiée.** Valeurs exactes, vérifiées dans le binaire officiel : `nvs` data/nvs `0x9000`/`0x5000` · `otadata` data/ota `0xe000`/`0x2000` · `app0` app/ota_0 `0x10000`/`0x480000` · `app1` app/ota_1 `0x490000`/`0x480000` · `spiffs` data/spiffs `0x910000`/`0x6e0000` · `coredump` data/coredump `0xff0000`/`0x10000`.
-- **Offsets interdits en écriture sur l'appareil :** `0x0` (bootloader), `0x8000` (table de partitions), `0x10000` (app0, firmware d'origine). Toute commande `write_flash` visant ces offsets est un bug du plan.
+- **Le firmware d'origine n'est jamais écrasé.** Il occupe un slot OTA que nous ne touchons pas, et c'est la seule façon de revenir en arrière sans accès série. En pratique : n'écrire que dans le slot rendu par `esp_ota_get_next_update_partition(NULL)`, jamais à un offset calculé à la main. Les zones `0x0` (bootloader), `0x8000` (table de partitions) et le slot du firmware d'origine sont interdites en écriture.
+- **Aucun identifiant WiFi n'est commité.** Ils vivent dans `sdkconfig`, déjà exclu par `.gitignore`, et sont saisis par `idf.py menuconfig`.
 - **Aucun binaire BTT n'est commité.** Ils sont sans licence explicite. `.gitignore` les exclut déjà.
 - **Aucune ligne de code issue de `nomadsgalaxy/Prusa-Connect-Touch`** (licence OCL v1.1 + SWAtt, attribution héritée dans l'UI et le code).
 - **`PandaTouch_IDF` est un sous-module, jamais une copie.** Le dépôt amont n'a pas de fichier `LICENSE` ; on n'en redistribue donc rien.
@@ -1440,167 +1443,311 @@ git commit -m "feat(firmware): projet ESP-IDF minimal de preuve de vie"
 
 ---
 
-### Task 5: Sauvegarde du flash de l'appareil
+### Task 5: Rendre le firmware réversible sans câble série
 
 **Files:**
-- Create: `docs/hardware/flashing.md`
-- Create: `backups/` (ignoré par Git — contient le MAC et la NVS de l'appareil)
+- Create: `firmware/main/wifi.c`, `firmware/main/wifi.h`
+- Create: `firmware/main/netlog.c`, `firmware/main/netlog.h`
+- Create: `firmware/main/rescue.c`, `firmware/main/rescue.h`
+- Create: `firmware/main/web.c`, `firmware/main/web.h`
+- Create: `firmware/main/Kconfig.projbuild`
+- Modify: `firmware/main/app_main.c`, `firmware/main/CMakeLists.txt`, `firmware/sdkconfig.defaults`
+- Modify: `docs/hardware/flashing.md` (créé ici, pas à la tâche 6)
 
 **Interfaces:**
-- Consumes: `python ktouch-cli.py` de la tâche 3.
-- Produces: `backups/ktouch-stock-<date>.bin`, une sauvegarde de 16 777 216 octets vérifiée, et la réponse à la question ouverte de la spec : quel firmware se trouve réellement sur l'appareil.
+- Consumes: le firmware compilable de la tâche 4.
+- Produces: `wifi_start(void) -> esp_err_t`, `wifi_is_connected(void) -> bool`, `wifi_ip_string(char *out, size_t len) -> bool` ; `netlog_init(void) -> esp_err_t` et `netlog_snapshot(char *out, size_t len) -> size_t` ; `rescue_arm(uint32_t delai_ms) -> esp_err_t`, `rescue_disarm(void) -> void`, `rescue_switch_to_other_slot(void) -> esp_err_t` ; `web_start(void) -> esp_err_t`.
 
-Première tâche nécessitant le matériel. Elle n'écrit rien : elle ne fait que lire.
+**Pourquoi cette tâche existe.** L'appareil n'est atteignable qu'en WiFi : son port USB-C n'est pas exploitable ici, donc `esptool` est hors jeu et **aucune sauvegarde des 16 Mo n'est possible**. Le filet de sécurité prévu à l'origine — dumper puis restaurer octet par octet — n'existe plus.
 
-- [ ] **Step 1: Connecter l'appareil et identifier son port**
+Sans lui, installer la mire LVGL de la tâche 4 serait un aller sans retour : ce firmware n'a pas de pile réseau, donc une fois démarré dessus, plus aucun moyen de reprendre la main. L'appareil afficherait des bandes de couleur jusqu'à ce qu'un accès série redevienne possible.
 
-Brancher la K-Touch en USB-C, puis :
+Le remplacement du filet, c'est le firmware lui-même. Trois mécanismes, du plus automatique au plus manuel.
 
-```powershell
-Get-CimInstance Win32_PnPEntity | Where-Object { $_.Name -match 'COM\d+' } | Select-Object Name, DeviceID
+**Le sauvetage automatique** est le seul qui fonctionne quand tout va mal. Au démarrage, avant même de tenter quoi que ce soit d'autre, un compte à rebours est armé. Si le WiFi n'est pas connecté à son échéance, le firmware bascule la partition de démarrage sur l'autre slot et redémarre — donc revient au firmware d'origine, tout seul, sans intervention. Il ne dépend ni du réseau, ni de l'écran, ni du tactile.
+
+**Le retour manuel** couvre le cas où le WiFi marche mais où l'affichage est raté : une requête sur `/revert` rebascule sur l'autre slot. Comme le firmware d'origine n'est jamais écrasé, revenir au stock ne demande aucun téléversement, juste un changement de slot.
+
+**La mise à jour** permet d'itérer sur le pinout sans câble : `/update` accepte une image applicative, l'écrit dans le slot inactif et redémarre dessus. C'est ce qui rend le jalon praticable, puisque corriger un pinout demandera plusieurs essais.
+
+> **Contrainte absolue :** ce firmware n'écrit jamais dans `app0`. Il n'écrit que dans le slot inactif, qui est `app1` tant qu'il tourne lui-même depuis `app0`. `esp_ota_get_next_update_partition(NULL)` donne toujours le bon, sans calcul d'offset à la main.
+
+- [ ] **Step 1: Déclarer les identifiants WiFi hors du dépôt**
+
+`firmware/main/Kconfig.projbuild` :
+
+```
+menu "K-Touch custom"
+
+    config KTOUCH_WIFI_SSID
+        string "SSID du réseau WiFi"
+        default ""
+        help
+            Renseigné via `idf.py menuconfig`. Stocké dans `sdkconfig`, qui est
+            exclu du dépôt : les identifiants ne sont jamais commités.
+
+    config KTOUCH_WIFI_PASSWORD
+        string "Mot de passe WiFi"
+        default ""
+
+    config KTOUCH_RESCUE_TIMEOUT_MS
+        int "Délai avant sauvetage automatique (ms)"
+        default 90000
+        help
+            Si le WiFi n'est pas connecté à l'échéance, le firmware rebascule
+            sur l'autre slot OTA et redémarre. C'est le seul filet qui
+            fonctionne sans réseau ni écran.
+
+endmenu
 ```
 
-Expected: une nouvelle entrée avec `VID_1A86` (WCH), le pont CH340K de la K-Touch. Au moment de la rédaction, seuls `COM1` (port ACPI) et `COM3` (`VID_041E`, Creative — sans rapport) étaient présents : le nouveau port est donc facile à repérer.
-
-Si aucun port n'apparaît, installer le pilote CH340 de WCH, puis rebrancher. Noter le port retenu ; il est appelé `<PORT>` dans la suite.
-
-- [ ] **Step 2: Installer esptool**
+Renseigner ensuite le SSID et le mot de passe :
 
 ```powershell
-python -m pip install -r tools/requirements.txt
-python -m esptool version
+& "<chemin-vers-esp-idf>\export.ps1"; cd "<racine-du-depot>\firmware"; idf.py menuconfig
 ```
 
-Expected: une version 4.7 ou supérieure.
+Vérification : `git status` ne doit montrer **aucune** modification de fichier suivi contenant le SSID. `sdkconfig` est déjà exclu par `.gitignore`.
 
-- [ ] **Step 3: Lire l'identité de la puce**
+- [ ] **Step 2: Écrire le sauvetage automatique**
+
+C'est la partie dont tout le reste dépend : elle doit être écrite en premier et rester la plus simple possible.
+
+`firmware/main/rescue.c` :
+
+```c
+/* Sauvetage automatique : sans accès série, c'est le seul moyen de revenir au
+ * firmware d'origine si ce firmware-ci ne parvient pas à joindre le réseau.
+ *
+ * Le principe est volontairement pauvre : un minuteur armé au démarrage, que
+ * seule une connexion WiFi réussie désarme. Il ne dépend ni de l'écran, ni du
+ * tactile, ni d'aucune bibliothèque tierce — donc il survit à leur défaillance. */
+
+#include "rescue.h"
+
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "esp_timer.h"
+
+static const char *TAG = "rescue";
+static esp_timer_handle_t minuteur;
+
+esp_err_t rescue_switch_to_other_slot(void)
+{
+    const esp_partition_t *cible = esp_ota_get_next_update_partition(NULL);
+    if (cible == NULL) {
+        ESP_LOGE(TAG, "aucun autre slot OTA disponible");
+        return ESP_ERR_NOT_FOUND;
+    }
+    /* Le slot voisin contient le firmware d'origine, que nous n'écrasons
+     * jamais : la bascule suffit, il n'y a rien à téléverser. */
+    esp_err_t erreur = esp_ota_set_boot_partition(cible);
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "bascule impossible : %s", esp_err_to_name(erreur));
+        return erreur;
+    }
+    ESP_LOGW(TAG, "bascule vers %s, redemarrage", cible->label);
+    return ESP_OK;
+}
+
+static void sur_echeance(void *arg)
+{
+    ESP_LOGE(TAG, "reseau injoignable dans le delai imparti");
+    if (rescue_switch_to_other_slot() == ESP_OK) {
+        esp_restart();
+    }
+    /* Si même la bascule échoue, redémarrer quand même : le bootloader
+     * retombera sur le slot que otadata désigne encore. */
+    esp_restart();
+}
+
+esp_err_t rescue_arm(uint32_t delai_ms)
+{
+    const esp_timer_create_args_t args = {
+        .callback = sur_echeance,
+        .name = "rescue",
+    };
+    esp_err_t erreur = esp_timer_create(&args, &minuteur);
+    if (erreur != ESP_OK) {
+        return erreur;
+    }
+    ESP_LOGW(TAG, "sauvetage arme : %lu ms pour joindre le reseau", (unsigned long)delai_ms);
+    return esp_timer_start_once(minuteur, (uint64_t)delai_ms * 1000);
+}
+
+void rescue_disarm(void)
+{
+    if (minuteur != NULL) {
+        esp_timer_stop(minuteur);
+        esp_timer_delete(minuteur);
+        minuteur = NULL;
+        ESP_LOGI(TAG, "sauvetage desarme : le reseau repond");
+    }
+}
+```
+
+`firmware/main/rescue.h` déclare les trois fonctions et rien d'autre.
+
+- [ ] **Step 3: Écrire la connexion WiFi**
+
+`firmware/main/wifi.c` — station classique ESP-IDF : `esp_netif_init`, boucle d'événements par défaut, `esp_netif_create_default_wifi_sta`, `esp_wifi_init` avec la configuration par défaut, mode `WIFI_MODE_STA`, SSID et mot de passe issus de `CONFIG_KTOUCH_WIFI_SSID` / `CONFIG_KTOUCH_WIFI_PASSWORD`, puis `esp_wifi_start`.
+
+Sur `WIFI_EVENT_STA_DISCONNECTED`, relancer `esp_wifi_connect()` — une coupure passagère ne doit pas déclencher le sauvetage tant que le délai n'est pas écoulé. Sur `IP_EVENT_STA_GOT_IP`, mémoriser l'adresse, journaliser `adresse IP : %s`, et **appeler `rescue_disarm()`** — c'est le seul endroit du firmware qui désarme le minuteur.
+
+`wifi_is_connected()` rend l'état courant, `wifi_ip_string()` recopie l'adresse mémorisée.
+
+- [ ] **Step 4: Écrire le journal réseau**
+
+Sans port série, la console n'est lisible que par le réseau. Le plus simple à consulter, et le plus robuste à travers un pare-feu, est un tampon circulaire en RAM exposé en HTTP.
+
+`firmware/main/netlog.c` — un tampon statique de 16 Kio, un mutex, et un relais installé avec `esp_log_set_vprintf()` qui écrit à la fois vers la sortie d'origine et dans le tampon. `netlog_snapshot()` recopie le contenu courant sous mutex.
+
+> Attention au piège : le relais est appelé depuis n'importe quelle tâche, y compris pendant une interruption différée. Ne rien allouer dedans, ne pas appeler `ESP_LOG*` récursivement, et prendre le mutex avec un délai nul en abandonnant l'écriture plutôt qu'en bloquant.
+
+- [ ] **Step 5: Écrire le serveur HTTP**
+
+`firmware/main/web.c`, sur `esp_http_server`, cinq routes :
+
+| Route | Méthode | Rôle |
+|---|---|---|
+| `/` | GET | page d'état minimale en HTML, avec liens vers les autres routes |
+| `/status` | GET | JSON : slot en cours, version, temps depuis le démarrage, mémoire libre, tactile disponible ou non |
+| `/log` | GET | texte brut, contenu de `netlog_snapshot()` |
+| `/revert` | POST | `rescue_switch_to_other_slot()` puis `esp_restart()` |
+| `/update` | POST | reçoit une image applicative brute et l'écrit dans le slot inactif |
+
+Le gestionnaire de `/update` suit le schéma habituel : `esp_ota_get_next_update_partition(NULL)`, `esp_ota_begin` en `OTA_SIZE_UNKNOWN`, boucle de `httpd_req_recv` vers `esp_ota_write`, puis `esp_ota_end` et `esp_ota_set_boot_partition`, et enfin `esp_restart()` après avoir répondu. En cas d'échec en cours de route, appeler `esp_ota_abort()` : sans ça le handle reste ouvert et la tentative suivante échoue.
+
+> `/revert` et `/update` sont en POST délibérément. En GET, n'importe quelle requête d'un navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait l'appareil.
+
+- [ ] **Step 6: Câbler le tout dans `app_main`**
+
+L'ordre compte, et il est dicté par le sauvetage.
+
+Armer le sauvetage **en tout premier**, avant l'écran, avant le WiFi — pour qu'une panne de n'importe quel étage ultérieur reste rattrapable. Puis initialiser la NVS (le WiFi en a besoin), le journal réseau, le WiFi, et seulement ensuite l'écran, la mire et le serveur HTTP.
+
+Journaliser la partition d'exécution au démarrage, via `esp_ota_get_running_partition()`, avec son label et son offset : c'est la première chose à vérifier dans le journal, et elle doit annoncer `app1`.
+
+- [ ] **Step 7: Compiler**
 
 ```powershell
-python -m esptool --port <PORT> chip_id
+& "<chemin-vers-esp-idf>\export.ps1"; cd "<racine-du-depot>\firmware"; idf.py build
 ```
 
-Expected: `Chip is ESP32-S3`, plus l'adresse MAC. Si la connexion échoue, maintenir le bouton BOOT pendant la mise sous tension pour forcer le mode téléchargement.
+Expected: la compilation aboutit. Le binaire grossit nettement — la pile WiFi et le serveur HTTP pèsent plus que le reste — mais reste très en deçà des 4 718 592 octets du slot.
 
-> Comparer le MAC affiché avec celui consigné dans le journal du pack de recovery local (`Recovery_toolV1.0.6/Tool/.../logs/`, le nom du fichier est le MAC). S'ils coïncident, l'appareil est bien celui qui a reçu un firmware Panda Touch le 19 novembre 2024, et l'étape 5 le confirmera.
-
-- [ ] **Step 4: Sauvegarder l'intégralité du flash**
+Vérifier ensuite le binaire produit :
 
 ```powershell
-python -m esptool --port <PORT> --baud 460800 read_flash 0 0x1000000 backups/ktouch-stock-2026-07-26.bin
+python ktouch-cli.py image firmware/build/ktouch-custom.bin
 ```
 
-Expected: `Read 16777216 bytes`, en deux à trois minutes. Ne rien débrancher pendant l'opération.
+- [ ] **Step 8: Documenter la procédure sans câble**
 
-- [ ] **Step 5: Vérifier la sauvegarde**
+`docs/hardware/flashing.md` — décrit la voie WiFi de bout en bout : installation par le `/update` du firmware d'origine, retour par `/revert`, sauvetage automatique si le réseau ne répond pas, et itération par le `/update` de notre propre firmware.
 
-```powershell
-python ktouch-cli.py verify backups/ktouch-stock-2026-07-26.bin
-```
+Consigner explicitement ce qui a été perdu et pourquoi : sans accès série, aucune sauvegarde intégrale des 16 Mo n'est possible, donc pas de restauration octet par octet. Ce qui reste : le firmware d'origine intact dans son slot, et les images officielles publiées par BTT. Ce qui n'est pas récupérable en cas de perte : la NVS, donc les réglages et les identifiants WiFi saisis sur l'écran.
 
-Expected: `Taille : 16 Mio, conforme`, `Partitionnement : identique au stock`, et `Sauvegarde exploitable : OUI`. Le rapport indique aussi le contenu de chaque slot.
+Indiquer aussi comment retrouver une voie série si le besoin s'en fait sentir — la K-Touch expose son UART via un pont sur le port USB-C, et un câble USB-C ne transportant que l'alimentation n'énumère aucun port.
 
-> **Point de décision.** Si `app0` annonce `project_name` = `K-Touch`, l'appareil porte bien le firmware d'origine. S'il annonce `knomi_p1`, c'est du firmware Panda Touch, et cette sauvegarde devient précieuse : le firmware K-Touch d'origine n'est plus sur l'appareil et devra être réinstallé depuis le dépôt officiel BTT.
->
-> **Si `Sauvegarde exploitable` vaut `NON`, arrêter le jalon ici** et diagnostiquer avant toute écriture. Un partitionnement inattendu invalide toutes les hypothèses d'offsets du plan.
-
-- [ ] **Step 6: Faire une copie de la sauvegarde hors du dossier de travail**
-
-Copier le fichier sur un autre disque ou un espace de stockage distinct. C'est la seule protection contre une erreur de manipulation locale.
-
-- [ ] **Step 7: Documenter la procédure**
-
-`docs/hardware/flashing.md` — consigne l'identification du port, l'installation du pilote CH340, les commandes de sauvegarde et de vérification, la liste des offsets interdits en écriture, et la procédure de restauration intégrale :
-`python -m esptool --port <PORT> --baud 460800 write_flash 0x0 <sauvegarde>.bin`.
-Préciser que la restauration intégrale réécrit aussi la NVS, donc les réglages Wi-Fi de l'appareil.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add docs/hardware/flashing.md
-git commit -m "docs(hardware): procedure de sauvegarde et de restauration du flash"
+git add firmware/main firmware/CMakeLists.txt firmware/sdkconfig.defaults docs/hardware/flashing.md
+git commit -m "feat(firmware): wifi, journal reseau, OTA et sauvetage automatique"
 ```
 
 ---
 
-### Task 6: Installation dans le slot app1 et preuve de vie
+### Task 6: Installation par WiFi et preuve de vie
 
 **Files:**
-- Modify: `docs/hardware/flashing.md` — ajouter la section d'installation dans `app1`.
+- Modify: `docs/hardware/flashing.md` — consigner le déroulé réel et ce qui a été observé.
 
 **Interfaces:**
-- Consumes: `firmware/build/ktouch-custom.bin` de la tâche 4, la sauvegarde vérifiée de la tâche 5, et `ktouch.otadata.build_otadata` de la tâche 2.
-- Produces: un appareil démarrant sur `app1` avec écran allumé et tactile fonctionnel — ou un diagnostic précis si le pinout Panda Touch ne convient pas.
+- Consumes: `firmware/build/ktouch-custom.bin` de la tâche 5, celui qui embarque le WiFi, le journal réseau et le sauvetage.
+- Produces: un appareil démarrant sur `app1` avec notre firmware — ou un diagnostic précis si le pinout du Panda Touch ne convient pas à la K-Touch.
 
-- [ ] **Step 1: Confronter notre implémentation d'otadata à l'appareil réel**
+Première tâche qui écrit sur l'appareil. Elle passe entièrement par le réseau : le mécanisme OTA du firmware d'origine se charge d'écrire dans le slot inactif et de basculer le démarrage, ce qui évite toute manipulation d'`otadata` à la main.
 
-Avant d'écrire quoi que ce soit, vérifier que notre calcul de CRC correspond à celui du bootloader, en le confrontant à l'`otadata` réellement présente dans la sauvegarde :
+> **Ne jamais installer le binaire de la tâche 4.** Seul celui de la tâche 5 sait revenir en arrière. Vérifier avant tout téléversement que l'image contient bien le WiFi : `python ktouch-cli.py image firmware/build/ktouch-custom.bin` doit annoncer une taille nettement supérieure aux ~512 Ko de la tâche 4.
 
-```powershell
-python ktouch-cli.py otadata backups/ktouch-stock-2026-07-26.bin
-```
-
-Expected: au moins une entrée dont `crc` égale `attendu` et dont `valide` vaut `True`.
-
-> **C'est le contrôle le plus important du jalon.** Si aucune entrée valide n'apparaît alors que l'appareil démarre normalement, notre modèle d'`otadata` est faux : **ne pas écrire**, et reprendre l'analyse. Si les deux entrées sont vierges (`0xFFFFFFFF`), c'est également plausible sur un appareil jamais mis à jour par OTA — dans ce cas le bootloader démarre le premier slot, et notre modèle reste valable, mais on passera par la vérification de relecture de l'étape 5 avant de conclure.
-
-- [ ] **Step 2: Écrire le firmware dans le slot app1**
+- [ ] **Step 1: Relever l'état de départ**
 
 ```powershell
-python -m esptool --port <PORT> --baud 460800 write_flash 0x490000 firmware/build/ktouch-custom.bin
+curl.exe -s http://<IP>/update/identity
 ```
 
-Expected: `Hash of data verified.` L'offset `0x490000` est le début de `app1`. Le firmware d'origine, en `0x10000`, n'est pas touché.
+Expected: un objet JSON du type `{"id": "V1.0.0", "hardware": "ESP32"}`. Noter la valeur : c'est la version du firmware d'origine, et donc ce à quoi l'appareil doit revenir à la tâche 7.
 
-- [ ] **Step 3: Générer et écrire l'otadata qui sélectionne app1**
+> Si cette requête échoue, s'arrêter. Un appareil déjà injoignable avant toute écriture ne doit pas en recevoir une.
+
+- [ ] **Step 2: Téléverser notre firmware par l'OTA du fabricant**
+
+L'interface de mise à jour est servie sur `http://<IP>/update`. Le plus sûr est de passer par le navigateur et de sélectionner `firmware/build/ktouch-custom.bin`, puisque c'est le chemin que BTT a testé.
+
+Expected: la page annonce la fin du téléversement puis le redémarrage de l'appareil.
+
+> **Résultat à ne pas surinterpréter.** Il est possible que l'OTA d'origine refuse notre image, par exemple s'il contrôle un identifiant de produit. **Un refus est sans conséquence** : rien n'est écrit, l'appareil continue de tourner sur son firmware. Ce n'est pas un échec du jalon, c'est une information — et elle oriente vers l'autre voie, la restauration d'un accès série. Ne pas tenter de contourner le contrôle.
+
+- [ ] **Step 3: Vérifier que notre firmware a pris la main**
+
+Laisser une minute à l'appareil, puis :
 
 ```powershell
-python ktouch-cli.py make-otadata 1 firmware/build/otadata-app1.bin
-python -m esptool --port <PORT> --baud 460800 write_flash 0xe000 firmware/build/otadata-app1.bin
+curl.exe -s http://<IP>/status
 ```
 
-Expected: `Hash of data verified.`, 8192 octets écrits.
+Expected: notre JSON à nous, annonçant `app1` comme partition d'exécution.
 
-- [ ] **Step 4: Redémarrer et observer la console**
+> Si rien ne répond au bout de deux minutes, **ne rien faire** : le sauvetage automatique de la tâche 5 rebascule sur l'autre slot et redémarre tout seul. Attendre, puis vérifier avec `curl.exe -s http://<IP>/update/identity` que le firmware d'origine a repris la main. C'est le mécanisme qui joue son rôle, pas une panne.
+
+- [ ] **Step 4: Lire le journal réseau**
 
 ```powershell
-python -m esptool --port <PORT> run
+curl.exe -s http://<IP>/log
 ```
 
-Puis ouvrir le moniteur série à 115200 bauds (`idf.py -p <PORT> monitor` depuis `firmware/`, ou tout terminal série).
+Expected: les traces de démarrage, la partition d'exécution, l'adresse IP obtenue, puis la construction de l'interface. Si le GT911 n'a pas répondu, l'avertissement explicite ajouté à la tâche 4 doit apparaître ici — c'est ce qui distingue « tactile muet » de « rien ne marche ».
 
-Expected: les traces `demarrage du firmware de preuve de vie`, puis `interface construite, le panneau doit etre allume`, puis `toujours vivant` toutes les cinq secondes.
+- [ ] **Step 5: Constater la preuve de vie à l'écran**
 
-- [ ] **Step 5: Relire l'otadata et confirmer le slot actif**
-
-```powershell
-python -m esptool --port <PORT> --baud 460800 read_flash 0xe000 0x2000 firmware/build/otadata-relu.bin
-python ktouch-cli.py otadata firmware/build/otadata-relu.bin
-```
-
-Expected: `slot actif : app1`.
-
-- [ ] **Step 6: Constater la preuve de vie**
-
-Observer l'écran et consigner le résultat :
+Cette étape est visuelle et ne peut pas être automatisée. Observer et consigner :
 
 - le rétroéclairage s'allume ;
 - les quatre bandes de couleur sont dans l'ordre rouge, vert, bleu, blanc, sans dominante ni canal manquant ;
-- le texte est net et lisible, sans décalage horizontal ni déchirure ;
+- le texte est net, sans décalage horizontal ni déchirure ;
 - les quatre repères jaunes sont visibles aux quatre coins, ce qui prouve que les 800×480 sont balayés ;
-- l'image est stable, sans scintillement ni défilement ;
-- un appui sur l'écran produit une ligne `appui a x=… y=…` dans la console, avec des coordonnées cohérentes avec l'endroit touché.
+- l'image est stable, sans scintillement ni défilement.
 
-> **Interprétation en cas d'échec.** Un écran noir avec des traces série normales oriente vers le rétroéclairage ou la broche de reset. Une image aux couleurs fausses ou décalée oriente vers l'ordre des broches de données. Un défilement ou un scintillement oriente vers les timings et la fréquence pixel. Un affichage correct mais un tactile muet ou aux axes inversés isole le GT911. Chacun de ces symptômes désigne une zone précise du BSP, et c'est exactement ce qui rend la tâche 7 exploitable même en cas d'échec.
+> Une photographie de l'écran suffit à faire juger ces points par quelqu'un qui n'est pas devant l'appareil.
 
-- [ ] **Step 7: Documenter l'installation**
+- [ ] **Step 6: Vérifier le tactile**
 
-Ajouter à `docs/hardware/flashing.md` la section d'installation dans `app1` : les deux commandes `write_flash`, la génération de l'`otadata`, la vérification par relecture, et le rappel que `app0` reste intact.
+Appuyer successivement au centre puis sur chacun des quatre repères de coin, puis relire le journal :
 
-- [ ] **Step 8: Commit**
+```powershell
+curl.exe -s http://<IP>/log
+```
+
+Expected: une ligne `appui a x=… y=…` par appui, avec des coordonnées cohérentes avec l'endroit touché — proches de `(0,0)` en haut à gauche et de `(799,479)` en bas à droite.
+
+> Des coordonnées inversées, en miroir ou bornées trop tôt renseignent sur la configuration du GT911 et non sur le panneau : ce sont deux réglages indépendants dans le BSP.
+
+- [ ] **Step 7: Interpréter**
+
+Chaque symptôme désigne une zone précise, et c'est ce qui rend la tâche exploitable même en cas d'échec.
+
+Un écran noir avec un journal réseau normal oriente vers le rétroéclairage ou la broche de reset du panneau. Une image aux couleurs fausses ou décalée oriente vers l'ordre des broches de données. Un défilement ou un scintillement oriente vers les timings et la fréquence pixel. Un affichage correct avec un tactile muet isole le GT911. Un appareil qui ne répond jamais et revient au stock par le sauvetage oriente vers le WiFi ou vers un blocage précoce, pas vers l'affichage.
+
+- [ ] **Step 8: Documenter et commiter**
+
+Compléter `docs/hardware/flashing.md` avec le déroulé réel, y compris les tentatives infructueuses : ce sont elles qui ont de la valeur pour quelqu'un qui refera la manipulation.
 
 ```bash
 git add docs/hardware/flashing.md
-git commit -m "docs(hardware): installation dans le slot app1"
+git commit -m "docs(hardware): installation par WiFi et resultat de la preuve de vie"
 ```
 
 ---
@@ -1616,29 +1763,25 @@ git commit -m "docs(hardware): installation dans le slot app1"
 - Consumes: le résultat observé à la tâche 6.
 - Produces: la preuve que la manipulation est réversible, et le pinout de la K-Touch documenté — confirmé ou infirmé.
 
-Prouver la réversibilité fait partie des critères de succès de la spec : un firmware qu'on ne peut pas désinstaller n'est pas une expérimentation, c'est un aller simple.
+Prouver la réversibilité fait partie des critères de réussite : un firmware qu'on ne peut pas désinstaller n'est pas une expérimentation, c'est un aller simple. C'est d'autant plus vrai ici qu'aucune sauvegarde intégrale n'existe.
 
-- [ ] **Step 1: Revenir au slot app0**
-
-```powershell
-python ktouch-cli.py make-otadata 0 firmware/build/otadata-app0.bin
-python -m esptool --port <PORT> --baud 460800 write_flash 0xe000 firmware/build/otadata-app0.bin
-python -m esptool --port <PORT> run
-```
-
-Expected: l'appareil redémarre sur le firmware d'origine, avec son interface habituelle.
-
-- [ ] **Step 2: Vérifier le retour en arrière**
+- [ ] **Step 1: Revenir au firmware d'origine**
 
 ```powershell
-python -m esptool --port <PORT> --baud 460800 read_flash 0xe000 0x2000 firmware/build/otadata-verif.bin
-python ktouch-cli.py otadata firmware/build/otadata-verif.bin
+curl.exe -s -X POST http://<IP>/revert
 ```
 
-Expected: `slot actif : app0`.
+Expected: l'appareil accuse réception puis redémarre. Le firmware d'origine n'ayant jamais été écrasé, il n'y a rien à téléverser.
 
-> Si l'appareil ne redémarre plus du tout, la restauration intégrale documentée à la tâche 5 reprend la main :
-> `python -m esptool --port <PORT> --baud 460800 write_flash 0x0 backups/ktouch-stock-2026-07-26.bin`
+- [ ] **Step 2: Vérifier le retour**
+
+```powershell
+curl.exe -s http://<IP>/update/identity
+```
+
+Expected: à nouveau la valeur relevée à la tâche 6, étape 1 — `{"id": "V1.0.0", "hardware": "ESP32"}`. L'interface d'origine doit également être revenue à l'écran.
+
+> Si l'appareil ne répond plus du tout, le sauvetage automatique reste la dernière ligne : il rebascule et redémarre sans intervention. S'il a lui aussi échoué, il ne reste que la voie série, décrite dans `docs/hardware/flashing.md`.
 
 - [ ] **Step 3: Documenter le pinout**
 
@@ -1646,11 +1789,11 @@ Expected: `slot actif : app0`.
 
 En cas de succès : indiquer que le pinout du Panda Touch 7 pouces fonctionne tel quel sur la K-Touch 5 pouces, avec le tableau complet des broches (PCLK `GPIO5`, DE `GPIO38`, reset `GPIO46`, rétroéclairage `GPIO21`, données `17,18,48,47,39,11,12,13,14,15,16,6,7,8,9,10`, GT911 sur SCL `GPIO1` / SDA `GPIO2` / reset `GPIO41` / interruption `GPIO40`, I²C d'extension sur `GPIO3`/`GPIO4`), les timings employés, la date de la vérification et la version du firmware testée. Préciser explicitement que cela lève la réserve « may differ on a few panel GPIOs or timings » du README de Prusa-Connect-Touch.
 
-En cas d'échec : décrire précisément le symptôme observé, la zone du BSP qu'il désigne, et ce qui a été écarté. Ouvrir un jalon de rétro-ingénierie ciblé sur la fonction d'initialisation LCD du firmware d'origine, avec Ghidra et le module Xtensa.
+En cas d'échec : décrire le symptôme observé, la zone qu'il désigne, et ce qui a été écarté. Ouvrir alors un jalon de rétro-ingénierie ciblé sur la fonction d'initialisation LCD du firmware d'origine, avec Ghidra et le module Xtensa — en sachant que le binaire à désassembler est celui de la V1.0.0, la version réellement présente sur l'appareil.
 
 - [ ] **Step 4: Mettre à jour l'état du projet**
 
-Dans `README.md`, remplacer la section « État » par le résultat réel du jalon 1 et la suite envisagée. Dans la spec, ajouter une courte section « Résultat du jalon 1 » qui consigne le firmware trouvé sur l'appareil, le verdict du pinout, et la réversibilité vérifiée.
+Dans `README.md`, remplacer la section « État » par le résultat réel du jalon et la suite envisagée. Dans la spec, ajouter une section « Résultat du jalon 1 » qui consigne le verdict du pinout, la réversibilité vérifiée, et le fait que tout s'est fait sans accès série.
 
 - [ ] **Step 5: Ouvrir l'issue de licence chez BTT**
 
