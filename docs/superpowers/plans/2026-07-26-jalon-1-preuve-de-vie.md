@@ -1457,7 +1457,9 @@ git commit -m "feat(firmware): projet ESP-IDF minimal de preuve de vie"
 
 **Interfaces:**
 - Consumes: le firmware compilable de la tâche 4.
-- Produces: `wifi_start(void) -> esp_err_t`, `wifi_is_connected(void) -> bool`, `wifi_ip_string(char *out, size_t len) -> bool` ; `netlog_init(void) -> esp_err_t` et `netlog_snapshot(char *out, size_t len) -> size_t` ; `rescue_arm(uint32_t delai_ms) -> esp_err_t`, `rescue_disarm(void) -> void`, `rescue_switch_to_other_slot(void) -> esp_err_t` ; `web_start(void) -> esp_err_t`.
+- Produces: `wifi_start(void) -> esp_err_t`, `wifi_is_connected(void) -> bool`, `wifi_ip_string(char *out, size_t len) -> bool` ; `netlog_init(void) -> esp_err_t` et `netlog_snapshot(char *out, size_t len) -> size_t` ; `rescue_arm(uint32_t delai_ms) -> esp_err_t`, `rescue_disarm(void) -> void`, `rescue_switch_to_other_slot(void) -> esp_err_t`, `rescue_count_boot(void) -> uint32_t`, `rescue_reset_boot_count(void) -> void` ; `web_start(void) -> esp_err_t`.
+
+> **Le rappel du minuteur ne doit rien faire de lourd.** `esp_timer` l'exécute dans sa propre tâche, dont la pile est étroite et qu'ESP-IDF documente comme ne devant jamais bloquer. Or basculer de slot implique une vérification SHA-256 de l'image cible, une allocation, une projection de la flash, puis un `esp_restart()` qui appelle les gestionnaires d'arrêt enregistrés — dont `esp_wifi_stop`, un appel bloquant. Le rappel doit donc se contenter de signaler une petite tâche dédiée, créée au moment de l'armement, qui fait le travail.
 
 **Pourquoi cette tâche existe.** L'appareil n'est atteignable qu'en WiFi : son port USB-C n'est pas exploitable ici, donc `esptool` est hors jeu et **aucune sauvegarde des 16 Mo n'est possible**. Le filet de sécurité prévu à l'origine — dumper puis restaurer octet par octet — n'existe plus.
 
@@ -1467,11 +1469,26 @@ Le remplacement du filet, c'est le firmware lui-même. Trois mécanismes, du plu
 
 **Le sauvetage automatique** est le seul qui fonctionne quand tout va mal. Au démarrage, avant même de tenter quoi que ce soit d'autre, un compte à rebours est armé. Si le WiFi n'est pas connecté à son échéance, le firmware bascule la partition de démarrage sur l'autre slot et redémarre — donc revient au firmware d'origine, tout seul, sans intervention. Il ne dépend ni du réseau, ni de l'écran, ni du tactile.
 
+> **Un minuteur seul ne suffit pas, et c'est le défaut qui a failli passer.** Il ne couvre que les pannes plus lentes que son échéance. Or la panne la plus probable de ce jalon — un pinout de panneau qui ne convient pas — fait échouer l'initialisation de l'écran en moins d'une seconde. Avec un `ESP_ERROR_CHECK`, cela déclenche un `abort()`, donc un redémarrage immédiat, donc une boucle de redémarrage dont le minuteur de 90 secondes ne voit jamais l'échéance. Le sauvetage serait resté parfaitement correct et parfaitement inutile, précisément sur l'hypothèse que le jalon existe pour tester.
+>
+> Deux mesures ferment cette classe entière de pannes. **Aucune défaillance locale n'est fatale** : ni l'écran, ni le rétroéclairage, ni le tactile, ni le serveur ne sont vérifiés par `ESP_ERROR_CHECK` — on journalise et on continue. Et **un compteur de démarrages** survit aux redémarrages en mémoire `RTC_NOINIT_ATTR` : incrémenté à l'entrée d'`app_main`, remis à zéro dès qu'une adresse IP est obtenue, il bascule immédiatement sur l'autre slot au-delà de trois tentatives. Une boucle de redémarrage, quelle qu'en soit la cause — panique, chien de garde, débordement de pile — se solde donc par un retour au firmware d'origine.
+
 **Le retour manuel** couvre le cas où le WiFi marche mais où l'affichage est raté : une requête sur `/revert` rebascule sur l'autre slot. Comme le firmware d'origine n'est jamais écrasé, revenir au stock ne demande aucun téléversement, juste un changement de slot.
 
-**La mise à jour** permet d'itérer sur le pinout sans câble : `/update` accepte une image applicative, l'écrit dans le slot inactif et redémarre dessus. C'est ce qui rend le jalon praticable, puisque corriger un pinout demandera plusieurs essais.
+**L'itération** sur le pinout ne passe **pas** par notre firmware. C'est contre-intuitif, et c'est le point que la conception initiale avait faux.
 
-> **Contrainte absolue :** ce firmware n'écrit jamais dans `app0`. Il n'écrit que dans le slot inactif, qui est `app1` tant qu'il tourne lui-même depuis `app0`. `esp_ota_get_next_update_partition(NULL)` donne toujours le bon, sans calcul d'offset à la main.
+Notre firmware tourne depuis `app1`, puisque c'est le slot inactif que l'OTA du firmware d'origine choisit. Avec deux slots seulement, le « slot inactif » vu depuis `app1` est donc `app0` — celui du firmware d'origine. Un `/update` dans notre firmware ne pourrait écrire nulle part ailleurs, et `esp_ota_begin()` en `OTA_SIZE_UNKNOWN` efface la partition entière **avant** de recevoir le moindre octet. La première mise à jour effacerait donc le firmware d'origine, après quoi le sauvetage n'aurait plus rien vers quoi basculer.
+
+> **Notre firmware n'expose donc aucune route de mise à jour.** Cette décision n'est pas de la prudence excessive : avec deux slots, il n'existe aucune façon pour lui d'écrire ailleurs que sur le firmware d'origine.
+
+La boucle d'itération correcte repasse à chaque fois par le firmware d'origine, et ne touche jamais `app0` :
+
+1. `/revert` sur notre firmware — retour au firmware d'origine dans `app0` ;
+2. `/update` du firmware d'origine — écrit notre nouvelle version dans `app1` et démarre dessus ;
+3. essai, observation ;
+4. retour à l'étape 1.
+
+> **Contrainte absolue :** ce firmware n'écrit jamais dans une partition applicative, quelle qu'elle soit. La seule écriture en flash qu'il pratique est celle d'`otadata`, huit kibioctets qui désignent le slot de démarrage.
 
 - [ ] **Step 1: Déclarer les identifiants WiFi hors du dépôt**
 
@@ -1552,14 +1569,31 @@ esp_err_t rescue_switch_to_other_slot(void)
     return ESP_OK;
 }
 
+/* Dernier recours : effacer otadata.
+
+   Si `esp_ota_set_boot_partition` refuse la cible — image absente, à moitié
+   écrite, ou qui échoue la vérification — insister ne sert à rien. Mais une
+   otadata invalide n'est pas un blocage : le bootloader se rabat alors sur
+   `factory`, et faute de partition `factory` il démarre le premier slot OTA,
+   c'est-à-dire `app0`. Ce chemin est tolérant là où `esp_ota_set_boot_partition`
+   est intransigeant, puisque le bootloader essaie chaque slot à son tour. */
+static esp_err_t effacer_otadata(void)
+{
+    const esp_partition_t *ota = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA, NULL);
+    if (ota == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    ESP_LOGE(TAG, "dernier recours : effacement d'otadata");
+    return esp_partition_erase_range(ota, 0, ota->size);
+}
+
 static void sur_echeance(void *arg)
 {
     ESP_LOGE(TAG, "reseau injoignable dans le delai imparti");
-    if (rescue_switch_to_other_slot() == ESP_OK) {
-        esp_restart();
+    if (rescue_switch_to_other_slot() != ESP_OK) {
+        effacer_otadata();
     }
-    /* Si même la bascule échoue, redémarrer quand même : le bootloader
-     * retombera sur le slot que otadata désigne encore. */
     esp_restart();
 }
 
@@ -1630,27 +1664,69 @@ Sans port série, la console n'est lisible que par le réseau. Le plus simple à
 
 - [ ] **Step 5: Écrire le serveur HTTP**
 
-`firmware/main/web.c`, sur `esp_http_server`, cinq routes :
+`firmware/main/web.c`, sur `esp_http_server`, quatre routes — **et aucune route de mise à jour**, pour la raison exposée plus haut :
 
 | Route | Méthode | Rôle |
 |---|---|---|
 | `/` | GET | page d'état minimale en HTML, avec liens vers les autres routes |
-| `/status` | GET | JSON : slot en cours, version, temps depuis le démarrage, mémoire libre, tactile disponible ou non |
+| `/status` | GET | JSON : slot en cours, version, adresse IP, temps depuis le démarrage, mémoire libre, tactile disponible ou non, compteur de démarrages |
 | `/log` | GET | texte brut, contenu de `netlog_snapshot()` |
 | `/revert` | POST | `rescue_switch_to_other_slot()` puis `esp_restart()` |
-| `/update` | POST | reçoit une image applicative brute et l'écrit dans le slot inactif |
 
-Le gestionnaire de `/update` suit le schéma habituel : `esp_ota_get_next_update_partition(NULL)`, `esp_ota_begin` en `OTA_SIZE_UNKNOWN`, boucle de `httpd_req_recv` vers `esp_ota_write`, puis `esp_ota_end` et `esp_ota_set_boot_partition`, et enfin `esp_restart()` après avoir répondu. En cas d'échec en cours de route, appeler `esp_ota_abort()` : sans ça le handle reste ouvert et la tentative suivante échoue.
+Aucun code d'écriture de partition applicative ne doit figurer dans ce fichier : ni `esp_ota_begin`, ni `esp_ota_write`. La seule écriture en flash de tout le firmware est celle d'`otadata`, dans `rescue.c`.
 
-> `/revert` et `/update` sont en POST délibérément. En GET, n'importe quelle requête d'un navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait l'appareil.
+> `/revert` est en POST délibérément. En GET, n'importe quelle requête d'un navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait l'appareil.
+
+> Contrôler la valeur de retour de chaque `httpd_register_uri_handler` et journaliser un échec : une route de secours qui ne s'enregistre pas silencieusement est pire qu'une route absente.
 
 - [ ] **Step 6: Câbler le tout dans `app_main`**
 
-L'ordre compte, et il est dicté par le sauvetage.
+L'ordre est dicté par le sauvetage, et deux règles priment sur toute considération de lisibilité.
 
-Armer le sauvetage **en tout premier**, avant l'écran, avant le WiFi — pour qu'une panne de n'importe quel étage ultérieur reste rattrapable. Puis initialiser la NVS (le WiFi en a besoin), le journal réseau, le WiFi, et seulement ensuite l'écran, la mire et le serveur HTTP.
+**Aucune défaillance locale n'est fatale.** Pas un seul `ESP_ERROR_CHECK` sur l'écran, le rétroéclairage, le tactile, le WiFi ou le serveur. `ESP_ERROR_CHECK` appelle `abort()`, donc redémarre l'appareil en moins d'une seconde — bien avant l'échéance du minuteur, qui ne se déclenche alors jamais. Sur chacun de ces étages : récupérer le code d'erreur, le journaliser, et continuer. Un écran mort doit laisser tourner le WiFi et le serveur, c'est précisément ce qui permet de diagnostiquer à distance au lieu de constater un appareil muet.
+
+> `pt_backlight_set()` mérite une attention particulière : le BSP de BTT contient ses propres `ESP_ERROR_CHECK` sur les appels LEDC, donc un échec à l'intérieur peut abattre le processus sans que notre code y soit pour quoi que ce soit. Raison de plus pour démarrer le serveur HTTP **avant** de toucher à l'écran.
+
+**Le serveur HTTP démarre juste après le WiFi, avant l'écran.** Sans ça, une panne d'affichage emporte simultanément le sauvetage automatique — désarmé par une connexion WiFi réussie — et la route manuelle `/revert`. Les deux voies de secours disparaîtraient d'un coup, sur la panne la plus probable du jalon.
+
+L'ordre est donc : compteur de démarrages, sauvetage, NVS, journal réseau, WiFi, **serveur HTTP**, puis écran, mire et tactile.
 
 Journaliser la partition d'exécution au démarrage, via `esp_ota_get_running_partition()`, avec son label et son offset : c'est la première chose à vérifier dans le journal, et elle doit annoncer `app1`.
+
+- [ ] **Step 6 bis: Le compteur de démarrages**
+
+Le minuteur ne couvre que les pannes plus lentes que son échéance. Le compteur ferme tout le reste : paniques, chien de garde, débordements de pile, échecs d'initialisation de la PSRAM — tout ce qui redémarre l'appareil en moins de 90 secondes.
+
+`firmware/main/rescue.c`, une variable en mémoire RTC qui survit aux redémarrages mais pas à une coupure d'alimentation :
+
+```c
+/* RTC_NOINIT_ATTR survit à un redémarrage logiciel comme à une panique, mais
+ * pas à une coupure d'alimentation — exactement le comportement voulu : une
+ * boucle de redémarrage est détectée, un appareil rallumé repart à zéro. */
+RTC_NOINIT_ATTR static uint32_t compteur_demarrages;
+RTC_NOINIT_ATTR static uint32_t temoin_validite;
+
+#define TEMOIN_ATTENDU 0x4B544348u /* "KTCH" */
+#define DEMARRAGES_MAX 3
+
+uint32_t rescue_count_boot(void)
+{
+    if (temoin_validite != TEMOIN_ATTENDU) {
+        /* Premier démarrage après mise sous tension : la mémoire RTC contient
+         * n'importe quoi, il faut l'initialiser avant de s'y fier. */
+        temoin_validite = TEMOIN_ATTENDU;
+        compteur_demarrages = 0;
+    }
+    compteur_demarrages++;
+    return compteur_demarrages;
+}
+
+void rescue_reset_boot_count(void) { compteur_demarrages = 0; }
+```
+
+Au tout début d'`app_main`, appeler `rescue_count_boot()`. Si la valeur rendue dépasse `DEMARRAGES_MAX`, ne rien tenter d'autre : basculer immédiatement sur l'autre slot et redémarrer. Journaliser la valeur à chaque démarrage — c'est le premier indice à lire dans `/status`.
+
+Remettre le compteur à zéro dans le gestionnaire `IP_EVENT_STA_GOT_IP`, au même endroit que `rescue_disarm()` : une connexion réussie prouve que ce firmware est viable.
 
 - [ ] **Step 7: Compiler**
 
