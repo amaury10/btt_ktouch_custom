@@ -1,6 +1,27 @@
 /* Connexion WiFi station.
  *
- * Piège évité ici, et qui aurait pu rendre l'appareil définitivement
+ * Piège corrigé après le premier vol matériel : esp_wifi_start() est
+ * asynchrone, il se contente de poster WIFI_EVENT_STA_START, et l'interface
+ * station n'est prête qu'à la réception de cet événement. Appeler
+ * esp_wifi_connect() directement après esp_wifi_start() (comme le faisait ce
+ * fichier avant ce correctif) échoue donc typiquement avec
+ * ESP_ERR_WIFI_NOT_STARTED — et comme aucune tentative de connexion n'a
+ * jamais réellement eu lieu, aucun WIFI_EVENT_STA_DISCONNECTED ne se produit
+ * non plus pour relancer quoi que ce soit via le gestionnaire ci-dessous : le
+ * WiFi restait mort jusqu'à l'échéance du sauvetage, sans qu'aucune tentative
+ * n'ait jamais été faite. C'est exactement ce que l'exemple officiel
+ * "station" d'ESP-IDF évite en appelant esp_wifi_connect() depuis le
+ * gestionnaire de WIFI_EVENT_STA_START — repris ici.
+ *
+ * Ce bug n'a été trouvé qu'après un vol matériel et un post-mortem, car sans
+ * WiFi le journal réseau est injoignable : le seul canal qui aurait montré
+ * l'erreur est justement celui que l'erreur elle-même désactive. D'où
+ * l'importance de app_main.c qui affiche désormais l'état WiFi (et la
+ * dernière erreur de connexion, via wifi_last_connect_error()) directement à
+ * l'écran — seul canal de diagnostic qui survive à une panne WiFi sans
+ * câble série.
+ *
+ * Piège évité par ailleurs, et qui aurait pu rendre l'appareil définitivement
  * injoignable : la partition NVS (0x9000) est partagée par les deux slots
  * applicatifs. Le firmware d'origine y range ses identifiants WiFi dans
  * l'espace de noms standard d'ESP-IDF. Le stockage par défaut d'esp_wifi
@@ -44,16 +65,36 @@ static const char *TAG = "wifi";
 static volatile bool connectee;
 static char adresse_ip[16] = "0.0.0.0";
 
+/* Dernier message d'erreur d'un esp_wifi_connect() infructueux ; vidé dès
+ * qu'une connexion réussit. Affiché à l'écran par app_main.c : c'est le seul
+ * canal de diagnostic qui survive à une panne WiFi sans câble série. */
+static char derniere_erreur[32];
+
+static void tenter_connexion(void)
+{
+    esp_err_t erreur = esp_wifi_connect();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_connect a echoue : %s", esp_err_to_name(erreur));
+        strlcpy(derniere_erreur, esp_err_to_name(erreur), sizeof(derniere_erreur));
+    }
+}
+
 static void sur_evenement(void *arg, esp_event_base_t base, int32_t id, void *donnees)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        /* Premier appel possible à esp_wifi_connect() : l'interface station
+         * n'existe, du point de vue d'esp_wifi, qu'à partir de cet
+         * événement. */
+        tenter_connexion();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         connectee = false;
         ESP_LOGW(TAG, "connexion perdue, nouvelle tentative");
-        esp_wifi_connect();
+        tenter_connexion();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *evenement = (const ip_event_got_ip_t *)donnees;
         snprintf(adresse_ip, sizeof(adresse_ip), IPSTR, IP2STR(&evenement->ip_info.ip));
         connectee = true;
+        derniere_erreur[0] = '\0';
         ESP_LOGI(TAG, "adresse IP : %s", adresse_ip);
         /* Seul endroit du firmware qui désarme le sauvetage et qui remet le
          * compteur de démarrages à zéro : une connexion réussie prouve que ce
@@ -147,12 +188,13 @@ esp_err_t wifi_start(void)
         ESP_LOGW(TAG, "le sauvetage automatique se declenchera faute de connexion");
     }
 
-    erreur = esp_wifi_start();
-    if (erreur != ESP_OK) {
-        return erreur;
-    }
-
-    return esp_wifi_connect();
+    /* esp_wifi_start() est asynchrone : il ne fait que poster
+     * WIFI_EVENT_STA_START. C'est ce gestionnaire, plus haut, qui appelle
+     * esp_wifi_connect() — pas cette fonction. Rendre directement le
+     * résultat d'esp_wifi_start() : un esp_wifi_connect() synchrone ici,
+     * comme avant ce correctif, échouerait presque toujours avec
+     * ESP_ERR_WIFI_NOT_STARTED. */
+    return esp_wifi_start();
 }
 
 bool wifi_is_connected(void)
@@ -167,4 +209,15 @@ bool wifi_ip_string(char *out, size_t len)
     }
     strlcpy(out, adresse_ip, len);
     return connectee;
+}
+
+bool wifi_last_connect_error(char *out, size_t len)
+{
+    if (derniere_erreur[0] == '\0') {
+        return false;
+    }
+    if (out != NULL && len > 0) {
+        strlcpy(out, derniere_erreur, len);
+    }
+    return true;
 }

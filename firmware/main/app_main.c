@@ -10,6 +10,8 @@
  * commentaire au-dessus de app_main(). */
 
 #include <inttypes.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -27,11 +29,52 @@
 
 static const char *TAG = "preuve_de_vie";
 
+/* État affiché en continu, seul canal de diagnostic qui survive à une panne
+ * WiFi sans câble série (voir le commentaire en tête de wifi.c : c'est
+ * exactement ce qui manquait pour diagnostiquer le premier vol matériel).
+ * Renseignés une fois, tout au début d'app_main, avant que build_test_pattern()
+ * ne crée le label qui les affiche. */
+static char partition_label_globale[17] = "?";
+static uint32_t compteur_demarrages_global;
+
+/* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,
+ * ou avant que build_test_pattern() ne s'exécute) : rafraichir_etat_ecran()
+ * s'abstient dans ce cas plutôt que de déréférencer un pointeur nul. */
+static lv_obj_t *label_etat;
+
 static void on_touch(lv_event_t *event)
 {
     lv_point_t point;
     lv_indev_get_point(lv_indev_active(), &point);
     ESP_LOGI(TAG, "appui a x=%d y=%d", (int)point.x, (int)point.y);
+}
+
+/* Reconstruit le texte de la ligne d'état à partir de l'état WiFi courant.
+ * Appelée sous PT_LVGL_SCOPE_LOCK() par l'appelant — lv_label_set_text()
+ * n'est pas thread-safe vis-à-vis de la tâche LVGL. */
+static void rafraichir_etat_ecran(void)
+{
+    if (label_etat == NULL) {
+        return;
+    }
+
+    char ip[16];
+    bool connectee = wifi_ip_string(ip, sizeof(ip));
+    char erreur_wifi[32];
+    char texte[96];
+
+    if (connectee) {
+        snprintf(texte, sizeof(texte), "%s — boot %" PRIu32 " — %s",
+                 partition_label_globale, compteur_demarrages_global, ip);
+    } else if (wifi_last_connect_error(erreur_wifi, sizeof(erreur_wifi))) {
+        snprintf(texte, sizeof(texte), "%s — boot %" PRIu32 " — wifi: %s",
+                 partition_label_globale, compteur_demarrages_global, erreur_wifi);
+    } else {
+        snprintf(texte, sizeof(texte), "%s — boot %" PRIu32 " — wifi: connexion...",
+                 partition_label_globale, compteur_demarrages_global);
+    }
+
+    lv_label_set_text(label_etat, texte);
 }
 
 static void build_test_pattern(void)
@@ -68,6 +111,18 @@ static void build_test_pattern(void)
         lv_obj_set_style_bg_color(marker, lv_color_hex(0xFFFF00), LV_PART_MAIN);
         lv_obj_set_style_border_width(marker, 0, LV_PART_MAIN);
     }
+
+    /* Ligne d'état, ajoutée après le premier vol matériel : la mire (bandes,
+     * repères de coin) reste inchangée ci-dessus, ce sont désormais des
+     * points de repère confirmés bons, à comparer d'un vol à l'autre. Placée
+     * en bas de l'écran, loin des repères de coin (24x24 dans chaque angle)
+     * et des bandes (haut de l'écran) : aucun chevauchement. Sans câble
+     * série, c'est le seul canal de diagnostic qui survive à une panne
+     * WiFi — d'où son importance : voir le commentaire en tête de wifi.c. */
+    label_etat = lv_label_create(screen);
+    lv_obj_set_style_text_color(label_etat, lv_color_white(), LV_PART_MAIN);
+    lv_obj_align(label_etat, LV_ALIGN_BOTTOM_MID, 0, -8);
+    rafraichir_etat_ecran();
 }
 
 void app_main(void)
@@ -126,6 +181,13 @@ void app_main(void)
     ESP_LOGI(TAG, "partition d'execution : %s (offset 0x%06" PRIx32 ")",
              partition_courante != NULL ? partition_courante->label : "?",
              partition_courante != NULL ? (uint32_t)partition_courante->address : 0);
+
+    /* Renseignés une fois pour la ligne d'état affichée à l'écran (voir
+     * build_test_pattern()/rafraichir_etat_ecran()) : c'est le seul canal de
+     * diagnostic qui survive à une panne WiFi sans câble série. */
+    strlcpy(partition_label_globale, partition_courante != NULL ? partition_courante->label : "?",
+            sizeof(partition_label_globale));
+    compteur_demarrages_global = compteur_demarrages;
 
     /* La NVS est requise par le WiFi (stockage des paramètres PHY/calibration
      * et, selon la configuration, des informations de connexion). Une NVS
@@ -232,5 +294,17 @@ void app_main(void)
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         ESP_LOGI(TAG, "toujours vivant");
+
+        /* Rafraîchit la ligne d'état (état WiFi, IP une fois obtenue) sur ce
+         * même battement de 5 s. rafraichir_etat_ecran() s'abstient toute
+         * seule si label_etat est NULL (écran indisponible) ; on prend tout
+         * de même le verrou LVGL seulement quand il y a un écran à
+         * rafraîchir, pour ne pas dépendre d'un verrou jamais initialisé si
+         * pt_display_init() a échoué. */
+        if (label_etat != NULL) {
+            PT_LVGL_SCOPE_LOCK() {
+                rafraichir_etat_ecran();
+            }
+        }
     }
 }
