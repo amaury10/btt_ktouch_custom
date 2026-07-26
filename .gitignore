@@ -23,6 +23,9 @@ compile_commands.json
 __pycache__/
 *.pyc
 
+# --- Espace de travail des agents (registre, briefs, rapports de revue) ---
+.superpowers/
+
 # --- Éditeurs / OS ---
 .vscode/
 .idea/
