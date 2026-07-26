@@ -2,7 +2,9 @@
 
 **Date :** 2026-07-26
 **Dépôt :** https://github.com/amaury10/btt_ktouch_custom
-**Statut :** conception validée, jalon 1 à planifier
+**Statut :** jalon 1 atteint le 26 juillet 2026 — voir la section 9. Les
+sections 1 à 8 conservent la conception d'origine ; là où la réalité l'a
+démentie, la section 9 le dit.
 
 ---
 
@@ -146,13 +148,27 @@ LittleFS, ni FAT**, malgré le sous-type déclaré. Son en-tête (`00 00 2b 00 e
 nom de fichier en clair. C'est un format maison non documenté — cible de RE à
 part entière, dont dépendrait toute capacité à re-thématiser l'interface stock.
 
-Un point à vérifier au premier dump : le pack de recovery utilisé localement
-contient du firmware **Panda Touch** (projet interne `knomi_p1`, chaînes
-`BTT PANDA-TOUCH SETTING`, API `api.bambulab.com`), et son journal de flash
-atteste d'une écriture complète réussie sur un ESP32 le 19 novembre 2024. Il est
-donc possible que l'appareil ne porte pas actuellement le firmware K-Touch
-d'origine. Le dump du jalon 1 le dira sans
-ambiguïté, et cette information conditionne la valeur de la sauvegarde.
+**Question résolue : l'appareil porte bien le firmware K-Touch d'origine.** Un
+doute existait, parce que le pack de recovery présent localement contient du
+firmware **Panda Touch** (projet interne `knomi_p1`, API `api.bambulab.com`) et
+que son journal atteste d'une écriture complète réussie sur un ESP32 le
+19 novembre 2024. L'appareil, joignable sur le réseau local, sert une page de
+configuration dont le titre visible est « BTT K TOUCH SETTINGS MANAGER ». Or
+cette chaîne n'existe que dans le binaire K-Touch ; le firmware Panda Touch ne
+contient qu'une variante « PANDA-TOUCH ».
+
+Piège à connaître au passage : le binaire K-Touch contient **les deux** chaînes,
+et sa balise `<title>` annonce « BTT PANDA-TOUCH SETTINGS MANAGER » — vestige du
+tronc commun que BTT n'a pas renommé. Se fier au titre de l'onglet du navigateur
+mène donc à la conclusion inverse de la bonne ; c'est le `<h1>` qui distingue les
+deux appareils.
+
+Conséquence pratique pour le jalon 1 : cette page expose un point d'entrée
+`update`, c'est-à-dire le mécanisme OTA du fabricant. Il constitue une voie
+d'installation alternative à la manipulation manuelle d'`otadata`, et
+potentiellement plus sûre puisque c'est le firmware d'origine qui gère alors la
+bascule de slot. À évaluer une fois la sauvegarde faite, sans remplacer le dump
+qui reste le préalable absolu.
 
 ## 6. Architecture
 
@@ -190,13 +206,16 @@ doit pouvoir évoluer sans casser les applications.
 Le premier jalon valide la chaîne complète et répond empiriquement à la question
 du pinout, avant tout investissement dans le désassemblage.
 
-**Contenu.** Sauvegarder l'intégralité des 16 Mo de flash de l'appareil. Mettre
-en place la chaîne de compilation **ESP-IDF v5.3.x** — le BSP déclare un plancher
-à 5.1, mais son `sdkconfig.defaults` a été généré sous 5.3.1 et son code utilise
-les API LVGL 9 (`lv_display_t`), donc 5.3 est la version sur laquelle il a
-réellement été validé. Ce choix est indépendant de l'IDF v5.1.1 du firmware
-stock, que nous ne recompilons pas. Construire ensuite un firmware minimal
-s'appuyant sur le BSP, en partant du pinout Panda Touch. L'installer dans le
+**Contenu.** Sauvegarder l'intégralité des 16 Mo de flash de l'appareil. Utiliser
+la chaîne **ESP-IDF v5.5.5**, déjà installée et vérifiée. Le BSP déclare un
+plancher à 5.1 et a été validé sous 5.3.1, mais sa compatibilité avec la 5.5.5 a
+été contrôlée dans les sources : le pilote RGB y est présent, simplement déplacé,
+et tous les champs de configuration que le BSP renseigne existent encore. Le seul
+écart est un champ déprécié qui produira un avertissement de compilation attendu.
+La v6.0 est écartée pour ce jalon — version majeure à changements incompatibles,
+postérieure au dernier commit du BSP. Ce choix est indépendant de l'IDF v5.1.1 du
+firmware stock, que nous ne recompilons pas. Construire ensuite un firmware
+minimal s'appuyant sur le BSP, en partant du pinout Panda Touch. L'installer dans le
 slot `app1` et le rendre actif. Constater que l'écran s'allume et que le tactile
 répond.
 
@@ -214,6 +233,11 @@ revenir. En dernier recours, le flash complet est
 reprogrammable en USB-C via le CH340K, et le dump initial permet une restauration
 octet par octet. Aucune étape du jalon 1 n'est irréversible.
 
+> **Démenti par les faits.** Le port USB-C s'est révélé inexploitable sur
+> l'appareil de développement : ni dump, ni reprogrammation série. Ce paragraphe
+> et le critère de succès qui suit décrivent un filet de sécurité qui n'a jamais
+> existé. Ce qui l'a remplacé est décrit en section 9.
+
 **Critères de succès.** Le dump fait 16 777 216 octets et son contenu à
 l'offset `0x8000` correspond à la table de partitions attendue. Le firmware
 maison démarre depuis `app1`. Le rétroéclairage s'allume et une image de test
@@ -230,8 +254,70 @@ binaires de BTT. Le décodage du conteneur `product.img` n'est pas nécessaire a
 firmware maison, qui embarque ses propres ressources — il reste un objectif de
 documentation, pas un prérequis.
 
-## 9. Suite
+## 9. Résultat du jalon 1 — atteint le 26 juillet 2026
 
-Le jalon 1 fera l'objet d'un plan d'implémentation détaillé. Les jalons suivants
-seront cadrés une fois la preuve de vie obtenue, l'ordre entre l'application
-Klipper et l'application astro restant à décider à ce moment-là.
+**Quatre des cinq critères de réussite sont validés. Le cinquième est devenu
+impossible**, et c'est une distinction qui mérite d'être faite honnêtement
+plutôt que gommée.
+
+Le critère resté hors d'atteinte est le premier : « le dump fait 16 777 216
+octets ». Aucune sauvegarde n'a été prise, parce qu'aucune n'était possible — le
+port USB-C de l'appareil s'est révélé inexploitable, donc `esptool` hors jeu.
+Ce n'est pas un critère raté par négligence, c'est un critère dont la
+prémisse matérielle était fausse.
+
+Il a été remplacé par un filet embarqué dans le firmware, et ce remplacement a
+été **éprouvé deux fois en conditions réelles** avant même de servir
+volontairement : lors des essais où le WiFi ne s'associait pas, l'appareil est
+revenu seul au firmware d'origine, sans intervention. C'est une preuve de
+réversibilité plus forte qu'un fichier de sauvegarde jamais restauré.
+
+Les quatre autres critères sont validés sans réserve.
+
+Le pinout du Panda Touch 7 pouces fonctionne tel quel sur la K-Touch 5 pouces,
+affichage **et** tactile, sans aucune adaptation. Détail et mesures dans
+`docs/hardware/pinout.md`. C'est l'apport publiable du jalon : personne ne
+l'avait établi, et la réserve « may differ on a few panel GPIOs or timings » du
+README de Prusa-Connect-Touch est levée.
+
+Le firmware maison a démarré depuis `app1`, tourné 49 minutes sans un seul
+redémarrage — compteur resté à 1, tas libre inchangé à l'octet près — et
+l'appareil est revenu au firmware d'origine sur commande `/revert`. Le firmware
+d'origine n'a jamais été écrasé, et ses identifiants WiFi sont intacts.
+
+**Ce qui a changé par rapport à la conception initiale.** Le port USB-C de
+l'appareil s'est révélé inexploitable : `esptool` hors jeu, donc **aucune
+sauvegarde des 16 Mo**. Tout le filet de sécurité de la section 7 tombait, et la
+tâche d'installation devenait dangereuse — le firmware de preuve de vie n'ayant
+pas de pile réseau, l'installer aurait été un aller sans retour. Le filet a donc
+été déplacé dans le firmware lui-même : sauvetage automatique, compteur de
+démarrages en mémoire RTC, et retour par `/revert`. Les deux premiers ont été
+éprouvés en conditions réelles avant que le troisième ne serve.
+
+**Quatre défauts trouvés en relecture auraient rendu l'appareil définitivement
+injoignable**, et méritent d'être consignés parce qu'aucun n'était visible en
+lisant le code isolément : une écriture de la configuration WiFi dans la NVS
+**partagée entre les deux slots**, qui aurait effacé les identifiants du firmware
+d'origine ; un `ESP_ERROR_CHECK` sur l'initialisation de l'écran, qui
+transformait l'hypothèse même du jalon en boucle de redémarrage plus rapide que
+le minuteur de sauvetage ; un test mémoire PSRAM actif par défaut, qui appelle
+`abort()` depuis `cpu_start.c` avant qu'aucun secours n'existe ; et une route de
+mise à jour qui, depuis `app1`, ne pouvait écrire que sur `app0`.
+
+**Deux pièges d'outillage, à connaître.** `sdkconfig.defaults` ne s'applique
+qu'aux symboles absents du `sdkconfig` déjà généré — un réglage ajouté après la
+première compilation n'a aucun effet, silencieusement. Et la police Montserrat
+compilée par défaut dans LVGL ne couvre que l'ASCII de base : tout caractère
+au-delà s'affiche en carré vide, ce qui compte quand l'écran est le seul canal de
+diagnostic.
+
+## 10. Suite
+
+Les jalons suivants restent à cadrer. Le socle est désormais acquis : matériel
+documenté, firmware compilable, et un chemin d'installation et de retour éprouvé
+qui ne demande qu'un réseau. L'ordre entre l'application Klipper et l'application
+astro reste à décider.
+
+Deux chantiers de rétro-ingénierie restent ouverts et indépendants : le format du
+conteneur `product.img`, toujours non documenté, et le désassemblage du firmware
+d'origine si l'on veut comprendre son protocole plutôt que le remplacer.

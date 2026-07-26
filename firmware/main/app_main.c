@@ -1,0 +1,355 @@
+/* Preuve de vie du jalon 1 : allumer le panneau, afficher une mire lisible et
+ * confirmer que le tactile remonte des coordonnées cohérentes.
+ *
+ * Le pinout utilisé est celui du Panda Touch 7 pouces, fourni par le BSP. Toute
+ * l'expérience consiste à savoir s'il convient tel quel à la K-Touch 5 pouces.
+ *
+ * L'appareil n'est atteignable qu'en WiFi (le port USB-C ne sert qu'à
+ * l'alimentation ici) : ce firmware doit donc porter son propre chemin de
+ * retour. L'ordre de démarrage ci-dessous n'est pas arbitraire — voir le
+ * commentaire au-dessus de app_main(). */
+
+#include <inttypes.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "lvgl.h"
+#include "nvs_flash.h"
+#include "pandatouch_display.h"
+
+#include "netlog.h"
+#include "rescue.h"
+#include "web.h"
+#include "wifi.h"
+
+static const char *TAG = "preuve_de_vie";
+
+/* État affiché en continu, seul canal de diagnostic qui survive à une panne
+ * WiFi sans câble série (voir le commentaire en tête de wifi.c : c'est
+ * exactement ce qui manquait pour diagnostiquer le premier vol matériel).
+ * Renseignés une fois, tout au début d'app_main, avant que build_test_pattern()
+ * ne crée le label qui les affiche. */
+static char partition_label_globale[17] = "?";
+static uint32_t compteur_demarrages_global;
+
+/* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,
+ * ou avant que build_test_pattern() ne s'exécute) : rafraichir_etat_ecran()
+ * s'abstient dans ce cas plutôt que de déréférencer un pointeur nul. */
+static lv_obj_t *label_etat;
+
+static void on_touch(lv_event_t *event)
+{
+    lv_point_t point;
+    lv_indev_get_point(lv_indev_active(), &point);
+    ESP_LOGI(TAG, "appui a x=%d y=%d", (int)point.x, (int)point.y);
+}
+
+/* Reconstruit le texte (deux lignes) de la ligne d'état à partir de l'état
+ * WiFi courant. Appelée sous PT_LVGL_SCOPE_LOCK() par l'appelant —
+ * lv_label_set_text() n'est pas thread-safe vis-à-vis de la tâche LVGL.
+ *
+ * ASCII pur exigé de bout en bout (SSID compris, via strncpy sur des
+ * identifiants qui ne devraient déjà contenir que de l'ASCII) : la police
+ * Montserrat compilée par défaut dans LVGL ne couvre que 0x20-0x7F, un
+ * caractère hors de cette plage s'affiche en carré vide (voir
+ * build_test_pattern()). */
+static void rafraichir_etat_ecran(void)
+{
+    if (label_etat == NULL) {
+        return;
+    }
+
+    /* Première ligne : partition, compteur de démarrages, source des
+     * identifiants (cfg/nvs/aucun) et SSID employé — la lecture qui indique
+     * d'un coup d'œil laquelle des deux configurations a été essayée. */
+    char ssid[33];
+    const char *source = wifi_credential_source(ssid, sizeof(ssid));
+    char ligne1[96];
+    if (ssid[0] != '\0') {
+        snprintf(ligne1, sizeof(ligne1), "%s | boot %" PRIu32 " | %s:%s",
+                 partition_label_globale, compteur_demarrages_global, source, ssid);
+    } else {
+        snprintf(ligne1, sizeof(ligne1), "%s | boot %" PRIu32 " | sans ssid",
+                 partition_label_globale, compteur_demarrages_global);
+    }
+
+    /* Seconde ligne : IP une fois connecté ; sinon la raison de la dernière
+     * déconnexion (le diagnostic qui compte le plus, voir wifi.c) ou, à
+     * défaut, l'erreur synchrone d'esp_wifi_connect() ; toujours accompagnée
+     * du nombre d'essais pour distinguer une tentative isolée d'un blocage
+     * persistant. */
+    char ip[16];
+    bool connectee = wifi_ip_string(ip, sizeof(ip));
+    char raison[40];
+    char erreur_wifi[32];
+    char ligne2[96];
+
+    if (connectee) {
+        snprintf(ligne2, sizeof(ligne2), "wifi: %s", ip);
+    } else if (wifi_last_disconnect_reason(raison, sizeof(raison))) {
+        snprintf(ligne2, sizeof(ligne2), "wifi: %s | essais %" PRIu32, raison, wifi_connect_attempts());
+    } else if (wifi_last_connect_error(erreur_wifi, sizeof(erreur_wifi))) {
+        snprintf(ligne2, sizeof(ligne2), "wifi: %s | essais %" PRIu32, erreur_wifi, wifi_connect_attempts());
+    } else {
+        snprintf(ligne2, sizeof(ligne2), "wifi: connexion... | essais %" PRIu32, wifi_connect_attempts());
+    }
+
+    char texte[192];
+    snprintf(texte, sizeof(texte), "%s\n%s", ligne1, ligne2);
+    lv_label_set_text(label_etat, texte);
+}
+
+static void build_test_pattern(void)
+{
+    lv_obj_t *screen = lv_screen_active();
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x101820), LV_PART_MAIN);
+
+    /* Bandes primaires : un canal de couleur inversé ou une broche de données
+     * flottante se voit immédiatement. */
+    static const uint32_t colours[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFFFF};
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *bar = lv_obj_create(screen);
+        lv_obj_set_size(bar, 200, 80);
+        lv_obj_set_pos(bar, i * 200, 0);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(colours[i]), LV_PART_MAIN);
+        lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
+        lv_obj_set_style_radius(bar, 0, LV_PART_MAIN);
+    }
+
+    lv_obj_t *label = lv_label_create(screen);
+    /* Texte volontairement en ASCII pur : la police Montserrat compilee par
+     * defaut dans LVGL ne couvre que 0x20-0x7F, donc un tiret cadratin ou une
+     * lettre accentuee s'affiche en carre vide. L'ecran etant, faute de port
+     * serie, le seul canal de diagnostic qui survive a une panne de WiFi, sa
+     * lisibilite prime sur la typographie. */
+    lv_label_set_text(label, "K-Touch custom\nslot app1 - preuve de vie");
+    lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+
+    /* Repères de coin : valident que les 800x480 sont bien balayés en entier. */
+    static const lv_align_t corners[] = {
+        LV_ALIGN_TOP_LEFT, LV_ALIGN_TOP_RIGHT,
+        LV_ALIGN_BOTTOM_LEFT, LV_ALIGN_BOTTOM_RIGHT,
+    };
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *marker = lv_obj_create(screen);
+        lv_obj_set_size(marker, 24, 24);
+        lv_obj_align(marker, corners[i], 0, 0);
+        lv_obj_set_style_bg_color(marker, lv_color_hex(0xFFFF00), LV_PART_MAIN);
+        lv_obj_set_style_border_width(marker, 0, LV_PART_MAIN);
+    }
+
+    /* Ligne d'état, ajoutée après le premier vol matériel : la mire (bandes,
+     * repères de coin) reste inchangée ci-dessus, ce sont désormais des
+     * points de repère confirmés bons, à comparer d'un vol à l'autre. Placée
+     * en bas de l'écran, loin des repères de coin (24x24 dans chaque angle)
+     * et des bandes (haut de l'écran) : aucun chevauchement. Sans câble
+     * série, c'est le seul canal de diagnostic qui survive à une panne
+     * WiFi — d'où son importance : voir le commentaire en tête de wifi.c. */
+    label_etat = lv_label_create(screen);
+    lv_obj_set_style_text_color(label_etat, lv_color_white(), LV_PART_MAIN);
+    lv_obj_align(label_etat, LV_ALIGN_BOTTOM_MID, 0, -8);
+    rafraichir_etat_ecran();
+}
+
+void app_main(void)
+{
+    /* Tout au début, avant même le sauvetage : le compteur de démarrages
+     * couvre les pannes trop rapides pour que le minuteur les voie (panique,
+     * chien de garde, débordement de pile), à condition qu'elles surviennent
+     * après cette ligne. Il NE couvre PAS un échec d'initialisation de la
+     * PSRAM : esp_psram_chip_init() tourne depuis cpu_start.c, avant
+     * l'ordonnanceur et avant app_main — la seule parade à cette classe de
+     * pannes est dans sdkconfig.defaults (CONFIG_SPIRAM_IGNORE_NOTFOUND), pas
+     * ici. Le compteur survit aux redémarrages en mémoire RTC. Au-delà de
+     * RESCUE_DEMARRAGES_MAX tentatives consécutives, on ne tente plus rien :
+     * bascule immédiate, sans même armer le minuteur. */
+    uint32_t compteur_demarrages = rescue_count_boot();
+    if (compteur_demarrages > RESCUE_DEMARRAGES_MAX) {
+        /* La remise à zéro n'est pas une coquetterie : esp_restart() est une
+         * réinitialisation logicielle, la mémoire RTC survit donc jusque
+         * dans le firmware d'origine, qui n'y touche jamais. Sans elle, le
+         * compteur resterait à compteur_demarrages ; au prochain flash de ce
+         * firmware par-dessus, il repartirait déjà au-delà du seuil et
+         * basculerait sans jamais avoir tenté de démarrer, cassant la boucle
+         * d'itération décrite dans flashing.md jusqu'à une coupure secteur. */
+        rescue_reset_boot_count();
+        rescue_switch_now();
+        /* rescue_switch_now() délègue à une tâche dédiée et ne bloque pas :
+         * on attend ici, sans rien tenter d'autre, qu'elle redémarre
+         * l'appareil. */
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    /* Le journal réseau doit être en place avant même le sauvetage : sans
+     * port série, /log est le seul endroit où relire après coup la ligne
+     * "sauvetage arme : ... ms" — sans doute la plus utile de tout le
+     * démarrage — et les deux lignes de log qui suivent. Le compteur de
+     * démarrages ci-dessus reste la seule protection si netlog_init()
+     * échouait lui-même avant que le sauvetage ne soit armé. */
+    esp_err_t erreur = netlog_init();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "netlog_init a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    /* Le compte à rebours est armé ensuite, avant l'écran, avant le WiFi,
+     * avant quoi que ce soit d'autre. Une panne à n'importe quel étage
+     * ultérieur (NVS, WiFi, écran, tactile, serveur HTTP) doit rester
+     * rattrapable ; un sauvetage armé après coup ne protégerait pas contre
+     * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
+     * depuis le gestionnaire de IP_EVENT_STA_GOT_IP, dans wifi.c. */
+    ESP_ERROR_CHECK(rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS));
+
+    ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
+             compteur_demarrages, RESCUE_DEMARRAGES_MAX);
+
+    /* Première chose à vérifier dans le journal : ce firmware doit tourner
+     * depuis app1, jamais depuis app0 qui n'est jamais réécrit. */
+    const esp_partition_t *partition_courante = esp_ota_get_running_partition();
+    ESP_LOGI(TAG, "partition d'execution : %s (offset 0x%06" PRIx32 ")",
+             partition_courante != NULL ? partition_courante->label : "?",
+             partition_courante != NULL ? (uint32_t)partition_courante->address : 0);
+
+    /* Renseignés une fois pour la ligne d'état affichée à l'écran (voir
+     * build_test_pattern()/rafraichir_etat_ecran()) : c'est le seul canal de
+     * diagnostic qui survive à une panne WiFi sans câble série. */
+    strlcpy(partition_label_globale, partition_courante != NULL ? partition_courante->label : "?",
+            sizeof(partition_label_globale));
+    compteur_demarrages_global = compteur_demarrages;
+
+    /* La NVS est requise par le WiFi (stockage des paramètres PHY/calibration
+     * et, selon la configuration, des informations de connexion). Le
+     * réflexe habituel d'ESP-IDF sur ESP_ERR_NVS_NO_FREE_PAGES/
+     * ESP_ERR_NVS_NEW_VERSION_FOUND est d'appeler nvs_flash_erase() puis de
+     * réessayer — un réflexe qui NE DOIT JAMAIS s'appliquer ici :
+     * nvs_flash_erase() efface la partition nvs (0x9000) ENTIÈRE, or c'est
+     * justement celle que wifi.c passe onze lignes à expliquer comme
+     * partagée avec le firmware d'origine. ESP_ERR_NVS_NO_FREE_PAGES n'a
+     * rien d'exotique : c'est ce que rend une partition que le firmware
+     * d'origine a remplie. L'effacer détruirait ses identifiants WiFi — le
+     * seul accès de l'appareil — sans qu'aucun secours Kconfig ne soit
+     * garanti configuré (défaut "" dans Kconfig.projbuild). Un échec ici
+     * fait au pire échouer wifi_start() plus bas, non fatal comme les
+     * étages suivants : le sauvetage ramène alors au firmware d'origine
+     * avec sa NVS intacte. Détruire l'état avant d'échouer, ou aborter dans
+     * une boucle de redémarrage via ESP_ERROR_CHECK, sont les deux seules
+     * façons de rendre cet échec irrécupérable — d'où l'absence des deux
+     * ici. */
+    esp_err_t erreur_nvs = nvs_flash_init();
+    if (erreur_nvs != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_flash_init a echoue : %s ; NVS laissee intacte", esp_err_to_name(erreur_nvs));
+    }
+
+    /* Un échec ici n'est volontairement pas fatal : c'est justement le cas
+     * que le sauvetage automatique couvre. Si le WiFi ne se connecte
+     * jamais, rescue_disarm() n'est jamais appelé et le minuteur armé plus
+     * haut rebasculera sur l'autre slot à l'échéance. */
+    erreur = wifi_start();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "wifi_start a echoue : %s ; le sauvetage automatique reste actif", esp_err_to_name(erreur));
+    }
+
+    web_set_boot_count(compteur_demarrages);
+
+    /* Le serveur HTTP démarre ici, juste après le WiFi et AVANT l'écran :
+     * c'est ce qui garantit que /revert et /log restent joignables même si
+     * l'étage suivant (écran) échoue ou abat le processus. Sans cet ordre,
+     * une panne d'affichage emporterait à la fois le sauvetage automatique
+     * (déjà désarmé par une connexion WiFi réussie) et la route manuelle
+     * /revert — les deux voies de secours disparaîtraient d'un coup, sur la
+     * panne la plus probable de ce jalon. */
+    erreur = web_start();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "web_start a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    ESP_LOGI(TAG, "demarrage du firmware de preuve de vie");
+
+    /* Aucune défaillance locale n'est fatale à partir d'ici : ni l'écran, ni
+     * le rétroéclairage, ni le tactile ne sont vérifiés par ESP_ERROR_CHECK
+     * — on journalise et on continue. Un écran mort doit laisser tourner le
+     * WiFi et le serveur, précisément ce qui permet de diagnostiquer à
+     * distance au lieu de constater un appareil muet. pt_backlight_set()
+     * mérite une attention particulière : le BSP de BTT contient ses propres
+     * ESP_ERROR_CHECK sur les appels LEDC, donc un échec à l'intérieur peut
+     * abattre le processus sans que notre code y soit pour quoi que ce soit
+     * — raison de plus pour que WiFi et le serveur HTTP tournent déjà. */
+    esp_err_t erreur_affichage = pt_display_init();
+    if (erreur_affichage != ESP_OK) {
+        ESP_LOGE(TAG, "pt_display_init a echoue : %s", esp_err_to_name(erreur_affichage));
+        ESP_LOGE(TAG, "ecran indisponible, mais WiFi/serveur HTTP restent actifs pour /revert et /log");
+    } else {
+        if (!pt_backlight_set(80)) {
+            ESP_LOGW(TAG, "pt_backlight_set a echoue, l'ecran peut rester sombre");
+        }
+
+        PT_LVGL_SCOPE_LOCK() {
+            build_test_pattern();
+
+            /* Le rappel est enregistré sur le périphérique d'entrée tactile
+             * lui-même, et non sur un widget précis. lv_obj_create() donne par
+             * défaut LV_OBJ_FLAG_CLICKABLE à chaque objet créé, y compris les
+             * huit objets décoratifs de la mire (barres de couleur, repères de
+             * coin) : lv_indev_search_obj() les désigne donc comme cible de
+             * l'appui à la place de l'écran, et l'événement ne remonterait au
+             * parent que si l'enfant portait LV_OBJ_FLAG_EVENT_BUBBLE — ce
+             * qu'aucun d'eux ne fait. Un rappel posé sur l'écran (comme avant)
+             * ne recevait donc rien pour un appui sur une barre ou un repère de
+             * coin. lv_indev_send_event() envoie LV_EVENT_PRESSED aux rappels du
+             * périphérique AVANT de le distribuer à l'objet ciblé (voir
+             * send_event() dans lv_indev.c des sources LVGL vendues ici), quel
+             * que soit l'objet touché ou ses drapeaux : s'abonner ici capture
+             * donc chaque appui, y compris sur les repères de coin qui
+             * garantissent que les 800x480 sont bien balayés jusqu'aux bords. */
+            /* pt_display_init() avale une éventuelle défaillance tactile : si
+             * pt_lvgl_touch_init() échoue en interne (GT911 muet), la fonction
+             * ignore la valeur de retour (voir pandatouch_display.c) et rend
+             * quand même ESP_OK — ESP_ERROR_CHECK ne se déclenche donc jamais
+             * dans ce cas. lv_indev_get_next(NULL) renvoie alors NULL, et un
+             * NULL ici signale une puce tactile silencieuse, pas une erreur de
+             * programmation : il ne faut pas retirer ce test. Sans lui,
+             * lv_indev_add_event_cb() ferait échouer LV_ASSERT_NULL, qui boucle
+             * indéfiniment (LV_USE_ASSERT_NULL=y par défaut) — en tenant le
+             * verrou LVGL, donc sans jamais afficher la mire déjà construite.
+             * Un pinout tactile faux ou une puce GT911 non répondante étant
+             * justement l'hypothèse la plus probable de ce jalon, on dégrade
+             * ici plutôt que de tout bloquer : la mire reste visible et
+             * seul le retour tactile est absent, ce qui distingue clairement
+             * « l'écran marche, pas le tactile » de « rien ne marche ». */
+            lv_indev_t *touch_indev = lv_indev_get_next(NULL);
+            if (touch_indev != NULL) {
+                lv_indev_add_event_cb(touch_indev, on_touch, LV_EVENT_PRESSED, NULL);
+            } else {
+                ESP_LOGW(TAG, "aucun peripherique tactile enregistre : le GT911 n'a pas repondu");
+                ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
+            }
+            web_set_touch_available(touch_indev != NULL);
+        }
+
+        ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
+    }
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        ESP_LOGI(TAG, "toujours vivant");
+
+        /* Rafraîchit la ligne d'état (état WiFi, IP une fois obtenue) sur ce
+         * même battement de 5 s. rafraichir_etat_ecran() s'abstient toute
+         * seule si label_etat est NULL (écran indisponible) ; on prend tout
+         * de même le verrou LVGL seulement quand il y a un écran à
+         * rafraîchir, pour ne pas dépendre d'un verrou jamais initialisé si
+         * pt_display_init() a échoué. */
+        if (label_etat != NULL) {
+            PT_LVGL_SCOPE_LOCK() {
+                rafraichir_etat_ecran();
+            }
+        }
+    }
+}

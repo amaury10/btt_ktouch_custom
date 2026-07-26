@@ -1,0 +1,22 @@
+menu "K-Touch custom"
+
+    config KTOUCH_WIFI_SSID
+        string "SSID du réseau WiFi"
+        default ""
+        help
+            Renseigné via `idf.py menuconfig`. Stocké dans `sdkconfig`, qui est
+            exclu du dépôt : les identifiants ne sont jamais commités.
+
+    config KTOUCH_WIFI_PASSWORD
+        string "Mot de passe WiFi"
+        default ""
+
+    config KTOUCH_RESCUE_TIMEOUT_MS
+        int "Délai avant sauvetage automatique (ms)"
+        default 90000
+        help
+            Si le WiFi n'est pas connecté à l'échéance, le firmware rebascule
+            sur l'autre slot OTA et redémarre. C'est le seul filet qui
+            fonctionne sans réseau ni écran.
+
+endmenu
