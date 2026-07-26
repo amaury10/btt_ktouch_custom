@@ -1,0 +1,31 @@
+# --- Binaires propriétaires BTT : jamais redistribués (aucune licence explicite) ---
+# Récupérables via https://github.com/bigtreetech/K-Touch
+Recovery_tool*/
+vendor/stock/
+*.img
+*.bin
+!**/docs/**/*.bin
+
+# --- Sauvegardes de flash de l'appareil (volumineuses, et porteuses du MAC/NVS) ---
+backups/
+*.flashdump
+
+# --- ESP-IDF / build ---
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+compile_commands.json
+
+# --- Outils ---
+.venv/
+__pycache__/
+*.pyc
+
+# --- Éditeurs / OS ---
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*~
