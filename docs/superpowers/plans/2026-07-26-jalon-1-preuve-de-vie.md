@@ -692,12 +692,13 @@ git commit -m "feat(tools): lecture et fabrication de la partition otadata"
 **Files:**
 - Create: `tools/ktouch/dump.py`
 - Create: `tools/ktouch/__main__.py`
+- Create: `ktouch.py` (lanceur à la racine du dépôt)
 - Create: `docs/hardware/partitions.md`
 - Test: `tests/test_dump.py`
 
 **Interfaces:**
 - Consumes: `ktouch.image.{parse_app_desc, parse_partition_table, Partition, NotAnEspImage}` et `ktouch.otadata.active_slot` des tâches 1 et 2.
-- Produces: `ktouch.dump.STOCK_PARTITIONS: list[Partition]`, `ktouch.dump.FLASH_SIZE = 0x1000000`, `ktouch.dump.inspect_dump(data: bytes) -> DumpReport`, et la dataclasse gelée `DumpReport(size_ok: bool, partitions: list[Partition], partitions_match_stock: bool, app0: AppDesc | None, app1: AppDesc | None, active_slot: int | None)` avec la propriété `safe_to_flash: bool` et la méthode `format() -> str`.
+- Produces: `ktouch.dump.STOCK_PARTITIONS: list[Partition]`, `ktouch.dump.FLASH_SIZE = 0x1000000`, `ktouch.dump.inspect_dump(data: bytes) -> DumpReport`, et la dataclasse gelée `DumpReport(size_ok: bool, partitions: list[Partition], partitions_match_stock: bool, app0: AppDesc | None, app1: AppDesc | None, active_slot: int | None)` avec la propriété `safe_to_flash: bool` (vraie seulement si la taille est bonne, le partitionnement identique au stock **et** `app0` lisible) et la méthode `format() -> str`. Plus le lanceur `ktouch.py` à la racine, qui rend `python ktouch.py <sauvegarde.bin>` utilisable depuis le dépôt sans manipuler `PYTHONPATH`.
 
 C'est le filet de sécurité : aucune écriture sur l'appareil n'aura lieu tant que ce rapport ne confirme pas que la sauvegarde est complète et conforme.
 
@@ -743,6 +744,16 @@ def test_sauvegarde_conforme_est_declaree_sure():
 def test_taille_incorrecte_est_rejetee():
     report = inspect_dump(make_dump(size=0x800000))
     assert report.size_ok is False
+    assert report.safe_to_flash is False
+
+
+def test_app0_illisible_rend_la_sauvegarde_inexploitable():
+    """Une K-Touch d'origine a toujours un app0 : son absence trahit une lecture
+    corrompue, même si la taille et le partitionnement semblent corrects."""
+    report = inspect_dump(make_dump(app0=False))
+    assert report.size_ok is True
+    assert report.partitions_match_stock is True
+    assert report.app0 is None
     assert report.safe_to_flash is False
 
 
@@ -846,8 +857,15 @@ class DumpReport:
 
     @property
     def safe_to_flash(self) -> bool:
-        """Vrai si la sauvegarde permet une restauration intégrale."""
-        return self.size_ok and self.partitions_match_stock
+        """Vrai si la sauvegarde permet une restauration intégrale.
+
+        Exiger un `app0` lisible n'est pas de la coquetterie : une K-Touch
+        d'origine en contient toujours un. S'il est illisible alors que la
+        table de partitions est intacte, c'est le signe d'une lecture
+        corrompue — précisément la sauvegarde sur laquelle il ne faut pas
+        compter comme filet de secours.
+        """
+        return self.size_ok and self.partitions_match_stock and self.app0 is not None
 
     def format(self) -> str:
         lines = [
@@ -893,7 +911,7 @@ def inspect_dump(data: bytes) -> DumpReport:
 `tools/ktouch/__main__.py` :
 
 ```python
-"""Point d'entrée : `python -m ktouch <sauvegarde.bin>`."""
+"""Point d'entrée : `python ktouch.py <sauvegarde.bin>` depuis la racine."""
 
 import sys
 
@@ -902,13 +920,42 @@ from ktouch.dump import inspect_dump
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print("usage : python -m ktouch <sauvegarde.bin>", file=sys.stderr)
+        print("usage : python ktouch.py <sauvegarde.bin>", file=sys.stderr)
         return 2
-    with open(argv[1], "rb") as handle:
-        report = inspect_dump(handle.read())
+    try:
+        with open(argv[1], "rb") as handle:
+            data = handle.read()
+    except OSError as erreur:
+        print(f"lecture impossible : {erreur}", file=sys.stderr)
+        return 2
+    report = inspect_dump(data)
     print(report.format())
     return 0 if report.safe_to_flash else 1
 
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
+```
+
+`ktouch.py`, à la racine du dépôt — sans lui, `python -m ktouch` échoue avec
+`No module named ktouch`, car le paquet vit sous `tools/` et le `pythonpath` de
+`pytest.ini` ne s'applique qu'à pytest :
+
+```python
+"""Lanceur : rend le paquet `ktouch` accessible depuis la racine du dépôt.
+
+Le paquet vit sous `tools/` pour ne pas encombrer la racine, ce qui le rend
+invisible à `python -m ktouch`. Ce lanceur ajoute `tools/` au chemin de
+recherche pour que la commande de vérification, qui est le garde-fou de tout
+le projet, s'exécute telle qu'elle est documentée.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "tools"))
+
+from ktouch.__main__ import main  # noqa: E402  (après ajustement du chemin)
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
@@ -921,7 +968,15 @@ Expected: PASS — les tests des trois tâches, aucun échec.
 
 - [ ] **Step 5: Écrire la documentation du partitionnement**
 
-`docs/hardware/partitions.md` — reprend le tableau des six partitions avec offsets et tailles, explique le mécanisme des deux slots OTA et de l'`otadata` (structure de 32 octets, sélection par `ota_seq` le plus élevé, slot = `(ota_seq - 1) % 2`), et énonce la règle de sécurité : ne jamais écrire à `0x0`, `0x8000` ni `0x10000`. Indique que ces valeurs proviennent de `K-Touch_v1.1.0_partition.bin` du dépôt officiel BTT, et comment les revérifier avec `python -m ktouch`.
+`docs/hardware/partitions.md` — reprend le tableau des six partitions avec offsets et tailles, explique le mécanisme des deux slots OTA et de l'`otadata`, et énonce la règle de sécurité : ne jamais écrire à `0x0`, `0x8000` ni `0x10000`. Indique que ces valeurs proviennent de `K-Touch_v1.1.0_partition.bin` du dépôt officiel BTT, et comment les revérifier avec `python ktouch.py <sauvegarde.bin>`.
+
+Ce document sert à relire un vidage hexadécimal à la main : ses offsets doivent donc être exacts. Points à énoncer sans approximation.
+
+L'`otadata` contient **deux copies indépendantes** de 32 octets, une au début de chaque secteur de 4 Kio — donc aux adresses absolues `0xE000` et `0xF000`, et non aux octets 0-31 et 32-63. Elles ne sont normalement **pas** identiques : c'est justement la différence d'`ota_seq` qui porte le mécanisme de sélection.
+
+La disposition d'une entrée est : octets 0-3 `ota_seq` (uint32 LE), octets 4-23 `seq_label` (20 octets), octets 24-27 `ota_state` (uint32 LE), octets 28-31 `crc` (uint32 LE). Le CRC ne couvre **que** les 4 octets d'`ota_seq`, pas l'entrée entière. Les valeurs d'`ota_state` qu'on rencontre en pratique sont `0x2` VALID, `0x3` INVALID, `0x4` ABORTED et `0xFFFFFFFF` UNDEFINED — en gardant à l'esprit que `0x1` est PENDING_VERIFY et non VALID.
+
+Le bootloader retient l'entrée valide au plus grand `ota_seq` et démarre le slot `(ota_seq - 1) % 2`. **Si aucune entrée n'est valide, le démarrage n'échoue pas** : le bootloader se rabat sur la partition `factory`, et à défaut sur le premier slot OTA — donc sur le firmware d'origine en `app0`. Il faut le dire explicitement, parce que c'est le chemin de secours du projet : effacer l'`otadata` ramène au stock, ça ne brique pas l'appareil.
 
 - [ ] **Step 6: Commit**
 
@@ -1170,7 +1225,7 @@ git commit -m "feat(firmware): projet ESP-IDF minimal de preuve de vie"
 - Create: `backups/` (ignoré par Git — contient le MAC et la NVS de l'appareil)
 
 **Interfaces:**
-- Consumes: `python -m ktouch` de la tâche 3.
+- Consumes: `python ktouch.py` de la tâche 3.
 - Produces: `backups/ktouch-stock-<date>.bin`, une sauvegarde de 16 777 216 octets vérifiée, et la réponse à la question ouverte de la spec : quel firmware se trouve réellement sur l'appareil.
 
 Première tâche nécessitant le matériel. Elle n'écrit rien : elle ne fait que lire.
@@ -1217,7 +1272,7 @@ Expected: `Read 16777216 bytes`, en deux à trois minutes. Ne rien débrancher p
 - [ ] **Step 5: Vérifier la sauvegarde**
 
 ```powershell
-python -m ktouch backups/ktouch-stock-2026-07-26.bin
+python ktouch.py backups/ktouch-stock-2026-07-26.bin
 ```
 
 Expected: `Taille : 16 Mio, conforme`, `Partitionnement : identique au stock`, et `Sauvegarde exploitable : OUI`. Le rapport indique aussi le contenu de chaque slot.
