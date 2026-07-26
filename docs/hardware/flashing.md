@@ -26,6 +26,70 @@ Le remplacement du filet, c'est le firmware lui-même : voir
 `firmware/main/rescue.c`, `wifi.c`, `netlog.c` et `web.c`. Ce document décrit
 comment s'en servir.
 
+## Installer le firmware sur l'appareil
+
+L'installation passe par le mécanisme OTA du **firmware d'origine**, qui écrit
+dans le slot inactif et bascule le démarrage lui-même. C'est la voie la plus
+sûre : on ne manipule aucun offset à la main.
+
+### 1. Vérifier l'état de départ
+
+```powershell
+curl.exe -s http://<ip-de-la-k-touch>/update/identity
+```
+
+Attendu : un JSON du type `{"id": "V1.0.0", "hardware": "ESP32"}`. Noter cette
+version — c'est ce à quoi l'appareil doit revenir ensuite.
+
+> Si cette requête échoue, **s'arrêter**. Un appareil déjà injoignable avant
+> toute écriture ne doit pas en recevoir une.
+
+### 2. Vérifier que le binaire est le bon
+
+```powershell
+python ktouch-cli.py image firmware/build/ktouch-custom.bin
+```
+
+Attendu : `puce : ESP32-S3`, `projet : ktouch-custom`, et une taille très
+inférieure aux 4 718 592 octets du slot.
+
+> **N'installer qu'un firmware capable de revenir en arrière.** Un firmware sans
+> pile réseau — une simple mire, par exemple — n'a aucun moyen de reprendre la
+> main une fois démarré, et sans accès série c'est un aller sans retour.
+
+### 3. Téléverser
+
+Ouvrir `http://<ip-de-la-k-touch>/update` dans un navigateur et sélectionner
+`firmware/build/ktouch-custom.bin`. La page annonce la fin du téléversement puis
+le redémarrage.
+
+> **Un refus est sans conséquence.** Si l'OTA d'origine rejette l'image, rien
+> n'a été écrit et l'appareil continue de tourner normalement. Ce n'est pas un
+> échec, c'est une information — et il ne faut pas chercher à contourner le
+> contrôle.
+
+### 4. Constater
+
+Laisser une minute, puis lire l'écran. La ligne d'état en bas indique le slot,
+le compteur de démarrages, la source des identifiants WiFi et l'adresse IP une
+fois connectée :
+
+```
+app1 | boot 1 | cfg:MonReseau
+wifi: 192.168.1.42
+```
+
+Puis, à distance :
+
+```powershell
+curl.exe -s http://<ip-de-la-k-touch>/status
+curl.exe -s http://<ip-de-la-k-touch>/log
+```
+
+> Si rien ne répond au bout de deux minutes, **ne rien faire** : le sauvetage
+> automatique décrit plus bas ramène l'appareil au firmware d'origine tout seul.
+> Attendre, puis le vérifier avec `curl.exe -s http://<ip>/update/identity`.
+
 ## Les trois mécanismes, du plus manuel au plus automatique
 
 | Mécanisme | Déclencheur | Dépend de |
@@ -86,7 +150,7 @@ n'est jamais écrasé dans son slot, revenir au stock ne demande aucun
 téléversement :
 
 ```bash
-curl -X POST http://<ip-de-la-k-touch>/revert
+curl.exe -X POST http://<ip-de-la-k-touch>/revert
 ```
 
 L'appareil bascule immédiatement sur l'autre slot (`app0`, le firmware
@@ -154,7 +218,7 @@ repasse à chaque fois par le firmware d'origine, et ne touche jamais `app0` :
 1. `/revert` sur le firmware custom (s'il tourne encore et que le WiFi
    répond) — retour au firmware d'origine dans `app0` :
    ```bash
-   curl -X POST http://<ip-de-la-k-touch>/revert
+   curl.exe -X POST http://<ip-de-la-k-touch>/revert
    ```
    Si le WiFi ne répondait pas du tout, le sauvetage automatique (minuteur ou
    compteur de démarrages, voir plus haut) a déjà fait ce même retour tout

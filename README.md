@@ -50,6 +50,19 @@ Les deux premiers ont été éprouvés en conditions réelles avant que le trois
 ne serve : lors des essais où le WiFi ne s'associait pas, l'appareil est revenu
 au stock tout seul, deux fois.
 
+## Contenu du dépôt
+
+| Chemin | Rôle |
+|---|---|
+| [`firmware/`](firmware/) | Le firmware ESP-IDF et ses instructions de compilation — voir [`firmware/README.md`](firmware/README.md) |
+| [`tools/ktouch/`](tools/ktouch/) | Bibliothèque Python (standard uniquement) : images ESP32, table de partitions, `otadata` |
+| `ktouch-cli.py` | Lanceur : `verify`, `otadata`, `make-otadata`, `image` |
+| [`docs/hardware/`](docs/hardware/) | Pinout vérifié, partitionnement, procédure d'installation et de retour |
+
+Pour compiler, il faut ESP-IDF v5.5.5 et renseigner son réseau WiFi ; tout est
+dans [`firmware/README.md`](firmware/README.md). Pour l'outillage Python,
+`python -m pip install -r tools/requirements.txt` puis `python -m pytest`.
+
 ## Avertissement
 
 Reprogrammer l'appareil se fait à vos risques. La démarche est conçue pour être

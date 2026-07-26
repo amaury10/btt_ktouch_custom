@@ -12,7 +12,7 @@ La K-Touch dispose d'une flash de 16 Mio (0x1000000 octets) partitionnée selon 
 | otadata | data | ota | 0xE000 | 0x2000 (8 Kio) | Métadonnées OTA |
 | app0 | app | ota_0 | 0x10000 | 0x480000 (4608 Kio) | Slot OTA 0 (firmware actif ou passif) |
 | app1 | app | ota_1 | 0x490000 | 0x480000 (4608 Kio) | Slot OTA 1 (firmware actif ou passif) |
-| spiffs | data | spiffs | 0x910000 | 0x6E0000 (7104 Kio) | Système de fichiers |
+| spiffs | data | spiffs | 0x910000 | 0x6E0000 (7040 Kio) | Système de fichiers |
 | coredump | data | coredump | 0xFF0000 | 0x10000 (64 Kio) | Vidage de cœur (crash) |
 
 ## Mécanisme OTA (Over-The-Air)
@@ -55,9 +55,19 @@ Les adresses suivantes **ne doivent jamais être écrites** sans une vérificati
 
 Toute erreur d'écriture à ces adresses rend l'appareil inutilisable.
 
-## Vérification de la sauvegarde
+## Vérification d'une sauvegarde — si vous en avez une
 
-Avant toute opération de programmation, une sauvegarde complète de 16 Mio est créée et vérifiée à l'aide de :
+> **Sur l'appareil de développement de ce projet, aucune sauvegarde n'est
+> possible.** Son port USB-C est inexploitable, donc `esptool` est hors jeu et le
+> flash ne peut pas être lu. La réversibilité repose entièrement sur des
+> mécanismes embarqués dans le firmware — voir
+> [`flashing.md`](flashing.md), à lire avant toute manipulation.
+>
+> Cette section vaut donc pour qui **dispose** d'un accès série. Si c'est votre
+> cas, prenez la sauvegarde : c'est un filet strictement supérieur à tout ce que
+> le firmware peut offrir, puisqu'il permet une restauration octet par octet.
+
+Avec un accès série, la sauvegarde se prend par `esptool` puis se vérifie ainsi :
 
 ```bash
 python ktouch-cli.py verify <sauvegarde.bin>

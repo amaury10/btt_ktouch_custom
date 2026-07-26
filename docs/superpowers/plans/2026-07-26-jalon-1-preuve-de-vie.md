@@ -6,7 +6,7 @@
 
 **Architecture:** Deux moitiés indépendantes. Une bibliothèque Python côté PC (`tools/ktouch/`) qui sait lire les structures ESP32 — en-têtes d'images, table de partitions, `otadata` — et qui est développée en TDD pur, sans matériel. Un projet ESP-IDF (`firmware/`) qui s'appuie sur le composant `PandaTouch_IDF` de BTT référencé en sous-module Git. Le matériel n'intervient qu'à partir de la tâche 6, une fois l'outillage validé et le firmware rendu réversible, ce qui garantit qu'on ne touche jamais à l'appareil avec du code non testé.
 
-**Accès à l'appareil : WiFi uniquement.** Le port USB-C de la K-Touch n'est pas exploitable dans ce montage, donc `esptool` est hors jeu et **aucune sauvegarde des 16 Mo n'est possible**. Le filet de sécurité initial — dumper puis restaurer octet par octet — est remplacé par trois mécanismes embarqués dans le firmware lui-même, construits à la tâche 5 : un sauvetage automatique qui rebascule sur le firmware d'origine si le réseau ne répond pas, un retour manuel par `/revert`, et une mise à jour par `/update` pour itérer sans câble. La bibliothèque Python reste utile pour analyser les images et fabriquer une `otadata`, mais elle ne pilote plus l'appareil.
+**Accès à l'appareil : WiFi uniquement.** Le port USB-C de la K-Touch n'est pas exploitable dans ce montage, donc `esptool` est hors jeu et **aucune sauvegarde des 16 Mo n'est possible**. Le filet de sécurité initial — dumper puis restaurer octet par octet — est remplacé par trois mécanismes embarqués dans le firmware lui-même, construits à la tâche 5 : un sauvetage automatique qui rebascule sur le firmware d'origine si le réseau ne répond pas, un retour manuel par `/revert`, et un compteur de démarrages en mémoire RTC. **Notre firmware n'expose aucune route de mise à jour** : tournant depuis `app1`, il ne pourrait écrire que sur `app0`, donc sur le firmware d'origine — l'itération repasse par le `/update` du stock (voir la tâche 5). La bibliothèque Python reste utile pour analyser les images et fabriquer une `otadata`, mais elle ne pilote plus l'appareil.
 
 **Tech Stack:** Python 3.14 + pytest 9 (déjà installés) · ESP-IDF v5.5.5 (déjà installée) · LVGL 9 · ESP32-S3 · HTTP sur le réseau local pour tout dialogue avec l'appareil.
 
@@ -1644,9 +1644,23 @@ Lire la configuration héritée avec `esp_wifi_get_config(WIFI_IF_STA, &config)`
 
 `CONFIG_KTOUCH_WIFI_SSID` et `CONFIG_KTOUCH_WIFI_PASSWORD` ne servent que de **secours**, pour le cas où l'appareil n'aurait aucune configuration enregistrée. La règle d'application est stricte, et dans cet ordre :
 
+> **Révisé après le second vol matériel — cette priorité a été inversée.** Le
+> texte ci-dessous décrivait l'intention initiale ; le firmware livré fait
+> l'inverse, et pour une raison précise. `esp_wifi_get_config()` ne rend pas
+> qu'un SSID : il rend aussi un éventuel `sta.bssid_set` épinglé sur le point
+> d'accès auquel le firmware d'origine s'était associé, plus son canal, sa
+> méthode de balayage et ses seuils. Hériter de tout ça en bloc a empêché
+> l'association pendant deux essais. La priorité livrée est donc : **Kconfig
+> d'abord s'il est renseigné**, configuration reconstruite à neuf sans BSSID
+> épinglé ; l'héritage NVS ne sert qu'en repli, et son BSSID est effacé avant
+> usage. Le stockage restant en `WIFI_STORAGE_RAM`, aucune des deux branches ne
+> peut écrire dans la NVS partagée — cette garantie-là est inchangée.
+
+Intention initiale, conservée pour mémoire :
+
 1. lire la configuration héritée avec `esp_wifi_get_config(WIFI_IF_STA, &config)` ;
-2. **si son SSID est non vide, s'en servir telle quelle et ignorer complètement les options Kconfig** — la NVS de l'appareil fait toujours autorité ;
-3. seulement si le SSID hérité est vide, et seulement si `CONFIG_KTOUCH_WIFI_SSID` est renseigné, appliquer le secours par `esp_wifi_set_config()`.
+2. si son SSID est non vide, s'en servir telle quelle et ignorer les options Kconfig ;
+3. seulement si le SSID hérité est vide, appliquer le secours par `esp_wifi_set_config()`.
 
 Comme le stockage est déjà passé en `WIFI_STORAGE_RAM` à l'étape précédente, même ce chemin de secours ne peut pas écrire dans la NVS. Journaliser laquelle des deux sources a été retenue, mais **ne jamais journaliser le mot de passe** — le journal est exposé en HTTP sur `/log`.
 
@@ -1956,7 +1970,7 @@ git commit -m "docs: resultat du jalon 1 et pinout de la K-Touch"
 
 Relecture du plan face à la spec, effectuée après rédaction.
 
-**Couverture de la spec.** Les cinq critères de succès du jalon 1 sont couverts : sauvegarde de 16 777 216 octets et table de partitions conforme (tâche 5, étapes 4 et 5) ; démarrage depuis `app1` (tâche 6, étape 5) ; rétroéclairage et mire sans artefact (tâche 6, étape 6) ; coordonnées tactiles cohérentes dans le journal (tâche 6, étape 6) ; retour au stock effectué au moins une fois (tâche 7, étapes 1 et 2). La contrainte de non-modification de la table de partitions est portée par les contraintes globales et rappelée dans `partitions.csv`. La stratégie de sous-module qui évite toute redistribution est mise en œuvre à la tâche 4, étape 2, et l'issue de licence à la tâche 7, étape 5.
+**Couverture de la spec.** Les cinq critères de succès du jalon 1 sont couverts : sauvegarde de 16 777 216 octets — **critère devenu impossible**, le port USB-C étant inexploitable, remplacé par la réversibilité embarquée éprouvée deux fois en conditions réelles ; démarrage depuis `app1` (tâche 6, étape 5) ; rétroéclairage et mire sans artefact (tâche 6, étape 6) ; coordonnées tactiles cohérentes dans le journal (tâche 6, étape 6) ; retour au stock effectué au moins une fois (tâche 7, étapes 1 et 2). La contrainte de non-modification de la table de partitions est portée par les contraintes globales et rappelée dans `partitions.csv`. La stratégie de sous-module qui évite toute redistribution est mise en œuvre à la tâche 4, étape 2, et l'issue de licence à la tâche 7, étape 5.
 
 **Cohérence des noms.** `parse_app_desc`, `parse_partition_table`, `parse_image_header` et `NotAnEspImage` sont définis à la tâche 1 et consommés tels quels aux tâches 3 et 4. `active_slot`, `build_otadata`, `parse_otadata` et `seq_crc` sont définis à la tâche 2 et consommés aux tâches 3, 6 et 7. `STOCK_PARTITIONS` et `FLASH_SIZE` sont définis à la tâche 3 et utilisés par ses propres tests. `tests/test_dump.py` importe ses fixtures depuis `test_image.py`, ce que rend possible le `pythonpath`/`testpaths` de `pytest.ini`.
 

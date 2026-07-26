@@ -2,7 +2,9 @@
 
 **Date :** 2026-07-26
 **Dépôt :** https://github.com/amaury10/btt_ktouch_custom
-**Statut :** conception validée, jalon 1 à planifier
+**Statut :** jalon 1 atteint le 26 juillet 2026 — voir la section 9. Les
+sections 1 à 8 conservent la conception d'origine ; là où la réalité l'a
+démentie, la section 9 le dit.
 
 ---
 
@@ -231,6 +233,11 @@ revenir. En dernier recours, le flash complet est
 reprogrammable en USB-C via le CH340K, et le dump initial permet une restauration
 octet par octet. Aucune étape du jalon 1 n'est irréversible.
 
+> **Démenti par les faits.** Le port USB-C s'est révélé inexploitable sur
+> l'appareil de développement : ni dump, ni reprogrammation série. Ce paragraphe
+> et le critère de succès qui suit décrivent un filet de sécurité qui n'a jamais
+> existé. Ce qui l'a remplacé est décrit en section 9.
+
 **Critères de succès.** Le dump fait 16 777 216 octets et son contenu à
 l'offset `0x8000` correspond à la table de partitions attendue. Le firmware
 maison démarre depuis `app1`. Le rétroéclairage s'allume et une image de test
@@ -249,8 +256,23 @@ documentation, pas un prérequis.
 
 ## 9. Résultat du jalon 1 — atteint le 26 juillet 2026
 
-**Les cinq critères de réussite sont validés**, malgré une contrainte apparue en
-cours de route qui a fait tomber la méthode initiale.
+**Quatre des cinq critères de réussite sont validés. Le cinquième est devenu
+impossible**, et c'est une distinction qui mérite d'être faite honnêtement
+plutôt que gommée.
+
+Le critère resté hors d'atteinte est le premier : « le dump fait 16 777 216
+octets ». Aucune sauvegarde n'a été prise, parce qu'aucune n'était possible — le
+port USB-C de l'appareil s'est révélé inexploitable, donc `esptool` hors jeu.
+Ce n'est pas un critère raté par négligence, c'est un critère dont la
+prémisse matérielle était fausse.
+
+Il a été remplacé par un filet embarqué dans le firmware, et ce remplacement a
+été **éprouvé deux fois en conditions réelles** avant même de servir
+volontairement : lors des essais où le WiFi ne s'associait pas, l'appareil est
+revenu seul au firmware d'origine, sans intervention. C'est une preuve de
+réversibilité plus forte qu'un fichier de sauvegarde jamais restauré.
+
+Les quatre autres critères sont validés sans réserve.
 
 Le pinout du Panda Touch 7 pouces fonctionne tel quel sur la K-Touch 5 pouces,
 affichage **et** tactile, sans aucune adaptation. Détail et mesures dans

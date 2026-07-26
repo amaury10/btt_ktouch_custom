@@ -29,8 +29,12 @@ affiche une mire choisie pour que chaque défaut de câblage se voie.
 | Image **stable, sans scintillement** | Horloge pixel et porches viables à 23 MHz |
 | Rétroéclairage allumé | `GPIO21` et la configuration LEDC corrects |
 
-L'appareil est ensuite revenu de lui-même au firmware d'origine par le mécanisme
-de sauvetage automatique, ce qui confirme que la manipulation est réversible.
+La réversibilité a été démontrée de deux façons distinctes, et il vaut la peine
+de ne pas les confondre. Lors d'essais antérieurs où le WiFi ne s'associait pas,
+l'appareil est **revenu seul** au firmware d'origine, deux fois, par le mécanisme
+de sauvetage automatique embarqué. Puis, l'essai concluant terminé, il y est
+retourné **sur commande** via la route `/revert`. Le premier cas prouve que le
+retour survit à une panne ; le second, qu'il est disponible à la demande.
 
 ## Panneau LCD — RGB parallèle 16 bits, mode DE
 
@@ -117,10 +121,10 @@ correct n'implique en rien un tactile correctement orienté.
 
 ## Stabilité
 
-L'appareil a fonctionné plus de trente minutes sous ce firmware sans un seul
-redémarrage — compteur de démarrages resté à 1, tas libre inchangé à 7,4 Mo
-entre deux relevés espacés. Ni chien de garde, ni panique, ni fuite mémoire
-observable.
+L'appareil a fonctionné **49 minutes** sous ce firmware sans un seul redémarrage
+— compteur de démarrages resté à 1, tas libre inchangé à l'octet près (7 399 519)
+entre deux relevés espacés d'une demi-heure. Ni chien de garde, ni panique, ni
+fuite mémoire observable.
 
 ## Sources
 

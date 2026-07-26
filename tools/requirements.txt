@@ -1,1 +1,9 @@
-esptool>=4.7
+# La bibliotheque `ktouch` n'utilise que la bibliotheque standard : il n'y a
+# rien a installer pour s'en servir. Cette liste ne couvre que l'outillage de
+# test.
+pytest>=8
+
+# esptool n'est PAS liste volontairement. Il ne sert qu'avec un acces serie au
+# port USB-C, indisponible sur l'appareil de ce projet : voir
+# docs/hardware/flashing.md. Si vous disposez d'un tel acces, installez-le a la
+# demande avec `python -m pip install "esptool>=4.7"`.
