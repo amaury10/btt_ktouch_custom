@@ -1,12 +1,43 @@
-# Issue à ouvrir chez BIGTREETECH
+# La licence manquante de `PandaTouch_IDF`
 
-**Dépôt cible :** https://github.com/bigtreetech/PandaTouch_IDF/issues/new
+Ce document consigne le constat de licence qui a déterminé l'architecture du
+dépôt, et conserve un texte de signalement rédigé mais **non envoyé**.
 
-Le texte ci-dessous est prêt à être copié. Il est en anglais, langue d'usage sur
-ce dépôt. À poster manuellement : ouvrir une issue chez un tiers engage ton
-identité GitHub, ce n'est pas une action que l'outillage doit faire à ta place.
+## Le constat
 
-Une fois postée, ajouter le lien de l'issue dans la section Licence du `README.md`.
+Le composant [`bigtreetech/PandaTouch_IDF`](https://github.com/bigtreetech/PandaTouch_IDF),
+dont provient tout le support matériel utilisé ici, affiche dans son README un
+badge « License: MIT » pointant vers un fichier `LICENSE` **qui n'existe pas**.
+L'API de licence de GitHub ne détecte aucune licence sur ce dépôt.
+
+Du code publié sans licence reste sous droit d'auteur plein : les conditions
+d'utilisation de GitHub permettent de le consulter et de le forker sur la
+plateforme, pas de le redistribuer ni de l'inclure dans une œuvre dérivée.
+
+## La conséquence, déjà appliquée
+
+Le composant est référencé en **sous-module Git** et n'est jamais recopié dans ce
+dépôt. Rien de son code n'est redistribué ici. C'est la seule raison de ce choix
+d'architecture, qui serait autrement inutilement contraignant.
+
+À noter que d'autres projets vendorisent le composant en se fiant au badge — le
+fichier `NOTICE` de `nomadsgalaxy/Prusa-Connect-Touch` le liste comme
+« BigTreeTech, MIT ». Cette affirmation repose sur la même image décorative.
+
+## Repli si la situation devait gêner
+
+Réécrire proprement le support matériel : les numéros de broches et les timings
+sont des faits, non protégeables — et `docs/hardware/pinout.md` les documente
+désormais indépendamment, vérifiés sur matériel. Le reste n'est qu'une couche de
+collage au-dessus de `esp_lcd_rgb_panel` et `esp_lcd_touch_gt911`, tous deux
+publiés par Espressif sous Apache-2.0.
+
+## Signalement rédigé, non envoyé
+
+Le texte ci-dessous a été préparé pour une issue chez BIGTREETECH, puis mis de
+côté. Il est conservé au cas où la question redeviendrait d'actualité — par
+exemple si l'on souhaitait un jour intégrer le composant plutôt que le
+référencer. **Rien n'a été publié chez un tiers.**
 
 ---
 
@@ -55,18 +86,3 @@ to others: <lien vers docs/hardware/pinout.md une fois le dépôt public>
 ```
 
 ---
-
-## Pourquoi cette démarche
-
-Ce n'est pas une formalité. La licence du composant est le point qui a
-déterminé l'architecture du dépôt : sans fichier `LICENSE`, il est référencé en
-sous-module et jamais recopié, ce qui évite toute redistribution. Si BTT ajoute
-le fichier, cette contrainte tombe et le composant pourra être intégré
-normalement — voire forké pour y corriger les défauts relevés en chemin, comme
-les `ESP_ERROR_CHECK` de `pt_backlight_init()` qui rendent une défaillance LEDC
-fatale pour l'application appelante.
-
-Si BTT ne répond pas, le repli reste la réécriture propre du support matériel :
-les numéros de broches et les timings sont des faits, non protégeables, et le
-reste n'est qu'une couche de collage au-dessus de `esp_lcd_rgb_panel` et
-`esp_lcd_touch_gt911`, tous deux publiés par Espressif sous Apache-2.0.
