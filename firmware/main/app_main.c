@@ -64,13 +64,13 @@ static void rafraichir_etat_ecran(void)
     char texte[96];
 
     if (connectee) {
-        snprintf(texte, sizeof(texte), "%s — boot %" PRIu32 " — %s",
+        snprintf(texte, sizeof(texte), "%s | boot %" PRIu32 " | %s",
                  partition_label_globale, compteur_demarrages_global, ip);
     } else if (wifi_last_connect_error(erreur_wifi, sizeof(erreur_wifi))) {
-        snprintf(texte, sizeof(texte), "%s — boot %" PRIu32 " — wifi: %s",
+        snprintf(texte, sizeof(texte), "%s | boot %" PRIu32 " | wifi: %s",
                  partition_label_globale, compteur_demarrages_global, erreur_wifi);
     } else {
-        snprintf(texte, sizeof(texte), "%s — boot %" PRIu32 " — wifi: connexion...",
+        snprintf(texte, sizeof(texte), "%s | boot %" PRIu32 " | wifi: connexion...",
                  partition_label_globale, compteur_demarrages_global);
     }
 
@@ -95,7 +95,12 @@ static void build_test_pattern(void)
     }
 
     lv_obj_t *label = lv_label_create(screen);
-    lv_label_set_text(label, "K-Touch custom\nslot app1 — preuve de vie");
+    /* Texte volontairement en ASCII pur : la police Montserrat compilee par
+     * defaut dans LVGL ne couvre que 0x20-0x7F, donc un tiret cadratin ou une
+     * lettre accentuee s'affiche en carre vide. L'ecran etant, faute de port
+     * serie, le seul canal de diagnostic qui survive a une panne de WiFi, sa
+     * lisibilite prime sur la typographie. */
+    lv_label_set_text(label, "K-Touch custom\nslot app1 - preuve de vie");
     lv_obj_set_style_text_color(label, lv_color_white(), LV_PART_MAIN);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
 
