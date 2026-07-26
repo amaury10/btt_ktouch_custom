@@ -13,6 +13,7 @@
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
@@ -71,9 +72,23 @@ static void build_test_pattern(void)
 
 void app_main(void)
 {
-    /* L'ordre qui suit est dicté par le sauvetage, pas par la lisibilité :
-     * le compte à rebours est armé EN TOUT PREMIER, avant l'écran, avant le
-     * WiFi, avant quoi que ce soit d'autre. Une panne à n'importe quel étage
+    /* Tout au début, avant même le sauvetage : le compteur de démarrages
+     * couvre les pannes trop rapides pour que le minuteur les voie (panique,
+     * chien de garde, débordement de pile, échec d'initialisation de la
+     * PSRAM...). Il survit aux redémarrages en mémoire RTC. Au-delà de
+     * RESCUE_DEMARRAGES_MAX tentatives consécutives, on ne tente plus rien :
+     * bascule immédiate, sans même armer le minuteur. */
+    uint32_t compteur_demarrages = rescue_count_boot();
+    ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
+             compteur_demarrages, RESCUE_DEMARRAGES_MAX);
+    if (compteur_demarrages > RESCUE_DEMARRAGES_MAX) {
+        ESP_LOGE(TAG, "boucle de redemarrage detectee, bascule immediate vers l'autre slot");
+        rescue_switch_to_other_slot();
+        esp_restart();
+    }
+
+    /* Le compte à rebours est armé ensuite, avant l'écran, avant le WiFi,
+     * avant quoi que ce soit d'autre. Une panne à n'importe quel étage
      * ultérieur (NVS, WiFi, écran, tactile, serveur HTTP) doit rester
      * rattrapable ; un sauvetage armé après coup ne protégerait pas contre
      * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
@@ -116,69 +131,84 @@ void app_main(void)
         ESP_LOGE(TAG, "wifi_start a echoue : %s ; le sauvetage automatique reste actif", esp_err_to_name(erreur));
     }
 
-    ESP_LOGI(TAG, "demarrage du firmware de preuve de vie");
+    web_set_boot_count(compteur_demarrages);
 
-    /* pt_display_init() enregistre déjà le périphérique d'entrée tactile en
-     * interne : il appelle pt_lvgl_touch_init(pt_disp, 800, 480) lui-même
-     * (voir pandatouch_display.c). Il n'y a donc pas d'appel explicite à
-     * pt_lvgl_touch_init() ici — le brief d'origine en supposait un avant
-     * l'ajout du sous-module, mais la vraie signature
-     * (lv_indev_t *pt_lvgl_touch_init(lv_display_t*, int, int)) ne
-     * correspond de toute façon pas à l'appel sans argument imaginé, et
-     * l'appeler nous-mêmes créerait un second périphérique d'entrée. */
-    ESP_ERROR_CHECK(pt_display_init());
-    pt_backlight_set(80);
-
-    PT_LVGL_SCOPE_LOCK() {
-        build_test_pattern();
-
-        /* Le rappel est enregistré sur le périphérique d'entrée tactile
-         * lui-même, et non sur un widget précis. lv_obj_create() donne par
-         * défaut LV_OBJ_FLAG_CLICKABLE à chaque objet créé, y compris les
-         * huit objets décoratifs de la mire (barres de couleur, repères de
-         * coin) : lv_indev_search_obj() les désigne donc comme cible de
-         * l'appui à la place de l'écran, et l'événement ne remonterait au
-         * parent que si l'enfant portait LV_OBJ_FLAG_EVENT_BUBBLE — ce
-         * qu'aucun d'eux ne fait. Un rappel posé sur l'écran (comme avant)
-         * ne recevait donc rien pour un appui sur une barre ou un repère de
-         * coin. lv_indev_send_event() envoie LV_EVENT_PRESSED aux rappels du
-         * périphérique AVANT de le distribuer à l'objet ciblé (voir
-         * send_event() dans lv_indev.c des sources LVGL vendues ici), quel
-         * que soit l'objet touché ou ses drapeaux : s'abonner ici capture
-         * donc chaque appui, y compris sur les repères de coin qui
-         * garantissent que les 800x480 sont bien balayés jusqu'aux bords. */
-        /* pt_display_init() avale une éventuelle défaillance tactile : si
-         * pt_lvgl_touch_init() échoue en interne (GT911 muet), la fonction
-         * ignore la valeur de retour (voir pandatouch_display.c) et rend
-         * quand même ESP_OK — ESP_ERROR_CHECK ne se déclenche donc jamais
-         * dans ce cas. lv_indev_get_next(NULL) renvoie alors NULL, et un
-         * NULL ici signale une puce tactile silencieuse, pas une erreur de
-         * programmation : il ne faut pas retirer ce test. Sans lui,
-         * lv_indev_add_event_cb() ferait échouer LV_ASSERT_NULL, qui boucle
-         * indéfiniment (LV_USE_ASSERT_NULL=y par défaut) — en tenant le
-         * verrou LVGL, donc sans jamais afficher la mire déjà construite.
-         * Un pinout tactile faux ou une puce GT911 non répondante étant
-         * justement l'hypothèse la plus probable de ce jalon, on dégrade
-         * ici plutôt que de tout bloquer : la mire reste visible et
-         * seul le retour tactile est absent, ce qui distingue clairement
-         * « l'écran marche, pas le tactile » de « rien ne marche ». */
-        lv_indev_t *touch_indev = lv_indev_get_next(NULL);
-        if (touch_indev != NULL) {
-            lv_indev_add_event_cb(touch_indev, on_touch, LV_EVENT_PRESSED, NULL);
-        } else {
-            ESP_LOGW(TAG, "aucun peripherique tactile enregistre : le GT911 n'a pas repondu");
-            ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
-        }
-        web_set_touch_available(touch_indev != NULL);
-    }
-
-    ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
-
-    /* Dernier étage : le serveur HTTP, qui expose /revert et /update. Un
-     * échec ici aussi reste non fatal, pour la même raison que le WiFi. */
+    /* Le serveur HTTP démarre ici, juste après le WiFi et AVANT l'écran :
+     * c'est ce qui garantit que /revert et /log restent joignables même si
+     * l'étage suivant (écran) échoue ou abat le processus. Sans cet ordre,
+     * une panne d'affichage emporterait à la fois le sauvetage automatique
+     * (déjà désarmé par une connexion WiFi réussie) et la route manuelle
+     * /revert — les deux voies de secours disparaîtraient d'un coup, sur la
+     * panne la plus probable de ce jalon. */
     erreur = web_start();
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "web_start a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    ESP_LOGI(TAG, "demarrage du firmware de preuve de vie");
+
+    /* Aucune défaillance locale n'est fatale à partir d'ici : ni l'écran, ni
+     * le rétroéclairage, ni le tactile ne sont vérifiés par ESP_ERROR_CHECK
+     * — on journalise et on continue. Un écran mort doit laisser tourner le
+     * WiFi et le serveur, précisément ce qui permet de diagnostiquer à
+     * distance au lieu de constater un appareil muet. pt_backlight_set()
+     * mérite une attention particulière : le BSP de BTT contient ses propres
+     * ESP_ERROR_CHECK sur les appels LEDC, donc un échec à l'intérieur peut
+     * abattre le processus sans que notre code y soit pour quoi que ce soit
+     * — raison de plus pour que WiFi et le serveur HTTP tournent déjà. */
+    esp_err_t erreur_affichage = pt_display_init();
+    if (erreur_affichage != ESP_OK) {
+        ESP_LOGE(TAG, "pt_display_init a echoue : %s", esp_err_to_name(erreur_affichage));
+        ESP_LOGE(TAG, "ecran indisponible, mais WiFi/serveur HTTP restent actifs pour /revert et /log");
+    } else {
+        if (!pt_backlight_set(80)) {
+            ESP_LOGW(TAG, "pt_backlight_set a echoue, l'ecran peut rester sombre");
+        }
+
+        PT_LVGL_SCOPE_LOCK() {
+            build_test_pattern();
+
+            /* Le rappel est enregistré sur le périphérique d'entrée tactile
+             * lui-même, et non sur un widget précis. lv_obj_create() donne par
+             * défaut LV_OBJ_FLAG_CLICKABLE à chaque objet créé, y compris les
+             * huit objets décoratifs de la mire (barres de couleur, repères de
+             * coin) : lv_indev_search_obj() les désigne donc comme cible de
+             * l'appui à la place de l'écran, et l'événement ne remonterait au
+             * parent que si l'enfant portait LV_OBJ_FLAG_EVENT_BUBBLE — ce
+             * qu'aucun d'eux ne fait. Un rappel posé sur l'écran (comme avant)
+             * ne recevait donc rien pour un appui sur une barre ou un repère de
+             * coin. lv_indev_send_event() envoie LV_EVENT_PRESSED aux rappels du
+             * périphérique AVANT de le distribuer à l'objet ciblé (voir
+             * send_event() dans lv_indev.c des sources LVGL vendues ici), quel
+             * que soit l'objet touché ou ses drapeaux : s'abonner ici capture
+             * donc chaque appui, y compris sur les repères de coin qui
+             * garantissent que les 800x480 sont bien balayés jusqu'aux bords. */
+            /* pt_display_init() avale une éventuelle défaillance tactile : si
+             * pt_lvgl_touch_init() échoue en interne (GT911 muet), la fonction
+             * ignore la valeur de retour (voir pandatouch_display.c) et rend
+             * quand même ESP_OK — ESP_ERROR_CHECK ne se déclenche donc jamais
+             * dans ce cas. lv_indev_get_next(NULL) renvoie alors NULL, et un
+             * NULL ici signale une puce tactile silencieuse, pas une erreur de
+             * programmation : il ne faut pas retirer ce test. Sans lui,
+             * lv_indev_add_event_cb() ferait échouer LV_ASSERT_NULL, qui boucle
+             * indéfiniment (LV_USE_ASSERT_NULL=y par défaut) — en tenant le
+             * verrou LVGL, donc sans jamais afficher la mire déjà construite.
+             * Un pinout tactile faux ou une puce GT911 non répondante étant
+             * justement l'hypothèse la plus probable de ce jalon, on dégrade
+             * ici plutôt que de tout bloquer : la mire reste visible et
+             * seul le retour tactile est absent, ce qui distingue clairement
+             * « l'écran marche, pas le tactile » de « rien ne marche ». */
+            lv_indev_t *touch_indev = lv_indev_get_next(NULL);
+            if (touch_indev != NULL) {
+                lv_indev_add_event_cb(touch_indev, on_touch, LV_EVENT_PRESSED, NULL);
+            } else {
+                ESP_LOGW(TAG, "aucun peripherique tactile enregistre : le GT911 n'a pas repondu");
+                ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
+            }
+            web_set_touch_available(touch_indev != NULL);
+        }
+
+        ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
     }
 
     while (true) {

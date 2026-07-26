@@ -55,20 +55,27 @@ static void sur_evenement(void *arg, esp_event_base_t base, int32_t id, void *do
         snprintf(adresse_ip, sizeof(adresse_ip), IPSTR, IP2STR(&evenement->ip_info.ip));
         connectee = true;
         ESP_LOGI(TAG, "adresse IP : %s", adresse_ip);
-        /* Seul endroit du firmware qui désarme le sauvetage. */
+        /* Seul endroit du firmware qui désarme le sauvetage et qui remet le
+         * compteur de démarrages à zéro : une connexion réussie prouve que ce
+         * firmware est viable. */
         rescue_disarm();
+        rescue_reset_boot_count();
     }
 }
 
 esp_err_t wifi_start(void)
 {
+    /* ESP_ERR_INVALID_STATE signifie simplement « déjà initialisé » pour ces
+     * deux appels — ce n'est pas un échec ici, tant que quelqu'un d'autre l'a
+     * fait avant nous (rien d'autre dans ce firmware ne le fait, mais rester
+     * tolérant coûte peu et évite d'abandonner le WiFi pour un faux positif). */
     esp_err_t erreur = esp_netif_init();
-    if (erreur != ESP_OK) {
+    if (erreur != ESP_OK && erreur != ESP_ERR_INVALID_STATE) {
         return erreur;
     }
 
     erreur = esp_event_loop_create_default();
-    if (erreur != ESP_OK) {
+    if (erreur != ESP_OK && erreur != ESP_ERR_INVALID_STATE) {
         return erreur;
     }
 

@@ -30,47 +30,46 @@ comment s'en servir.
 
 | Mécanisme | Déclencheur | Dépend de |
 |---|---|---|
-| Mise à jour (`/update`) | requête HTTP volontaire | WiFi fonctionnel |
 | Retour manuel (`/revert`) | requête HTTP volontaire | WiFi fonctionnel |
-| Sauvetage automatique | absence de connexion WiFi à l'échéance | rien — ni écran, ni tactile, ni réseau |
+| Sauvetage automatique (minuteur) | absence de connexion WiFi à l'échéance | rien — ni écran, ni tactile, ni réseau |
+| Sauvetage automatique (compteur de démarrages) | plus de `RESCUE_DEMARRAGES_MAX` redémarrages consécutifs | rien — survit même à une panique ou un chien de garde |
 
-Le firmware n'écrit **jamais** dans `app0`. Toute écriture (`/update`, comme le
-sauvetage automatique) cible `esp_ota_get_next_update_partition(NULL)`, qui
-désigne toujours le slot inactif — `app1` tant que le firmware custom tourne
-depuis `app0`, et inversement. Il n'y a pas de calcul d'offset à la main nulle
-part dans ce code.
+**Ce firmware n'écrit jamais dans une partition applicative, ni `app0` ni
+`app1`.** La seule écriture flash de tout le firmware est celle d'`otadata`
+(8 Kio), qui désigne le slot de démarrage — dans `rescue.c`, en dernier
+recours seulement, si le bootloader refuse la bascule normale.
+
+## Pourquoi il n'y a pas de route `/update` sur ce firmware
+
+C'est contre-intuitif, et c'est le point que la conception initiale de ce
+document avait faux : **l'itération sur le pinout ne passe pas par notre
+firmware**, mais toujours par celui d'origine.
+
+Ce firmware custom tourne depuis `app1` — c'est le slot que l'OTA du firmware
+d'origine choisit pour lui. Avec seulement deux slots OTA, le « slot inactif »
+vu depuis `app1` est donc `app0`, celui du firmware d'origine. Un `/update`
+sur notre firmware n'aurait nulle part ailleurs où écrire, et
+`esp_ota_begin(OTA_SIZE_UNKNOWN)` efface la partition cible **avant** de
+recevoir le moindre octet : la première mise à jour effacerait donc le
+firmware d'origine lui-même, après quoi le sauvetage n'aurait plus rien vers
+quoi basculer. C'est pourquoi ce firmware n'expose aucune route de mise à
+jour, et pourquoi `web.c` ne contient aucun `esp_ota_begin`/`esp_ota_write`.
 
 ## Routes HTTP exposées
 
 Le serveur écoute sur le port 80, à l'adresse IP journalisée au démarrage
-(`adresse IP : ...` dans les logs, visible aussi via `/status`).
+(`adresse IP : ...` dans les logs, et rapportée dans `/status`).
 
 | Route | Méthode | Rôle |
 |---|---|---|
 | `/` | GET | page d'état minimale, avec liens vers les autres routes |
-| `/status` | GET | JSON : slot en cours, version, temps depuis le démarrage, mémoire libre, tactile disponible ou non |
+| `/status` | GET | JSON : slot en cours, version, adresse IP, temps depuis le démarrage, mémoire libre, tactile disponible ou non, compteur de démarrages |
 | `/log` | GET | texte brut, contenu du journal réseau en RAM (dernières lignes de log) |
 | `/revert` | POST | bascule vers l'autre slot OTA et redémarre |
-| `/update` | POST | reçoit une image applicative brute (`.bin`), l'écrit dans le slot inactif et redémarre dessus |
 
-`/revert` et `/update` sont en **POST** délibérément : en GET, n'importe quelle
-requête d'un navigateur, d'un aspirateur de liens ou d'un scanner réseau
-redémarrerait l'appareil.
-
-## Installer le firmware d'origine par WiFi (sans câble)
-
-Utile si l'appareil tourne déjà sur le firmware custom et qu'on veut revenir
-au stock BIGTREETECH sans passer par `/revert` (par exemple pour réinstaller
-une version différente de celle actuellement dans `app0`) :
-
-```bash
-curl -X POST --data-binary @K-Touch_v1.1.0_app.bin http://<ip-de-la-k-touch>/update
-```
-
-L'image doit être une image applicative ESP-IDF brute (pas l'image de flash
-complète 16 Mio) — le type d'image qu'`esptool` écrirait normalement à
-l'offset `0x10000` ou `0x490000`. L'appareil écrit l'image dans le slot
-inactif, bascule le boot dessus, puis redémarre.
+`/revert` est en **POST** délibérément : en GET, n'importe quelle requête d'un
+navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait
+l'appareil.
 
 ## Revenir au firmware d'origine (le WiFi marche, l'affichage est raté)
 
@@ -84,41 +83,65 @@ téléversement :
 curl -X POST http://<ip-de-la-k-touch>/revert
 ```
 
-L'appareil bascule immédiatement sur l'autre slot et redémarre dessus.
+L'appareil bascule immédiatement sur l'autre slot (`app0`, le firmware
+d'origine) et redémarre dessus.
 
-## Sauvetage automatique (le WiFi ne répond pas du tout)
+## Sauvetage automatique (le WiFi ne répond pas du tout, ou l'appareil boucle)
 
-C'est le seul mécanisme qui fonctionne quand tout va mal : il ne dépend ni du
-réseau, ni de l'écran, ni du tactile. Au démarrage, avant même de tenter quoi
-que ce soit d'autre, un compte à rebours de `CONFIG_KTOUCH_RESCUE_TIMEOUT_MS`
-(90 secondes par défaut) est armé. Si le WiFi n'est pas connecté à son
-échéance — mauvais SSID, mot de passe incorrect, réseau hors de portée — le
-firmware bascule seul la partition de démarrage sur l'autre slot et
-redémarre. Aucune intervention n'est nécessaire : il suffit d'attendre.
+Deux mécanismes indépendants, qui ne dépendent ni du réseau, ni de l'écran, ni
+du tactile :
+
+**Le minuteur** couvre les pannes plus lentes que son échéance
+(`CONFIG_KTOUCH_RESCUE_TIMEOUT_MS`, 90 secondes par défaut). Armé tout au
+début d'`app_main`, avant l'écran, avant le WiFi, il ne dépend que de
+lui-même. Si le WiFi n'est pas connecté à son échéance — mauvais SSID, mot de
+passe incorrect, réseau hors de portée —, le firmware bascule seul la
+partition de démarrage sur l'autre slot et redémarre.
 
 Le seul endroit du firmware qui désarme ce minuteur est le gestionnaire de
 `IP_EVENT_STA_GOT_IP` dans `wifi.c`, c'est-à-dire une connexion WiFi
 effectivement réussie (adresse IP obtenue). Rien d'autre ne le désarme.
 
+**Le compteur de démarrages** couvre tout ce que le minuteur ne voit pas : une
+panne plus rapide que 90 secondes — panique, chien de garde, débordement de
+pile, échec d'initialisation de la PSRAM. Il vit en mémoire RTC
+(`RTC_NOINIT_ATTR`), donc survit à un redémarrage logiciel comme à une
+panique, mais pas à une coupure d'alimentation. Incrémenté tout au début
+d'`app_main`, avant même le minuteur, il bascule immédiatement l'appareil sur
+l'autre slot dès qu'il dépasse trois démarrages consécutifs sans qu'une
+adresse IP n'ait jamais été obtenue. Une connexion WiFi réussie le remet à
+zéro, au même endroit que le minuteur.
+
+Dans les deux cas, aucune intervention n'est nécessaire : il suffit d'attendre
+que l'appareil se rétablisse de lui-même.
+
 ## Itérer sur le pinout (le cas d'usage principal de ce jalon)
 
-Corriger un pinout mal deviné demande plusieurs essais. Le cycle, sans jamais
-débrancher l'appareil :
+Corriger un pinout mal deviné demande plusieurs essais. La boucle correcte
+repasse à chaque fois par le firmware d'origine, et ne touche jamais `app0` :
 
-1. Corriger le code, recompiler (`idf.py build`).
-2. Envoyer le nouveau binaire :
+1. `/revert` sur le firmware custom (s'il tourne encore et que le WiFi
+   répond) — retour au firmware d'origine dans `app0` :
    ```bash
-   curl -X POST --data-binary @firmware/build/ktouch-custom.bin http://<ip-de-la-k-touch>/update
+   curl -X POST http://<ip-de-la-k-touch>/revert
    ```
-3. L'appareil redémarre sur le nouveau binaire, réarme le sauvetage, retente
-   le WiFi. Si le nouveau code casse quelque chose avant que le WiFi ne se
-   connecte, le sauvetage automatique ramène l'appareil au slot précédent
-   (celui d'où l'on vient de faire `/update`, puisque c'est justement le
-   slot qui devient inactif) 90 secondes plus tard — sans jamais toucher à
-   `app0`.
-4. Une fois la bonne adresse IP retrouvée (elle peut changer d'un
-   redémarrage à l'autre selon le bail DHCP), consulter `/log` pour lire les
-   logs de démarrage et confirmer ce qui a changé.
+   Si le WiFi ne répondait pas du tout, le sauvetage automatique (minuteur ou
+   compteur de démarrages, voir plus haut) a déjà fait ce même retour tout
+   seul — cette étape est alors inutile.
+2. Corriger le code, recompiler (`idf.py build`).
+3. `/update` **du firmware d'origine**, pas du nôtre — c'est lui qui expose
+   cette route, et c'est lui qui tourne à ce stade puisqu'on vient d'y
+   revenir. Il écrit la nouvelle version dans le slot inactif (`app1`) et
+   démarre dessus.
+4. Essai, observation. Si le nouveau code casse quelque chose avant que le
+   WiFi ne se connecte, le sauvetage automatique ramène l'appareil au
+   firmware d'origine dans `app0` de lui-même, sans jamais y avoir touché.
+5. Retour à l'étape 1.
+
+Une fois la bonne adresse IP du firmware custom retrouvée (elle peut changer
+d'un redémarrage à l'autre selon le bail DHCP — `/status` sur le firmware
+d'origine ou les journaux réseau permettent de la retrouver), consulter
+`/log` pour lire les logs de démarrage et confirmer ce qui a changé.
 
 ## Retrouver une voie série, si le besoin s'en fait sentir
 

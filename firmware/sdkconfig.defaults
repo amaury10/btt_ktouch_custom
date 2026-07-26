@@ -20,6 +20,21 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 
+# --- Sauvetage (rescue.c) : ces trois réglages sont désormais une garantie de
+# sécurité, pas de simples valeurs par défaut, et sont donc pinnés ici. ---
+# Une panique doit toujours redémarrer l'appareil (jamais s'arrêter en
+# attendant un débogueur) : c'est ce qui permet au compteur de démarrages en
+# RTC_NOINIT_ATTR de détecter une boucle de redémarrage et de rebasculer.
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+# Un dépassement du chien de garde applicatif doit lui aussi provoquer une
+# panique — donc un redémarrage — et pas seulement un message : sans ça, une
+# tâche bloquée ne redémarre jamais et aucun sauvetage ne se déclenche.
+CONFIG_ESP_TASK_WDT_PANIC=y
+# Le rappel du minuteur de sauvetage (rescue.c) ne fait plus que réveiller une
+# tâche dédiée (voir tache_sur_echeance) : cette pile reste volontairement
+# étroite, la valeur par défaut suffit largement.
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=3584
+
 CONFIG_FREERTOS_HZ=1000
 CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_COLOR_MIX_ROUND_OFS=0
