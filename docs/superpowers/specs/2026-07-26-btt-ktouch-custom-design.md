@@ -146,13 +146,27 @@ LittleFS, ni FAT**, malgré le sous-type déclaré. Son en-tête (`00 00 2b 00 e
 nom de fichier en clair. C'est un format maison non documenté — cible de RE à
 part entière, dont dépendrait toute capacité à re-thématiser l'interface stock.
 
-Un point à vérifier au premier dump : le pack de recovery utilisé localement
-contient du firmware **Panda Touch** (projet interne `knomi_p1`, chaînes
-`BTT PANDA-TOUCH SETTING`, API `api.bambulab.com`), et son journal de flash
-atteste d'une écriture complète réussie sur un ESP32 le 19 novembre 2024. Il est
-donc possible que l'appareil ne porte pas actuellement le firmware K-Touch
-d'origine. Le dump du jalon 1 le dira sans
-ambiguïté, et cette information conditionne la valeur de la sauvegarde.
+**Question résolue : l'appareil porte bien le firmware K-Touch d'origine.** Un
+doute existait, parce que le pack de recovery présent localement contient du
+firmware **Panda Touch** (projet interne `knomi_p1`, API `api.bambulab.com`) et
+que son journal atteste d'une écriture complète réussie sur un ESP32 le
+19 novembre 2024. L'appareil, joignable sur le réseau local, sert une page de
+configuration dont le titre visible est « BTT K TOUCH SETTINGS MANAGER ». Or
+cette chaîne n'existe que dans le binaire K-Touch ; le firmware Panda Touch ne
+contient qu'une variante « PANDA-TOUCH ».
+
+Piège à connaître au passage : le binaire K-Touch contient **les deux** chaînes,
+et sa balise `<title>` annonce « BTT PANDA-TOUCH SETTINGS MANAGER » — vestige du
+tronc commun que BTT n'a pas renommé. Se fier au titre de l'onglet du navigateur
+mène donc à la conclusion inverse de la bonne ; c'est le `<h1>` qui distingue les
+deux appareils.
+
+Conséquence pratique pour le jalon 1 : cette page expose un point d'entrée
+`update`, c'est-à-dire le mécanisme OTA du fabricant. Il constitue une voie
+d'installation alternative à la manipulation manuelle d'`otadata`, et
+potentiellement plus sûre puisque c'est le firmware d'origine qui gère alors la
+bascule de slot. À évaluer une fois la sauvegarde faite, sans remplacer le dump
+qui reste le préalable absolu.
 
 ## 6. Architecture
 
