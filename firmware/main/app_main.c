@@ -49,31 +49,58 @@ static void on_touch(lv_event_t *event)
     ESP_LOGI(TAG, "appui a x=%d y=%d", (int)point.x, (int)point.y);
 }
 
-/* Reconstruit le texte de la ligne d'état à partir de l'état WiFi courant.
- * Appelée sous PT_LVGL_SCOPE_LOCK() par l'appelant — lv_label_set_text()
- * n'est pas thread-safe vis-à-vis de la tâche LVGL. */
+/* Reconstruit le texte (deux lignes) de la ligne d'état à partir de l'état
+ * WiFi courant. Appelée sous PT_LVGL_SCOPE_LOCK() par l'appelant —
+ * lv_label_set_text() n'est pas thread-safe vis-à-vis de la tâche LVGL.
+ *
+ * ASCII pur exigé de bout en bout (SSID compris, via strncpy sur des
+ * identifiants qui ne devraient déjà contenir que de l'ASCII) : la police
+ * Montserrat compilée par défaut dans LVGL ne couvre que 0x20-0x7F, un
+ * caractère hors de cette plage s'affiche en carré vide (voir
+ * build_test_pattern()). */
 static void rafraichir_etat_ecran(void)
 {
     if (label_etat == NULL) {
         return;
     }
 
-    char ip[16];
-    bool connectee = wifi_ip_string(ip, sizeof(ip));
-    char erreur_wifi[32];
-    char texte[96];
-
-    if (connectee) {
-        snprintf(texte, sizeof(texte), "%s | boot %" PRIu32 " | %s",
-                 partition_label_globale, compteur_demarrages_global, ip);
-    } else if (wifi_last_connect_error(erreur_wifi, sizeof(erreur_wifi))) {
-        snprintf(texte, sizeof(texte), "%s | boot %" PRIu32 " | wifi: %s",
-                 partition_label_globale, compteur_demarrages_global, erreur_wifi);
+    /* Première ligne : partition, compteur de démarrages, source des
+     * identifiants (cfg/nvs/aucun) et SSID employé — la lecture qui indique
+     * d'un coup d'œil laquelle des deux configurations a été essayée. */
+    char ssid[33];
+    const char *source = wifi_credential_source(ssid, sizeof(ssid));
+    char ligne1[96];
+    if (ssid[0] != '\0') {
+        snprintf(ligne1, sizeof(ligne1), "%s | boot %" PRIu32 " | %s:%s",
+                 partition_label_globale, compteur_demarrages_global, source, ssid);
     } else {
-        snprintf(texte, sizeof(texte), "%s | boot %" PRIu32 " | wifi: connexion...",
+        snprintf(ligne1, sizeof(ligne1), "%s | boot %" PRIu32 " | sans ssid",
                  partition_label_globale, compteur_demarrages_global);
     }
 
+    /* Seconde ligne : IP une fois connecté ; sinon la raison de la dernière
+     * déconnexion (le diagnostic qui compte le plus, voir wifi.c) ou, à
+     * défaut, l'erreur synchrone d'esp_wifi_connect() ; toujours accompagnée
+     * du nombre d'essais pour distinguer une tentative isolée d'un blocage
+     * persistant. */
+    char ip[16];
+    bool connectee = wifi_ip_string(ip, sizeof(ip));
+    char raison[40];
+    char erreur_wifi[32];
+    char ligne2[96];
+
+    if (connectee) {
+        snprintf(ligne2, sizeof(ligne2), "wifi: %s", ip);
+    } else if (wifi_last_disconnect_reason(raison, sizeof(raison))) {
+        snprintf(ligne2, sizeof(ligne2), "wifi: %s | essais %" PRIu32, raison, wifi_connect_attempts());
+    } else if (wifi_last_connect_error(erreur_wifi, sizeof(erreur_wifi))) {
+        snprintf(ligne2, sizeof(ligne2), "wifi: %s | essais %" PRIu32, erreur_wifi, wifi_connect_attempts());
+    } else {
+        snprintf(ligne2, sizeof(ligne2), "wifi: connexion... | essais %" PRIu32, wifi_connect_attempts());
+    }
+
+    char texte[192];
+    snprintf(texte, sizeof(texte), "%s\n%s", ligne1, ligne2);
     lv_label_set_text(label_etat, texte);
 }
 
