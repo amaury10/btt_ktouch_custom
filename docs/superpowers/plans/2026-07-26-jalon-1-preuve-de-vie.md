@@ -1592,7 +1592,29 @@ void rescue_disarm(void)
 
 - [ ] **Step 3: Écrire la connexion WiFi**
 
-`firmware/main/wifi.c` — station classique ESP-IDF : `esp_netif_init`, boucle d'événements par défaut, `esp_netif_create_default_wifi_sta`, `esp_wifi_init` avec la configuration par défaut, mode `WIFI_MODE_STA`, SSID et mot de passe issus de `CONFIG_KTOUCH_WIFI_SSID` / `CONFIG_KTOUCH_WIFI_PASSWORD`, puis `esp_wifi_start`.
+> ### ⚠ Le piège qui briquerait l'appareil définitivement
+>
+> La partition `nvs` (`0x9000`) est **partagée par les deux slots applicatifs**. Le firmware d'origine y range ses identifiants WiFi dans l'espace de noms standard d'ESP-IDF — vérifié dans son binaire, qui contient `nvs.net80211` et `sta.ssid`.
+>
+> Or `esp_wifi_set_config()` **persiste dans cette NVS**, puisque le stockage par défaut est `WIFI_STORAGE_FLASH`. Appeler cette fonction avec un SSID vide effacerait donc les identifiants du firmware d'origine.
+>
+> L'enchaînement serait sans retour : notre firmware ne se connecte pas, le sauvetage se déclenche, l'appareil rebascule sur le firmware d'origine — **qui n'a plus de WiFi**. Et comme le WiFi est le seul accès, l'appareil devient définitivement injoignable. Le sauvetage aurait parfaitement fonctionné tout en rendant la situation irrécupérable.
+>
+> **Deux règles en découlent, non négociables.** Appeler `esp_wifi_set_storage(WIFI_STORAGE_RAM)` juste après `esp_wifi_init()`, pour qu'aucune écriture de configuration ne puisse jamais atteindre la NVS. Et ne pas appeler `esp_wifi_set_config()` du tout dans le cas normal.
+
+**Notre firmware n'a pas besoin d'identifiants : il hérite de ceux du firmware d'origine.** C'est la conséquence heureuse du même partage de NVS. `esp_wifi_init()` charge la configuration station déjà enregistrée ; il suffit ensuite d'appeler `esp_wifi_connect()` pour rejoindre le même réseau, sans que le SSID ni le mot de passe transitent où que ce soit.
+
+`firmware/main/wifi.c` — station ESP-IDF, dans cet ordre : `esp_netif_init`, boucle d'événements par défaut, `esp_netif_create_default_wifi_sta`, `esp_wifi_init` avec la configuration par défaut, **puis immédiatement `esp_wifi_set_storage(WIFI_STORAGE_RAM)`**, mode `WIFI_MODE_STA`, `esp_wifi_start`, et enfin `esp_wifi_connect()`.
+
+Lire la configuration héritée avec `esp_wifi_get_config(WIFI_IF_STA, &config)` après `esp_wifi_init()` et journaliser le SSID trouvé — c'est le premier indice à consulter si la connexion échoue. Si aucun SSID n'est enregistré, le journaliser en avertissement explicite et laisser le sauvetage faire son office.
+
+`CONFIG_KTOUCH_WIFI_SSID` et `CONFIG_KTOUCH_WIFI_PASSWORD` ne servent que de **secours**, pour le cas où l'appareil n'aurait aucune configuration enregistrée. La règle d'application est stricte, et dans cet ordre :
+
+1. lire la configuration héritée avec `esp_wifi_get_config(WIFI_IF_STA, &config)` ;
+2. **si son SSID est non vide, s'en servir telle quelle et ignorer complètement les options Kconfig** — la NVS de l'appareil fait toujours autorité ;
+3. seulement si le SSID hérité est vide, et seulement si `CONFIG_KTOUCH_WIFI_SSID` est renseigné, appliquer le secours par `esp_wifi_set_config()`.
+
+Comme le stockage est déjà passé en `WIFI_STORAGE_RAM` à l'étape précédente, même ce chemin de secours ne peut pas écrire dans la NVS. Journaliser laquelle des deux sources a été retenue, mais **ne jamais journaliser le mot de passe** — le journal est exposé en HTTP sur `/log`.
 
 Sur `WIFI_EVENT_STA_DISCONNECTED`, relancer `esp_wifi_connect()` — une coupure passagère ne doit pas déclencher le sauvetage tant que le délai n'est pas écoulé. Sur `IP_EVENT_STA_GOT_IP`, mémoriser l'adresse, journaliser `adresse IP : %s`, et **appeler `rescue_disarm()`** — c'est le seul endroit du firmware qui désarme le minuteur.
 
