@@ -1,6 +1,6 @@
 # Pinout de la BIGTREETECH K-Touch — vérifié sur matériel
 
-**Statut : affichage confirmé le 26 juillet 2026. Tactile non encore vérifié.**
+**Statut : affichage et tactile confirmés sur matériel le 26 juillet 2026.**
 
 ## Ce que ce document apporte
 
@@ -10,9 +10,9 @@ par BIGTREETECH dans son composant `PandaTouch_IDF`, et le projet
 `nomadsgalaxy/Prusa-Connect-Touch` notait dans son README que la K-Touch « is the
 same family but **may differ on a few panel GPIOs or timings** ».
 
-**Cette réserve est levée pour la partie affichage : le pinout du Panda Touch
-7 pouces fonctionne tel quel sur la K-Touch 5 pouces**, aux valeurs exactes
-reproduites ci-dessous, sans aucune adaptation.
+**Cette réserve est levée : le pinout du Panda Touch 7 pouces fonctionne tel quel
+sur la K-Touch 5 pouces**, affichage comme tactile, aux valeurs exactes
+reproduites ci-dessous et sans aucune adaptation.
 
 ## Comment la vérification a été faite
 
@@ -72,9 +72,7 @@ Broches de données, dans l'ordre `DATA0` à `DATA15` :
 Piloté en PWM par le périphérique LEDC : `LEDC_TIMER_1`, canal `LEDC_CHANNEL_0`,
 mode basse vitesse, résolution 11 bits, fréquence 30 kHz.
 
-## Tactile GT911 — **non encore vérifié**
-
-Valeurs héritées du Panda Touch, **à confirmer** :
+## Tactile GT911 — confirmé
 
 | Signal | GPIO |
 |---|---|
@@ -84,19 +82,45 @@ Valeurs héritées du Panda Touch, **à confirmer** :
 | Interruption | `40` |
 
 Registres : état `0x814E`, premier point `0x814F`, jusqu'à 5 points simultanés.
+Le contrôleur répond à l'adresse I²C `0x5D`.
 
-La vérification demande de lire les coordonnées remontées lors d'un appui, ce qui
-n'a pas encore été possible : le journal du firmware n'est accessible que par le
-réseau, et le WiFi ne s'est pas connecté lors du premier essai. Le firmware
-n'ayant pas signalé de GT911 muet, rien ne laisse présager de problème — mais
-tant que des coordonnées cohérentes n'ont pas été observées, ce tableau reste une
-hypothèse et non un résultat.
+Traces d'initialisation obtenues sur l'appareil :
 
-## Ce qui reste ouvert
+```
+PandaTouch::Touch: ACK 0x5D (no reset)
+PandaTouch::Touch: STATUS=0x00
+PandaTouch::Touch: PT_GT911 ready @ 0x5D
+PandaTouch::LVGL_Touch: PT GT911 LVGL indev registered (800x480 touch -> 800x480 disp)
+```
 
-L'orientation et la mise à l'échelle du tactile ne sont pas vérifiées non plus :
-des coordonnées inversées ou en miroir se règlent dans le GT911 et non dans le
-panneau, ce sont deux réglages indépendants.
+### Orientation et échelle — vérifiées
+
+Les quatre repères de la mire ont leurs centres en `(12,12)`, `(788,12)`,
+`(788,468)` et `(12,468)`. Appuyés dans le sens des aiguilles d'une montre en
+partant du coin supérieur gauche, ils ont remonté :
+
+| Ordre d'appui | Coin physique | Coordonnées lues |
+|---|---|---|
+| 1 | haut-gauche | `(27, 23)` |
+| 2 | haut-droite | `(784, 21)` |
+| 3 | bas-droite | `(777, 459)` |
+| 4 | bas-gauche | `(27, 460)` |
+
+La correspondance est directe : **aucune rotation, aucun miroir, aucune
+inversion d'axe**, et l'échelle est correcte sur les deux axes. Les écarts d'une
+dizaine de pixels par rapport aux centres théoriques correspondent à la surface
+de contact d'un doigt.
+
+C'est un point qui méritait vérification et non déduction : l'orientation du
+tactile se règle dans le GT911, indépendamment du panneau. Un pinout d'affichage
+correct n'implique en rien un tactile correctement orienté.
+
+## Stabilité
+
+L'appareil a fonctionné plus de trente minutes sous ce firmware sans un seul
+redémarrage — compteur de démarrages resté à 1, tas libre inchangé à 7,4 Mo
+entre deux relevés espacés. Ni chien de garde, ni panique, ni fuite mémoire
+observable.
 
 ## Sources
 
