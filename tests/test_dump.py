@@ -1,9 +1,5 @@
 """Tests de la vérification d'une sauvegarde complète du flash (16 Mio)."""
 
-import struct
-
-import pytest
-
 from ktouch.dump import FLASH_SIZE, STOCK_PARTITIONS, inspect_dump
 from ktouch.otadata import build_otadata
 

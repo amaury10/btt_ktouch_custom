@@ -17,7 +17,7 @@ from ktouch.image import (
     parse_app_desc,
     parse_partition_table,
 )
-from ktouch.otadata import active_slot as read_active_slot
+from ktouch.otadata import OTADATA_SIZE, active_slot as read_active_slot
 
 FLASH_SIZE = 0x1000000  # 16 Mio
 PARTITION_TABLE_OFFSET = 0x8000
@@ -34,7 +34,6 @@ STOCK_PARTITIONS = [
 ]
 
 OTADATA_OFFSET = 0xE000
-OTADATA_SIZE = 0x2000
 
 
 @dataclass(frozen=True)

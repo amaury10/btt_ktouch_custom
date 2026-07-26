@@ -24,15 +24,21 @@ La K-Touch supporte deux slots d'application (`app0` et `app1`), permettant une 
 La partition `otadata` (8 Kio à l'adresse 0xE000) contient deux copies identiques de 32 octets chacune :
 
 - **Octets 0-3** : `ota_seq` — nombre de séquence (incrémenté à chaque mise à jour)
-- **Octets 4-7** : CRC-32-LE du champ précédent
-- **Octets 8-31** : réservé et rempli de 0xFF
+- **Octets 4-23** : `seq_label` — étiquette de séquence (20 octets, généralement 0xFF)
+- **Octets 24-27** : `ota_state` — état du slot
+  - `0x00000002` (VALID) : slot valide et peut être bootable
+  - `0x00000003` (INVALID) : slot invalide, à ignorer
+  - `0x00000004` (ABORTED) : mise à jour avortée, à ignorer
+  - `0xFFFFFFFF` (UNDEFINED) : non initialisé
+- **Octets 28-31** : CRC-32-LE calculé **uniquement sur les 4 octets d'`ota_seq`**
 
 Le slot actif est déterminé par la formule : **slot = (ota_seq - 1) % 2**
 
 Lorsqu'une mise à jour OTA arrive :
-1. Le nouvel application est écrit dans le slot inactif
+1. Le nouvel application est écrit dans le slot inactif avec `ota_state = 0x00000001` (PENDING_VERIFY)
 2. Un nouvel `ota_seq` (le plus élevé des deux copies + 1) est écrit dans `otadata`
-3. La K-Touch sélectionne le slot correspondant au nouvel `ota_seq`
+3. À la prochaine validation du boot, le bootloader accepte le nouveau slot et met à jour `ota_state` à VALID
+4. Si le boot échoue avant la validation, le bootloader revient au slot précédent et marque le nouveau avec ABORTED
 
 Chaque copie de la structure de 32 octets possède son propre CRC ; une structure avec un CRC invalide est ignorée. Si les deux copies sont invalides ou absentes, le démarrage échoue.
 
