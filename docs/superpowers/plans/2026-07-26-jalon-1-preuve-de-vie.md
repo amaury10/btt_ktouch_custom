@@ -1695,7 +1695,9 @@ Journaliser la partition d'exécution au démarrage, via `esp_ota_get_running_pa
 
 - [ ] **Step 6 bis: Le compteur de démarrages**
 
-Le minuteur ne couvre que les pannes plus lentes que son échéance. Le compteur ferme tout le reste : paniques, chien de garde, débordements de pile, échecs d'initialisation de la PSRAM — tout ce qui redémarre l'appareil en moins de 90 secondes.
+Le minuteur ne couvre que les pannes plus lentes que son échéance. Le compteur ferme presque tout le reste : paniques, chien de garde, débordements de pile — tout ce qui redémarre l'appareil en moins de 90 secondes, **à condition que ce soit après le démarrage d'`app_main`**.
+
+> **Ce que le compteur ne couvre pas, et qui a failli passer.** Une première rédaction de ce plan affirmait qu'il couvrait aussi les échecs d'initialisation de la PSRAM. C'est faux : `esp_psram_chip_init()` est appelée depuis `cpu_start.c`, **avant l'ordonnanceur et avant `app_main`**. Un échec y provoque un `abort()` alors qu'aucune ligne de notre code de secours n'a encore tourné — ni compteur, ni minuteur, ni serveur. Et comme `otadata` désigne toujours `app1`, une coupure de courant ne change rien : l'appareil recommence indéfiniment. C'est la seule classe de pannes qui rend l'appareil définitivement injoignable, et elle se traite en amont, par la configuration.
 
 `firmware/main/rescue.c`, une variable en mémoire RTC qui survit aux redémarrages mais pas à une coupure d'alimentation :
 
@@ -1724,9 +1726,34 @@ uint32_t rescue_count_boot(void)
 void rescue_reset_boot_count(void) { compteur_demarrages = 0; }
 ```
 
-Au tout début d'`app_main`, appeler `rescue_count_boot()`. Si la valeur rendue dépasse `DEMARRAGES_MAX`, ne rien tenter d'autre : basculer immédiatement sur l'autre slot et redémarrer. Journaliser la valeur à chaque démarrage — c'est le premier indice à lire dans `/status`.
+Au tout début d'`app_main`, appeler `rescue_count_boot()`. Si la valeur rendue dépasse `DEMARRAGES_MAX`, ne rien tenter d'autre : **remettre le compteur à zéro**, puis basculer sur l'autre slot et redémarrer. Journaliser la valeur à chaque démarrage — c'est le premier indice à lire dans `/status`.
+
+> **La remise à zéro sur ce chemin n'est pas une coquetterie.** `esp_restart()` est une réinitialisation logicielle : la mémoire RTC survit jusque dans le firmware d'origine, qui n'y touche jamais. Sans remise à zéro, le compteur reste à 4. À la tentative suivante, notre firmware fraîchement installé lirait 5, basculerait immédiatement, et repartirait au stock **sans jamais avoir essayé de démarrer** — et ainsi de suite à chaque essai. La boucle d'itération décrite plus haut serait cassée, et seule une coupure d'alimentation la débloquerait.
 
 Remettre le compteur à zéro dans le gestionnaire `IP_EVENT_STA_GOT_IP`, au même endroit que `rescue_disarm()` : une connexion réussie prouve que ce firmware est viable.
+
+- [ ] **Step 6 ter: Assagir la configuration mémoire — la seule parade au trou pré-`app_main`**
+
+Le `sdkconfig.defaults` a été repris du BSP du Panda Touch **7 pouces**. Or toute la question de ce jalon est justement de savoir si la K-Touch 5 pouces lui ressemble. Quatre réglages y engagent la PSRAM avant même que notre code existe, et s'ils sont faux l'appareil est perdu sans recours.
+
+`CONFIG_SPIRAM_MODE_OCT` suppose une PSRAM octale. `CONFIG_SPIRAM_SPEED_120M` la cadence à une fréquence qu'Espressif classe elle-même en expérimental — c'est la raison d'être de `CONFIG_IDF_EXPERIMENTAL_FEATURES`. Et surtout, `CONFIG_SPIRAM_IGNORE_NOTFOUND` vaut `n` par défaut : une PSRAM absente ou muette devient donc une erreur fatale dans `cpu_start.c`, pas un avertissement.
+
+Pire encore, `CONFIG_SPIRAM_FETCH_INSTRUCTIONS` et `CONFIG_SPIRAM_RODATA` placent le code et les constantes en PSRAM. Un timing PSRAM marginal ne se traduit alors pas par une allocation qui échoue proprement, mais par un plantage sur une lecture d'instruction — potentiellement, là encore, avant `app_main`.
+
+Réglages retenus pour le premier vol, dans `firmware/sdkconfig.defaults` :
+
+```
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_SPIRAM_SPEED_80M=y
+# CONFIG_SPIRAM_FETCH_INSTRUCTIONS n'est pas défini
+# CONFIG_SPIRAM_RODATA n'est pas défini
+```
+
+Retirer explicitement `CONFIG_SPIRAM_SPEED_120M`, `CONFIG_SPIRAM_FETCH_INSTRUCTIONS` et `CONFIG_SPIRAM_RODATA`. Une preuve de vie n'a besoin d'aucun des trois : le tampon d'affichage tient largement, et le firmware fait 1,1 Mo.
+
+L'intérêt est de transformer une classe de pannes irrécupérable en une panne qui se diagnostique. Avec `IGNORE_NOTFOUND`, une PSRAM introuvable ou incompatible ne fait plus avorter le démarrage : elle fait échouer l'allocation du tampon LVGL dans le BSP, `pt_display_init()` rend une erreur, et l'on retombe exactement dans le cas déjà traité — écran mort, WiFi et `/revert` bien vivants. Autrement dit, on ramène l'inconnu matériel dans le périmètre que le reste de la conception sait gérer.
+
+> Même raisonnement pour `CONFIG_ESPTOOLPY_FLASHFREQ_120M` : notre application tourne sous le **bootloader d'origine**, que nous ne remplaçons pas et dont nous n'avons pas vérifié qu'il accepte cette cadence. Revenir à 80 MHz pour le premier vol.
 
 - [ ] **Step 7: Compiler**
 
