@@ -247,8 +247,55 @@ binaires de BTT. Le décodage du conteneur `product.img` n'est pas nécessaire a
 firmware maison, qui embarque ses propres ressources — il reste un objectif de
 documentation, pas un prérequis.
 
-## 9. Suite
+## 9. Résultat du jalon 1 — atteint le 26 juillet 2026
 
-Le jalon 1 fera l'objet d'un plan d'implémentation détaillé. Les jalons suivants
-seront cadrés une fois la preuve de vie obtenue, l'ordre entre l'application
-Klipper et l'application astro restant à décider à ce moment-là.
+**Les cinq critères de réussite sont validés**, malgré une contrainte apparue en
+cours de route qui a fait tomber la méthode initiale.
+
+Le pinout du Panda Touch 7 pouces fonctionne tel quel sur la K-Touch 5 pouces,
+affichage **et** tactile, sans aucune adaptation. Détail et mesures dans
+`docs/hardware/pinout.md`. C'est l'apport publiable du jalon : personne ne
+l'avait établi, et la réserve « may differ on a few panel GPIOs or timings » du
+README de Prusa-Connect-Touch est levée.
+
+Le firmware maison a démarré depuis `app1`, tourné 49 minutes sans un seul
+redémarrage — compteur resté à 1, tas libre inchangé à l'octet près — et
+l'appareil est revenu au firmware d'origine sur commande `/revert`. Le firmware
+d'origine n'a jamais été écrasé, et ses identifiants WiFi sont intacts.
+
+**Ce qui a changé par rapport à la conception initiale.** Le port USB-C de
+l'appareil s'est révélé inexploitable : `esptool` hors jeu, donc **aucune
+sauvegarde des 16 Mo**. Tout le filet de sécurité de la section 7 tombait, et la
+tâche d'installation devenait dangereuse — le firmware de preuve de vie n'ayant
+pas de pile réseau, l'installer aurait été un aller sans retour. Le filet a donc
+été déplacé dans le firmware lui-même : sauvetage automatique, compteur de
+démarrages en mémoire RTC, et retour par `/revert`. Les deux premiers ont été
+éprouvés en conditions réelles avant que le troisième ne serve.
+
+**Quatre défauts trouvés en relecture auraient rendu l'appareil définitivement
+injoignable**, et méritent d'être consignés parce qu'aucun n'était visible en
+lisant le code isolément : une écriture de la configuration WiFi dans la NVS
+**partagée entre les deux slots**, qui aurait effacé les identifiants du firmware
+d'origine ; un `ESP_ERROR_CHECK` sur l'initialisation de l'écran, qui
+transformait l'hypothèse même du jalon en boucle de redémarrage plus rapide que
+le minuteur de sauvetage ; un test mémoire PSRAM actif par défaut, qui appelle
+`abort()` depuis `cpu_start.c` avant qu'aucun secours n'existe ; et une route de
+mise à jour qui, depuis `app1`, ne pouvait écrire que sur `app0`.
+
+**Deux pièges d'outillage, à connaître.** `sdkconfig.defaults` ne s'applique
+qu'aux symboles absents du `sdkconfig` déjà généré — un réglage ajouté après la
+première compilation n'a aucun effet, silencieusement. Et la police Montserrat
+compilée par défaut dans LVGL ne couvre que l'ASCII de base : tout caractère
+au-delà s'affiche en carré vide, ce qui compte quand l'écran est le seul canal de
+diagnostic.
+
+## 10. Suite
+
+Les jalons suivants restent à cadrer. Le socle est désormais acquis : matériel
+documenté, firmware compilable, et un chemin d'installation et de retour éprouvé
+qui ne demande qu'un réseau. L'ordre entre l'application Klipper et l'application
+astro reste à décider.
+
+Deux chantiers de rétro-ingénierie restent ouverts et indépendants : le format du
+conteneur `product.img`, toujours non documenté, et le désassemblage du firmware
+d'origine si l'on veut comprendre son protocole plutôt que le remplacer.
