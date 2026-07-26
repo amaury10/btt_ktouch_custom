@@ -2,13 +2,27 @@
  * confirmer que le tactile remonte des coordonnées cohérentes.
  *
  * Le pinout utilisé est celui du Panda Touch 7 pouces, fourni par le BSP. Toute
- * l'expérience consiste à savoir s'il convient tel quel à la K-Touch 5 pouces. */
+ * l'expérience consiste à savoir s'il convient tel quel à la K-Touch 5 pouces.
+ *
+ * L'appareil n'est atteignable qu'en WiFi (le port USB-C ne sert qu'à
+ * l'alimentation ici) : ce firmware doit donc porter son propre chemin de
+ * retour. L'ordre de démarrage ci-dessous n'est pas arbitraire — voir le
+ * commentaire au-dessus de app_main(). */
+
+#include <inttypes.h>
 
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include "nvs_flash.h"
 #include "pandatouch_display.h"
+
+#include "netlog.h"
+#include "rescue.h"
+#include "web.h"
+#include "wifi.h"
 
 static const char *TAG = "preuve_de_vie";
 
@@ -57,6 +71,51 @@ static void build_test_pattern(void)
 
 void app_main(void)
 {
+    /* L'ordre qui suit est dicté par le sauvetage, pas par la lisibilité :
+     * le compte à rebours est armé EN TOUT PREMIER, avant l'écran, avant le
+     * WiFi, avant quoi que ce soit d'autre. Une panne à n'importe quel étage
+     * ultérieur (NVS, WiFi, écran, tactile, serveur HTTP) doit rester
+     * rattrapable ; un sauvetage armé après coup ne protégerait pas contre
+     * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
+     * depuis le gestionnaire de IP_EVENT_STA_GOT_IP, dans wifi.c. */
+    ESP_ERROR_CHECK(rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS));
+
+    /* Première chose à vérifier dans le journal : ce firmware doit tourner
+     * depuis app1, jamais depuis app0 qui n'est jamais réécrit. */
+    const esp_partition_t *partition_courante = esp_ota_get_running_partition();
+    ESP_LOGI(TAG, "partition d'execution : %s (offset 0x%06" PRIx32 ")",
+             partition_courante != NULL ? partition_courante->label : "?",
+             partition_courante != NULL ? (uint32_t)partition_courante->address : 0);
+
+    /* La NVS est requise par le WiFi (stockage des paramètres PHY/calibration
+     * et, selon la configuration, des informations de connexion). Une NVS
+     * corrompue au point que l'effacement ne la répare pas signale un
+     * problème matériel plus large : ESP_ERROR_CHECK est justifié ici,
+     * contrairement aux étages suivants qui doivent tous rester dégradables
+     * sans faire échouer le démarrage. */
+    esp_err_t erreur_nvs = nvs_flash_init();
+    if (erreur_nvs == ESP_ERR_NVS_NO_FREE_PAGES || erreur_nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        erreur_nvs = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(erreur_nvs);
+
+    /* Le journal réseau doit être en place avant le WiFi, pour capturer ses
+     * propres logs de connexion (ou d'échec) dans /log. */
+    esp_err_t erreur = netlog_init();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "netlog_init a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    /* Un échec ici n'est volontairement pas fatal : c'est justement le cas
+     * que le sauvetage automatique couvre. Si le WiFi ne se connecte
+     * jamais, rescue_disarm() n'est jamais appelé et le minuteur armé plus
+     * haut rebasculera sur l'autre slot à l'échéance. */
+    erreur = wifi_start();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "wifi_start a echoue : %s ; le sauvetage automatique reste actif", esp_err_to_name(erreur));
+    }
+
     ESP_LOGI(TAG, "demarrage du firmware de preuve de vie");
 
     /* pt_display_init() enregistre déjà le périphérique d'entrée tactile en
@@ -110,9 +169,18 @@ void app_main(void)
             ESP_LOGW(TAG, "aucun peripherique tactile enregistre : le GT911 n'a pas repondu");
             ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
         }
+        web_set_touch_available(touch_indev != NULL);
     }
 
     ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
+
+    /* Dernier étage : le serveur HTTP, qui expose /revert et /update. Un
+     * échec ici aussi reste non fatal, pour la même raison que le WiFi. */
+    erreur = web_start();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "web_start a echoue : %s", esp_err_to_name(erreur));
+    }
+
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         ESP_LOGI(TAG, "toujours vivant");
