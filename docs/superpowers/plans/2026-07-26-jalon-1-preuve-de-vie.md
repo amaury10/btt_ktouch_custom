@@ -1755,6 +1755,24 @@ L'intérêt est de transformer une classe de pannes irrécupérable en une panne
 
 > Même raisonnement pour `CONFIG_ESPTOOLPY_FLASHFREQ_120M` : notre application tourne sous le **bootloader d'origine**, que nous ne remplaçons pas et dont nous n'avons pas vérifié qu'il accepte cette cadence. Revenir à 80 MHz pour le premier vol.
 
+`CONFIG_SPIRAM_MEMTEST` mérite une mention à part, parce qu'il rouvre exactement le trou que le reste de ce bloc ferme. `IGNORE_NOTFOUND` ne couvre que « PSRAM introuvable », **pas « trouvée mais peu fiable »** — or c'est le mode de défaillance le plus probable d'une configuration 7 pouces sur du matériel 5 pouces. Le test mémoire vaut `y` par défaut, écrit et relit chaque octet mappé, et appelle `abort()` dans `cpu_start.c` s'il échoue : donc avant `app_main`, donc avant tout secours. Le désactiver fait apparaître le même défaut plus tard, dans une allocation qui échoue proprement, là où le firmware sait dégrader.
+
+> ### ⚠ Le piège de `sdkconfig.defaults`, à connaître avant d'y toucher
+>
+> **ESP-IDF n'applique `sdkconfig.defaults` qu'aux symboles absents du `sdkconfig` déjà généré.** Il n'écrase jamais une valeur existante. Ajouter une ligne à `sdkconfig.defaults` sur un projet déjà compilé ne change donc **rien**, silencieusement — et la compilation réussit, ce qui donne toutes les apparences d'un correctif appliqué.
+>
+> Ce piège a mordu deux fois ici. La seconde a été la plus instructive : trois réglages de sûreté avaient été ajoutés d'un bloc, et deux d'entre eux coïncidaient par chance avec les valeurs par défaut d'ESP-IDF. Seul `CONFIG_ESP_TASK_WDT_PANIC` en différait — et c'était donc le seul à ne pas avoir pris. Autrement dit, l'unique réglage qui changeait réellement le comportement était l'unique à ne pas s'appliquer, sans aucun signe visible.
+>
+> **La seule manière fiable de modifier la configuration est donc de supprimer `firmware/sdkconfig` et de le régénérer** par `idf.py reconfigure`, puis de ressaisir les identifiants WiFi. Une suppression chirurgicale de quelques lignes ne suffit pas : elle laisse en place tout ce qu'on n'a pas pensé à retirer.
+>
+> **Et la vérification ne se fait jamais dans `sdkconfig.defaults` ni dans `sdkconfig`, mais dans `build/config/sdkconfig.h`** — le seul fichier qui reflète ce qui a réellement été compilé :
+>
+> ```powershell
+> Select-String -Path firmware/build/config/sdkconfig.h -Pattern "CONFIG_ESP_TASK_WDT_PANIC|CONFIG_SPIRAM_MEMTEST"
+> ```
+>
+> Attendu : `CONFIG_ESP_TASK_WDT_PANIC 1` présent, `CONFIG_SPIRAM_MEMTEST` absent.
+
 - [ ] **Step 7: Compiler**
 
 ```powershell

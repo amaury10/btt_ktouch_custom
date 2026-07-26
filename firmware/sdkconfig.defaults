@@ -27,6 +27,14 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 CONFIG_SPIRAM_SPEED_80M=y
+# IGNORE_NOTFOUND ne couvre que « PSRAM introuvable », pas « trouvée mais peu
+# fiable » — et c'est justement le mode de défaillance le plus probable d'une
+# configuration 7 pouces sur du matériel 5 pouces. Le test mémoire vaut y par
+# défaut et appelle abort() dans cpu_start.c quand il échoue, donc avant
+# app_main : il rouvrirait exactement le trou que le bloc ci-dessus ferme.
+# Désactivé pour que le défaut se manifeste plus tard, dans une allocation qui
+# échoue proprement, là où le firmware sait dégrader au lieu de mourir.
+CONFIG_SPIRAM_MEMTEST=n
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
