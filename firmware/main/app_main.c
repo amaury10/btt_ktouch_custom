@@ -188,6 +188,17 @@ void app_main(void)
         }
     }
 
+    /* Le journal réseau doit être en place avant même le sauvetage : sans
+     * port série, /log est le seul endroit où relire après coup la ligne
+     * "sauvetage arme : ... ms" — sans doute la plus utile de tout le
+     * démarrage — et les deux lignes de log qui suivent. Le compteur de
+     * démarrages ci-dessus reste la seule protection si netlog_init()
+     * échouait lui-même avant que le sauvetage ne soit armé. */
+    esp_err_t erreur = netlog_init();
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "netlog_init a echoue : %s", esp_err_to_name(erreur));
+    }
+
     /* Le compte à rebours est armé ensuite, avant l'écran, avant le WiFi,
      * avant quoi que ce soit d'autre. Une panne à n'importe quel étage
      * ultérieur (NVS, WiFi, écran, tactile, serveur HTTP) doit rester
@@ -195,14 +206,6 @@ void app_main(void)
      * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
      * depuis le gestionnaire de IP_EVENT_STA_GOT_IP, dans wifi.c. */
     ESP_ERROR_CHECK(rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS));
-
-    /* Le journal réseau doit être en place avant même les deux lignes de log
-     * qui suivent : sans port série, /log est le seul endroit où les relire
-     * après coup, et ce sont les toutes premières choses à y vérifier. */
-    esp_err_t erreur = netlog_init();
-    if (erreur != ESP_OK) {
-        ESP_LOGE(TAG, "netlog_init a echoue : %s", esp_err_to_name(erreur));
-    }
 
     ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
              compteur_demarrages, RESCUE_DEMARRAGES_MAX);
@@ -222,17 +225,27 @@ void app_main(void)
     compteur_demarrages_global = compteur_demarrages;
 
     /* La NVS est requise par le WiFi (stockage des paramètres PHY/calibration
-     * et, selon la configuration, des informations de connexion). Une NVS
-     * corrompue au point que l'effacement ne la répare pas signale un
-     * problème matériel plus large : ESP_ERROR_CHECK est justifié ici,
-     * contrairement aux étages suivants qui doivent tous rester dégradables
-     * sans faire échouer le démarrage. */
+     * et, selon la configuration, des informations de connexion). Le
+     * réflexe habituel d'ESP-IDF sur ESP_ERR_NVS_NO_FREE_PAGES/
+     * ESP_ERR_NVS_NEW_VERSION_FOUND est d'appeler nvs_flash_erase() puis de
+     * réessayer — un réflexe qui NE DOIT JAMAIS s'appliquer ici :
+     * nvs_flash_erase() efface la partition nvs (0x9000) ENTIÈRE, or c'est
+     * justement celle que wifi.c passe onze lignes à expliquer comme
+     * partagée avec le firmware d'origine. ESP_ERR_NVS_NO_FREE_PAGES n'a
+     * rien d'exotique : c'est ce que rend une partition que le firmware
+     * d'origine a remplie. L'effacer détruirait ses identifiants WiFi — le
+     * seul accès de l'appareil — sans qu'aucun secours Kconfig ne soit
+     * garanti configuré (défaut "" dans Kconfig.projbuild). Un échec ici
+     * fait au pire échouer wifi_start() plus bas, non fatal comme les
+     * étages suivants : le sauvetage ramène alors au firmware d'origine
+     * avec sa NVS intacte. Détruire l'état avant d'échouer, ou aborter dans
+     * une boucle de redémarrage via ESP_ERROR_CHECK, sont les deux seules
+     * façons de rendre cet échec irrécupérable — d'où l'absence des deux
+     * ici. */
     esp_err_t erreur_nvs = nvs_flash_init();
-    if (erreur_nvs == ESP_ERR_NVS_NO_FREE_PAGES || erreur_nvs == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        erreur_nvs = nvs_flash_init();
+    if (erreur_nvs != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_flash_init a echoue : %s ; NVS laissee intacte", esp_err_to_name(erreur_nvs));
     }
-    ESP_ERROR_CHECK(erreur_nvs);
 
     /* Un échec ici n'est volontairement pas fatal : c'est justement le cas
      * que le sauvetage automatique couvre. Si le WiFi ne se connecte
