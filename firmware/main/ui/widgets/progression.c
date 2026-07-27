@@ -16,6 +16,19 @@
 
 #define BARRE_HAUTEUR 24
 
+/* Taille par défaut de `racine`, PAS LV_SIZE_CONTENT (voir le commentaire de
+ * progression_creer() ci-dessous pour le piège précis que ça évite). 700 :
+ * une largeur "quasiment pleine largeur" pour l'écran 800 px de la tâche 6,
+ * assez proche du réel pour rendre quelque chose de sensé même si l'écran
+ * appelant oublie de la redéfinir. 36 : assez pour loger BARRE_HAUTEUR (24)
+ * plus l'étiquette de pourcentage (Montserrat 20, ~23 px de haut) centrée
+ * par-dessus sans qu'elle déborde verticalement. Reste un défaut, pas une
+ * contrainte : l'écran appelant garde le droit de lv_obj_set_size(p.racine,
+ * ...) juste après progression_creer(), exactement comme simulateur/main.c
+ * le fait déjà pour sa mise en page à lui. */
+#define RACINE_LARGEUR_DEFAUT 700
+#define RACINE_HAUTEUR_DEFAUT 36
+
 void progression_creer(progression_t *p, lv_obj_t *parent)
 {
     if (p == NULL || parent == NULL) {
@@ -24,7 +37,25 @@ void progression_creer(progression_t *p, lv_obj_t *parent)
 
     p->racine = lv_obj_create(parent);
     lv_obj_remove_style_all(p->racine);
-    lv_obj_set_size(p->racine, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    /* PAS LV_SIZE_CONTENT sur les deux dimensions ici (défaut de la revue
+     * tâche 5, fix round 1) : `barre`, juste en dessous, est LV_PCT(100) de
+     * large — un enfant en pourcentage dans un parent en LV_SIZE_CONTENT est
+     * une dépendance circulaire que LVGL 9.2 résout en clouant l'enfant à
+     * zéro plutôt que de boucler (voir simulateur/lvgl/src/core/lv_obj_pos.c,
+     * la branche `w_is_pct` : "If parent has content size and the child has
+     * pct size a circular dependency will occur. To solve it keep child size
+     * at zero"). Ça ne s'est jamais vu à l'œil dans ce dépôt parce que
+     * simulateur/main.c redimensionne toujours `racine` juste après cet
+     * appel, avant la première passe de mise en page — mais rien n'y oblige
+     * un futur écran, et tuile.c utilise LV_SIZE_CONTENT avec succès juste à
+     * côté (ses enfants sont tous des labels de taille naturelle, aucun
+     * pourcentage), ce qui rend l'erreur plausible par simple copier-coller
+     * du motif voisin. Un défaut explicite élimine la classe d'erreur à la
+     * source plutôt que de compter sur un commentaire pour la prévenir (voir
+     * suite_progression() dans host-test/tests/test_widgets.c pour la
+     * régression qui vérifie que `barre` a une largeur réelle sans qu'aucun
+     * appelant n'ait besoin de la redéfinir). */
+    lv_obj_set_size(p->racine, RACINE_LARGEUR_DEFAUT, RACINE_HAUTEUR_DEFAUT);
     lv_obj_clear_flag(p->racine, LV_OBJ_FLAG_SCROLLABLE);
 
     p->barre = lv_bar_create(p->racine);

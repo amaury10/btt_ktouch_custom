@@ -34,7 +34,9 @@ static void suite_formateurs(void)
     ui_format_duree(b, sizeof(b), 0);       /* inconnu */ VERIFIER_TEXTE(b, "--");
     ui_format_duree(b, sizeof(b), 59);      /* moins d'une minute */ VERIFIER_TEXTE(b, "0m");
     ui_format_duree(b, sizeof(b), 83);      /* une minute */ VERIFIER_TEXTE(b, "1m");
+    ui_format_duree(b, sizeof(b), 3599);    /* juste sous une heure */ VERIFIER_TEXTE(b, "59m");
     ui_format_duree(b, sizeof(b), 3600);    /* une heure pile */ VERIFIER_TEXTE(b, "1h 00m");
+    ui_format_duree(b, sizeof(b), 3660);    /* juste au-dela d'une heure */ VERIFIER_TEXTE(b, "1h 01m");
     ui_format_duree(b, sizeof(b), 5025);    /* heures et minutes */ VERIFIER_TEXTE(b, "1h 23m");
     /* Borne haute de etat_klipper.h : KLIPPER_TEMPS_RESTANT_MAX_S = 359999. */
     ui_format_duree(b, sizeof(b), 359999u); /* borne haute */ VERIFIER_TEXTE(b, "99h 59m");
@@ -112,6 +114,25 @@ static void suite_progression(void)
     VERIFIER(p.barre != NULL);
     VERIFIER(p.etiquette != NULL);
 
+    /* Regression (revue tache 5) : `racine` en LV_SIZE_CONTENT des deux cotes
+     * pendant que `barre` (son enfant direct) est LV_PCT(100) est une
+     * dependance circulaire que LVGL 9.2 resout en clouant l'enfant a zero
+     * (voir simulateur/lvgl/src/core/lv_obj_pos.c:111-116 : "a pct-sized
+     * child inside a content-sized parent [...] keep child size at zero").
+     * Ca ne s'est jamais vu a l'oeil parce que simulateur/main.c redimensionne
+     * toujours `racine` juste apres progression_creer(), avant la premiere
+     * passe de mise en page — mais rien dans progression.h ne rend cet appel
+     * obligatoire, et un ecran qui se contente de lv_obj_align() (exactement
+     * ce que fait tuile_t, ou LV_SIZE_CONTENT fonctionne reellement puisque
+     * ses enfants sont des labels de taille naturelle) obtiendrait une barre
+     * en permanence invisible. lv_obj_update_layout() force la resolution
+     * AVANT l'assertion : sans cet appel explicite, p.barre n'a encore subi
+     * aucune passe de mise en page et le test ne prouverait rien. */
+    lv_obj_update_layout(p.racine);
+    /* la barre a une largeur reelle des la creation, sans redimensionnement
+     * de racine par l'appelant */
+    VERIFIER(lv_obj_get_width(p.barre) > 0);
+
     progression_definir(&p, 0.423f);
     /* la barre suit la fraction (plage interne 0..1000) */
     VERIFIER(lv_bar_get_value(p.barre) == 423);
@@ -133,6 +154,8 @@ static void suite_progression(void)
     VERIFIER(lv_bar_get_value(p.barre) == 0);
     progression_definir(&p, INFINITY);
     VERIFIER(lv_bar_get_value(p.barre) == 1000);
+    progression_definir(&p, -INFINITY);
+    VERIFIER(lv_bar_get_value(p.barre) == 0);
 
     progression_griser(&p, true);
     lv_color_t couleur_grise = lv_obj_get_style_text_color(p.etiquette, 0);

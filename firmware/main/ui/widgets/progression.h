@@ -24,7 +24,20 @@ typedef struct {
 } progression_t;
 
 /* Crée les trois objets LVGL et les range dans `p` (déjà alloué par
- * l'appelant). `p` ou `parent` NULL : ne fait rien. */
+ * l'appelant). `racine` sort avec une taille explicite (700x36 — voir le
+ * commentaire de RACINE_LARGEUR_DEFAUT/RACINE_HAUTEUR_DEFAUT dans
+ * progression.c pour la justification des deux chiffres), PAS
+ * LV_SIZE_CONTENT : `barre`, son enfant direct, est en LV_PCT(100), et
+ * LVGL 9.2 résout un enfant en pourcentage dans un parent en
+ * LV_SIZE_CONTENT en clouant l'enfant à zéro plutôt qu'en formant une
+ * dépendance circulaire (revue tâche 5, fix round 1 : la barre était
+ * invisible tant que l'écran appelant ne redimensionnait pas `racine`
+ * avant la première passe de mise en page — un piège d'autant plus
+ * probable que `tuile_creer()`, juste à côté, utilise LV_SIZE_CONTENT avec
+ * succès). L'écran appelant garde le droit de lv_obj_set_size(p.racine,
+ * ...) ensuite pour adapter la largeur à sa mise en page réelle (voir
+ * simulateur/main.c) ; ce n'est plus nécessaire pour que la barre soit
+ * visible, seulement pour l'ajuster. `p` ou `parent` NULL : ne fait rien. */
 void progression_creer(progression_t *p, lv_obj_t *parent);
 
 /* Fait avancer la barre et le texte du pourcentage à `fraction` (0.0 = vide,
