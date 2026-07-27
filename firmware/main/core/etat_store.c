@@ -5,7 +5,20 @@
 
 bool etat_store_init(etat_store_t *store, size_t taille)
 {
-    if (store == NULL || taille == 0) {
+    if (store == NULL) {
+        return false;
+    }
+    /* Toute sortie en echec doit laisser une structure sure a liberer : un
+     * appelant defensif appellera etat_store_liberer() sans savoir que
+     * l'initialisation a echoue, et liberer des pointeurs indetermines
+     * (cas d'un store alloue sur la pile, jamais initialise) serait un
+     * comportement indefini. */
+    store->avant = NULL;
+    store->arriere = NULL;
+    store->taille = 0;
+    store->generation = 0;
+
+    if (taille == 0) {
         return false;
     }
     store->avant = calloc(1, taille);
@@ -17,7 +30,6 @@ bool etat_store_init(etat_store_t *store, size_t taille)
         return false;
     }
     store->taille = taille;
-    store->generation = 0;
     return true;
 }
 

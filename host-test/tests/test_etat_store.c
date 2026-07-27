@@ -53,7 +53,20 @@ void suite_etat_store(void)
 
     etat_store_liberer(&s);
 
-    /* Une taille nulle est refusee plutot que de produire un magasin inutile. */
+    /* Une taille nulle est refusee plutot que de produire un magasin inutile.
+     * On pollue volontairement la memoire avant l'appel : si etat_store_init()
+     * ne remettait pas les champs a zero sur ce chemin d'echec, un store sur
+     * la pile garderait des pointeurs indetermines et liberer() plus bas
+     * appellerait free() sur n'importe quoi. Partir d'une pile deja a zero
+     * masquerait ce bug. */
     etat_store_t vide;
+    memset(&vide, 0x5A, sizeof(vide));
     VERIFIER(!etat_store_init(&vide, 0));
+
+    /* L'etat d'echec doit etre observable, pas seulement inoffensif. */
+    VERIFIER(etat_store_lire(&vide) == NULL);
+    VERIFIER(etat_store_generation(&vide) == 0);
+
+    /* Et liberer() doit rester sur sur un store dont l'init a echoue. */
+    etat_store_liberer(&vide);
 }
