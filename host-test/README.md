@@ -49,13 +49,13 @@ wsl -d Debian -- sh "/mnt/e/Dev/BTT KTouch Custom/host-test/run.sh"
 Ou, une fois dans un shell WSL, depuis la racine du dépôt :
 
 ```sh
-sh host-test/run.sh
+./host-test/run.sh
 ```
 
-> `run.sh` n'est pas nécessairement marqué exécutable après un `git clone`
-> ou un `git checkout` sur ce dépôt (certaines configurations Windows ne
-> préservent pas le bit d'exécution Unix). Invoquer le script via
-> `sh run.sh` plutôt que `./run.sh` évite ce problème dans tous les cas.
+Le bit d'exécution est suivi par Git (mode `100755` dans l'arbre), donc
+`./run.sh` fonctionne directement après un `git clone`. `sh run.sh` reste
+une alternative valide si jamais le bit d'exécution ne survit pas à un
+transfert (partage réseau, archive zip, etc.).
 
 `run.sh` configure un dossier `build/` avec CMake + Ninja, compile, puis
 lance l'exécutable `tests`. Il rend le code de sortie de `tests` : non nul
