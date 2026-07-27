@@ -1,8 +1,10 @@
 /* Serveur HTTP : c'est la seule interface de contrôle du firmware une fois le
- * câble série hors jeu. Quatre routes :
+ * câble série hors jeu. Cinq routes :
  *   GET  /        page d'état minimale, avec liens vers les autres routes
  *   GET  /status  JSON : slot en cours, version, IP, uptime, mémoire libre,
  *                 tactile disponible, compteur de démarrages
+ *   GET  /state   JSON : état de la liaison avec l'hôte, génération et
+ *                 dernier état Klipper connu (voir gestion_state() plus bas)
  *   GET  /log     texte brut, contenu du journal réseau (netlog_snapshot())
  *   POST /revert  bascule vers l'autre slot et redémarre
  *
@@ -37,6 +39,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "cJSON.h"
+
+#include "boucle.h"
+#include "etat_klipper.h"
+#include "liaison.h"
 #include "netlog.h"
 #include "rescue.h"
 #include "wifi.h"
@@ -66,6 +73,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<h1>K-Touch custom</h1>"
         "<ul>"
         "<li><a href=\"/status\">/status</a> — état (JSON)</li>"
+        "<li><a href=\"/state\">/state</a> — état Klipper courant (JSON)</li>"
         "<li><a href=\"/log\">/log</a> — journal réseau</li>"
         "<li>POST /revert — bascule vers l'autre slot et redémarre</li>"
         "</ul></body></html>";
@@ -108,6 +116,82 @@ static esp_err_t gestion_status(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     size_t a_envoyer = (size_t)longueur < sizeof(reponse) ? (size_t)longueur : sizeof(reponse) - 1;
     return httpd_resp_send(req, reponse, a_envoyer);
+}
+
+/* GET /state — seul moyen, à ce jalon, de vérifier à distance que
+ * l'analyseur (moonraker_parse.c) lit correctement une vraie machine : il
+ * n'y a pas encore d'écran pour l'afficher (sous-jalon 2b).
+ *
+ * boucle_etat_copier() est utilisé ici, JAMAIS boucle_etat() : ce dernier
+ * rend un pointeur BRUT vers le tampon interne de la boucle, valide
+ * seulement jusqu'au prochain cycle de la tâche d'interrogation (~1 s, voir
+ * le commentaire de boucle_etat() dans boucle.h). Cette tâche httpd tourne
+ * dans son propre contexte, sans aucune garantie d'être relue avant que la
+ * tâche d'interrogation ne remette à zéro ce même tampon pour le cycle
+ * suivant — un simple délai de scheduler suffirait à transformer un
+ * pointeur brut en lecture de mémoire déjà écrasée. boucle_etat_copier()
+ * copie sous mutex dans une structure locale à cette fonction, qui reste
+ * valable et exacte quel que soit le temps que la construction du JSON
+ * ci-dessous prend ensuite. */
+static esp_err_t gestion_state(httpd_req_t *req)
+{
+    etat_klipper_t etat;
+    memset(&etat, 0, sizeof(etat));
+    /* Rend false si la boucle n'a jamais démarré (hôte non configuré, ou
+     * boucle_demarrer() en échec) : `etat` reste alors la structure remise à
+     * zéro ci-dessus plutôt qu'indéterminée, et liaison/generation ci-dessous
+     * décrivent fidèlement cet état initial (LIAISON_CONNEXION, génération
+     * 0) — pas d'erreur HTTP pour ce qui est un état normal de l'appareil. */
+    boucle_etat_copier(&etat, sizeof(etat));
+
+    cJSON *racine = cJSON_CreateObject();
+    if (racine == NULL) {
+        return httpd_resp_send_500(req);
+    }
+
+    cJSON_AddStringToObject(racine, "liaison", liaison_nom(boucle_liaison()));
+    cJSON_AddNumberToObject(racine, "generation", (double)boucle_generation());
+
+    cJSON *etat_json = cJSON_AddObjectToObject(racine, "etat");
+    if (etat_json != NULL) {
+        cJSON_AddStringToObject(etat_json, "etat", etat.etat);
+
+        cJSON *buse = cJSON_AddObjectToObject(etat_json, "buse");
+        if (buse != NULL) {
+            cJSON_AddNumberToObject(buse, "actuelle", (double)etat.buse_actuelle);
+            cJSON_AddNumberToObject(buse, "consigne", (double)etat.buse_consigne);
+        }
+
+        cJSON *plateau = cJSON_AddObjectToObject(etat_json, "plateau");
+        if (plateau != NULL) {
+            cJSON_AddNumberToObject(plateau, "actuel", (double)etat.plateau_actuel);
+            cJSON_AddNumberToObject(plateau, "consigne", (double)etat.plateau_consigne);
+        }
+
+        cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
+        cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);
+        cJSON_AddNumberToObject(etat_json, "temps_restant_s", (double)etat.temps_restant_s);
+        cJSON_AddBoolToObject(etat_json, "impression_en_cours", etat.impression_en_cours);
+        cJSON_AddBoolToObject(etat_json, "impression_en_pause", etat.impression_en_pause);
+    }
+
+    /* cJSON plutôt qu'un snprintf à la main (voir gestion_status()
+     * ci-dessus, qui peut se permettre le snprintf parce qu'aucun de ses
+     * champs ne vient d'ailleurs que de ce firmware) : `fichier` vient de
+     * Moonraker, donc en dernier ressort d'un nom de fichier choisi par un
+     * utilisateur — un guillemet ou un antislash dedans casserait un JSON
+     * construit à la main sans qu'aucun test hôte ne puisse le voir, ceux-ci
+     * ne travaillant que sur du JSON déjà écrit à la main en entrée. */
+    char *texte = cJSON_PrintUnformatted(racine);
+    cJSON_Delete(racine);
+    if (texte == NULL) {
+        return httpd_resp_send_500(req);
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t resultat = httpd_resp_send(req, texte, HTTPD_RESP_USE_STRLEN);
+    cJSON_free(texte);
+    return resultat;
 }
 
 static esp_err_t gestion_log(httpd_req_t *req)
@@ -159,6 +243,9 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_status = {
         .uri = "/status", .method = HTTP_GET, .handler = gestion_status, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_state = {
+        .uri = "/state", .method = HTTP_GET, .handler = gestion_state, .user_ctx = NULL,
+    };
     static const httpd_uri_t route_log = {
         .uri = "/log", .method = HTTP_GET, .handler = gestion_log, .user_ctx = NULL,
     };
@@ -168,6 +255,7 @@ esp_err_t web_start(void)
 
     enregistrer_route(serveur, &route_racine);
     enregistrer_route(serveur, &route_status);
+    enregistrer_route(serveur, &route_state);
     enregistrer_route(serveur, &route_log);
     enregistrer_route(serveur, &route_revert);
 

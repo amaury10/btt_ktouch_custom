@@ -22,7 +22,13 @@
 #include "nvs_flash.h"
 #include "pandatouch_display.h"
 
+#include "backend.h"
+#include "backend_factice.h"
+#include "backend_moonraker.h"
+#include "boucle.h"
+#include "journal.h"
 #include "netlog.h"
+#include "reglages.h"
 #include "rescue.h"
 #include "web.h"
 #include "wifi.h"
@@ -268,6 +274,70 @@ void app_main(void)
     erreur = web_start();
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "web_start a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    /* Réglages, sélection du backend puis démarrage de la boucle
+     * d'interrogation — placés ICI, délibérément après web_start() : le
+     * serveur HTTP (donc /log et /revert, et maintenant /state) est déjà
+     * debout avant qu'on touche à la NVS des réglages ou qu'on lance la
+     * tâche réseau de boucle.c. Un réglage illisible ou un backend qui
+     * échoue à démarrer reste ainsi diagnosticable à distance au lieu de
+     * priver l'appareil de son seul canal de secours si l'étage suivant
+     * tombait avec lui. Comme pour NVS et WiFi plus haut : aucun
+     * ESP_ERROR_CHECK ici, on journalise et on continue — un hôte non
+     * configuré est l'état normal d'un premier démarrage (voir
+     * reglages.h), pas une panne, et rien ci-dessous ne doit pouvoir
+     * redémarrer l'appareil. */
+    esp_err_t erreur_reglages = reglages_charger();
+    if (erreur_reglages != ESP_OK) {
+        JOURNAL_ALERTE(TAG, "reglages_charger a echoue (%s) ; reglages par defaut conserves",
+                       esp_err_to_name(erreur_reglages));
+    }
+
+    if (!reglages_configures()) {
+        /* Premier démarrage, ou réglages jamais saisis : normal, pas une
+         * erreur. L'écran de première configuration qui renseignera l'hôte
+         * appartient au sous-jalon 2b — en attendant, ne pas démarrer la
+         * boucle plutôt que de la lancer contre une adresse vide, qui
+         * échouerait à chaque cycle pour rien. */
+        JOURNAL_ALERTE(TAG, "aucun hote configure : la boucle d'interrogation ne demarre pas "
+                       "(ecran de configuration a venir au sous-jalon 2b)");
+    } else {
+        /* Sélection du backend par le nom que porte CHAQUE descripteur
+         * lui-même (desc->nom), jamais par une chaîne recopiée ici : ainsi
+         * un futur renommage d'un backend ne peut pas faire diverger cette
+         * comparaison de la valeur réellement stockée dans les réglages. */
+        const backend_desc_t *desc_moonraker = backend_moonraker_desc();
+        const backend_desc_t *desc_factice = backend_factice_desc();
+        const char *nom_backend = reglages_backend();
+
+        const backend_desc_t *desc_choisi = NULL;
+        if (desc_moonraker != NULL && strcmp(nom_backend, desc_moonraker->nom) == 0) {
+            desc_choisi = desc_moonraker;
+        } else if (desc_factice != NULL && strcmp(nom_backend, desc_factice->nom) == 0) {
+            desc_choisi = desc_factice;
+        } else {
+            /* Nom inconnu : réglage corrompu, ou nom d'un backend retiré
+             * depuis. Repli documenté sur moonraker — le backend par défaut
+             * de reglages.h — plutôt qu'un choix silencieux ; le
+             * avertissement ci-dessous est ce qui rend ce repli visible
+             * dans /log au lieu de laisser deviner pourquoi la machine
+             * attendue ne répond jamais. */
+            JOURNAL_ALERTE(TAG, "backend '%s' inconnu ; repli sur '%s'",
+                           nom_backend, desc_moonraker != NULL ? desc_moonraker->nom : "?");
+            desc_choisi = desc_moonraker;
+        }
+
+        backend_hote_t hote;
+        reglages_hote(&hote);
+
+        if (desc_choisi != NULL) {
+            esp_err_t erreur_boucle = boucle_demarrer(desc_choisi, &hote);
+            if (erreur_boucle != ESP_OK) {
+                JOURNAL_ERREUR(TAG, "boucle_demarrer a echoue (%s) : /state restera a son etat initial",
+                               esp_err_to_name(erreur_boucle));
+            }
+        }
     }
 
     ESP_LOGI(TAG, "demarrage du firmware de preuve de vie");

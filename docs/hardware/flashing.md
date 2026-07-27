@@ -128,6 +128,7 @@ Le serveur écoute sur le port 80, à l'adresse IP journalisée au démarrage
 |---|---|---|
 | `/` | GET | page d'état minimale, avec liens vers les autres routes |
 | `/status` | GET | JSON : slot en cours, version, adresse IP, temps depuis le démarrage, mémoire libre, tactile disponible ou non, compteur de démarrages |
+| `/state` | GET | JSON : état de la liaison avec l'hôte Klipper, génération de l'état, et le dernier état connu (température buse/plateau, fichier, progression, temps restant, impression en cours/en pause) |
 | `/log` | GET | texte brut, contenu du journal réseau en RAM (dernières lignes de log) |
 | `/revert` | POST | bascule vers l'autre slot OTA et redémarre |
 
