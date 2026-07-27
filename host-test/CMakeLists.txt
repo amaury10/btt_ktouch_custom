@@ -51,12 +51,14 @@ add_executable(tests
     tests/test_backend_factice.c
     tests/test_hote_parse.c
     tests/test_boucle_cycle.c
+    tests/test_plateforme.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c
     ${CORE_DIR}/hote_parse.c
     ${CORE_DIR}/boucle_cycle.c
+    ${CORE_DIR}/plateforme.c
 )
 target_link_libraries(tests PRIVATE cjson)
 target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)

@@ -23,7 +23,13 @@ pkg_check_modules(SDL2 REQUIRED sdl2)
 # bibliothèque LVGL échoue avant même d'atteindre notre propre code.
 target_include_directories(lvgl PRIVATE ${SDL2_INCLUDE_DIRS})
 
-add_executable(ktouch-sim main.c afficheur.c)
-target_include_directories(ktouch-sim PRIVATE . vendor ${SDL2_INCLUDE_DIRS})
+# plateforme.c (la conversion RSSI -> barres, pure) vit sous firmware/main/core
+# avec le reste du socle portable : le simulateur la compile depuis là plutôt
+# que d'en garder une copie, pour ne jamais diverger de ce que rend le
+# firmware au même signal.
+set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
+
+add_executable(ktouch-sim main.c afficheur.c plateforme_sim.c ${CORE_DIR}/plateforme.c)
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)

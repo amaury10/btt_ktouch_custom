@@ -11,6 +11,7 @@ void suite_liaison(void);
 void suite_backend_factice(void);
 void suite_hote_parse(void);
 void suite_boucle_cycle(void);
+void suite_plateforme(void);
 
 int main(void)
 {
@@ -22,6 +23,7 @@ int main(void)
     suite_backend_factice();
     suite_hote_parse();
     suite_boucle_cycle();
+    suite_plateforme();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;
