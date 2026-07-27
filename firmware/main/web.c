@@ -56,6 +56,15 @@ static const char *TAG = "web";
 static bool tactile_disponible;
 static uint32_t compteur_demarrages;
 
+/* Plus petite marge de pile jamais observée dans gestion_state() (voir plus
+ * bas) : UINT32_MAX au départ, jamais réellement atteinte par
+ * uxTaskGetStackHighWaterMark(), donc la première requête journalise
+ * toujours. Lue et écrite uniquement par la tâche httpd (aucun accès
+ * concurrent, donc pas de mutex nécessaire) — ce serveur ne traite qu'une
+ * requête à la fois par défaut (HTTPD_DEFAULT_CONFIG().max_open_sockets et
+ * la configuration mono-tâche de esp_http_server ici). */
+static uint32_t s_marge_pile_min = UINT32_MAX;
+
 void web_set_touch_available(bool disponible)
 {
     tactile_disponible = disponible;
@@ -222,12 +231,22 @@ static esp_err_t gestion_state(httpd_req_t *req)
 
     /* Mesure, pas estimation : la tâche httpd garde la pile par défaut de
      * 4096 octets, et ce gestionnaire ajoute un arbre cJSON complet plus le
-     * formatage %g pleine précision de newlib pour chaque flottant. Cette
-     * ligne rend lisible dans /log, sur l'appareil réel, la marge
-     * effectivement restante — une seule fois suffit à trancher la question
-     * pour de bon plutôt que pour cette seule charge utile. */
-    JOURNAL_INFO(TAG, "gestion_state : marge de pile restante %u octets",
-                 (unsigned)uxTaskGetStackHighWaterMark(NULL));
+     * formatage %g pleine précision de newlib pour chaque flottant. Journalisé
+     * uniquement quand la marge empire : /state a vocation à être interrogée
+     * en boucle (c'est son usage prévu à l'étape de vérification), et netlog
+     * est un tampon circulaire de 16 Kio qui écrase silencieusement ses plus
+     * anciennes lignes — une trace à CHAQUE requête chasserait la séquence de
+     * démarrage et les alertes en quelques centaines de requêtes, soit le
+     * seul canal de diagnostic de l'appareil. Ce filtre donne une ligne à la
+     * première requête, puis seulement quand le pire jamais observé
+     * s'aggrave — ce qui reste l'information recherchée (le minimum jamais
+     * atteint) tout en bornant sa fréquence. */
+    uint32_t marge_pile = (uint32_t)uxTaskGetStackHighWaterMark(NULL);
+    if (marge_pile < s_marge_pile_min) {
+        s_marge_pile_min = marge_pile;
+        JOURNAL_INFO(TAG, "gestion_state : nouvelle marge de pile minimale %u octets",
+                     (unsigned)marge_pile);
+    }
 
     return resultat;
 }
