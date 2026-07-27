@@ -15,6 +15,7 @@ target_include_directories(cjson PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
 add_executable(tests
     tests/main.c
     tests/test_harnais.c
+    tests/test_contrat.c
 )
 target_link_libraries(tests PRIVATE cjson)
 target_include_directories(tests PRIVATE ${CORE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
