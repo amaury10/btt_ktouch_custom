@@ -17,7 +17,9 @@ add_executable(tests
     tests/test_harnais.c
     tests/test_contrat.c
     tests/test_moonraker_parse.c
+    tests/test_etat_store.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
+    ${CORE_DIR}/etat_store.c
 )
 target_link_libraries(tests PRIVATE cjson)
 target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)
