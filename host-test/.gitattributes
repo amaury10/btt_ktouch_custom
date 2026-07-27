@@ -1,0 +1,6 @@
+# Ce harnais s'exécute sous WSL (dash/gcc), qui n'accepte pas les fins de
+# ligne CRLF dans un script shell (`sh run.sh` échoue avec "Illegal option -").
+# Le dépôt a core.autocrlf=true côté Windows ; sans cette déclaration,
+# run.sh serait converti en CRLF au prochain checkout et casserait le
+# harnais pour tout contributeur. Voir aussi host-test/README.md.
+* text=auto eol=lf
