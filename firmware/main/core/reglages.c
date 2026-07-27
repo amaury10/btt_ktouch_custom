@@ -1,8 +1,8 @@
 #include "reglages.h"
 
-#include <stdlib.h>
 #include <string.h>
 
+#include "hote_parse.h"
 #include "journal.h"
 #include "nvs.h"
 
@@ -24,8 +24,10 @@ static const char *TAG = "reglages";
 
 #define REGLAGES_CLE_BACKEND "backend"
 
-#define REGLAGES_PORT_DEFAUT    7125u
-#define REGLAGES_PORT_MAX       65535u
+/* Alias sur la constante de hote_parse.h : une seule source de vérité pour le
+ * port par défaut, partagée entre l'analyse pure (hote_parse.c) et le reste
+ * de ce fichier (cache initial, migration depuis les anciennes clés). */
+#define REGLAGES_PORT_DEFAUT    HOTE_PARSE_PORT_DEFAUT
 #define REGLAGES_BACKEND_DEFAUT "moonraker"
 
 /* Longueur maximale d'un nom de backend stocké ("moonraker", "factice", et
@@ -49,43 +51,6 @@ static backend_hote_t g_hote = {
     .port = REGLAGES_PORT_DEFAUT,
 };
 static char g_backend[REGLAGES_BACKEND_LONGUEUR_MAX] = REGLAGES_BACKEND_DEFAUT;
-
-/* Découpe "adresse:port" en peuplant g_hote. Le découpage se fait sur le
- * DERNIER ':' : une adresse IPv6 littérale contient elle-même des ':', et
- * splitter sur le premier casserait ce cas précis. Un port absent, non
- * numérique ou hors de 1..65535 retombe sur le port par défaut plutôt que
- * d'être fait confiance — la chaîne vient de la NVS, potentiellement écrite
- * par une version passée ou future de ce fichier. */
-static void reglages_analyser_hote_chaine(const char *chaine)
-{
-    const char *separateur = strrchr(chaine, ':');
-    if (separateur == NULL) {
-        JOURNAL_ALERTE(TAG, "cle %s malformee (pas de ':') ; hote par defaut", REGLAGES_CLE_HOTE);
-        g_hote.adresse[0] = '\0';
-        g_hote.port = REGLAGES_PORT_DEFAUT;
-        return;
-    }
-
-    size_t longueur_adresse = (size_t)(separateur - chaine);
-    if (longueur_adresse >= sizeof(g_hote.adresse)) {
-        JOURNAL_ALERTE(TAG, "adresse trop longue dans %s ; hote par defaut", REGLAGES_CLE_HOTE);
-        g_hote.adresse[0] = '\0';
-        g_hote.port = REGLAGES_PORT_DEFAUT;
-        return;
-    }
-
-    char *fin = NULL;
-    unsigned long port = strtoul(separateur + 1, &fin, 10);
-    if (fin == separateur + 1 || *fin != '\0' || port < 1 || port > REGLAGES_PORT_MAX) {
-        JOURNAL_ALERTE(TAG, "port invalide dans %s (%s) ; port par defaut",
-                       REGLAGES_CLE_HOTE, separateur + 1);
-        port = REGLAGES_PORT_DEFAUT;
-    }
-
-    memcpy(g_hote.adresse, chaine, longueur_adresse);
-    g_hote.adresse[longueur_adresse] = '\0';
-    g_hote.port = (uint16_t)port;
-}
 
 /* Secours de migration : relit les deux anciennes clés séparées quand
  * REGLAGES_CLE_HOTE est absente. `handle` est déjà ouvert par l'appelant. */
@@ -132,7 +97,14 @@ esp_err_t reglages_charger(void)
     size_t taille_hote = sizeof(tampon_hote);
     esp_err_t erreur_hote = nvs_get_str(handle, REGLAGES_CLE_HOTE, tampon_hote, &taille_hote);
     if (erreur_hote == ESP_OK) {
-        reglages_analyser_hote_chaine(tampon_hote);
+        if (!hote_parse(tampon_hote, &g_hote)) {
+            /* hote_parse() a quand meme rempli g_hote de facon deterministe
+             * (voir hote_parse.h) ; on journalise seulement que la chaine
+             * stockee ne decrit pas un hote exploitable, sans dupliquer ici
+             * le detail du pourquoi. */
+            JOURNAL_ALERTE(TAG, "cle %s inexploitable (%s) ; hote par defaut",
+                           REGLAGES_CLE_HOTE, tampon_hote);
+        }
     } else if (erreur_hote == ESP_ERR_NVS_NOT_FOUND) {
         /* Migration : un appareil déjà configuré par une version antérieure
          * (avant le regroupement en une seule clé) a ses réglages dans les
@@ -182,6 +154,17 @@ bool reglages_hote(backend_hote_t *sortie)
 esp_err_t reglages_definir_hote(const backend_hote_t *hote)
 {
     if (hote == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Miroir de la validation appliquée à la lecture (hote_parse.c rejette un
+     * port de 0 et retombe sur REGLAGES_PORT_DEFAUT) : sans cette garde, un
+     * appelant qui écrit le port 0 verrait son adresse acceptée telle quelle
+     * mais son port silencieusement remplacé par la valeur par défaut au
+     * prochain reglages_charger(), sans qu'aucune erreur ne le signale à ce
+     * moment-là. Ce qui est écrit doit rester ce qui est relu. */
+    if (hote->port == 0) {
+        JOURNAL_ALERTE(TAG, "port hote nul ; ecriture refusee");
         return ESP_ERR_INVALID_ARG;
     }
 
