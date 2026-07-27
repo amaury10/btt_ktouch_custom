@@ -2,8 +2,8 @@
  * et soit la capture en PNG (mode hors écran), soit l'affiche dans une
  * fenêtre SDL interactive. Ce fichier sera remplacé par le vrai assemblage
  * d'écrans dans une tâche ultérieure du jalon 2b ; son seul but ici est de
- * prouver que l'afficheur (fond, quatre polices, un widget, cadrage) rend
- * correctement dans les deux modes. */
+ * prouver que l'afficheur (fond, les quatre polices Montserrat 14/20/28/48,
+ * un widget, cadrage) rend correctement dans les deux modes. */
 
 #include <stdio.h>
 #include <string.h>
@@ -37,6 +37,24 @@ static void dessiner_mire(void)
     lv_obj_set_size(barre, 400, 24);
     lv_obj_align(barre, LV_ALIGN_CENTER, 0, 60);
     lv_bar_set_value(barre, 42, LV_ANIM_OFF);
+
+    /* Montserrat 14 et 20 sont activées dans lv_conf.h au même titre que 28
+     * et 48, mais rien ne les faisait apparaître dans cette mire : une
+     * mauvaise valeur pour l'une d'elles serait restée invisible jusqu'à
+     * ce qu'un écran ultérieur en ait besoin. Ces deux lignes ferment
+     * l'écart entre ce que le commentaire d'en-tête de ce fichier annonce
+     * (« quatre polices ») et ce que la capture prouvait réellement. */
+    lv_obj_t *ligne20 = lv_label_create(ecran);
+    lv_obj_set_style_text_font(ligne20, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(ligne20, lv_color_hex(0xFFFFFF), 0);
+    lv_label_set_text(ligne20, "Montserrat 20 - the quick brown fox");
+    lv_obj_align(ligne20, LV_ALIGN_CENTER, 0, 110);
+
+    lv_obj_t *ligne14 = lv_label_create(ecran);
+    lv_obj_set_style_text_font(ligne14, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(ligne14, lv_color_hex(0xFFFFFF), 0);
+    lv_label_set_text(ligne14, "Montserrat 14 - the quick brown fox");
+    lv_obj_align(ligne14, LV_ALIGN_CENTER, 0, 140);
 
     /* Quatre carrés de coin : la moindre confusion de pas dans le rappel de
      * vidage hors écran (voir afficheur.c) les déplace ou les déforme, ce
