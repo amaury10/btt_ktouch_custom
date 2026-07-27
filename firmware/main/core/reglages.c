@@ -1,5 +1,6 @@
 #include "reglages.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "journal.h"
@@ -9,17 +10,33 @@
  * app_main.c, backend_factice.c), pour que /log reste lisible par module. */
 static const char *TAG = "reglages";
 
-#define REGLAGES_CLE_ADRESSE "hote_adresse"
-#define REGLAGES_CLE_PORT    "hote_port"
+/* Clé courante : adresse et port regroupés dans une seule chaîne
+ * "adresse:port" (voir reglages_definir_hote() pour la raison). */
+#define REGLAGES_CLE_HOTE "hote"
+
+/* Anciennes clés, écrites par une version antérieure de ce fichier qui
+ * stockait adresse et port séparément. On ne les écrit plus jamais, mais on
+ * les lit encore une fois en secours si REGLAGES_CLE_HOTE est absente, pour
+ * ne pas réinitialiser silencieusement un appareil déjà configuré par un
+ * firmware intermédiaire. */
+#define REGLAGES_CLE_ADRESSE_HERITEE "hote_adresse"
+#define REGLAGES_CLE_PORT_HERITEE    "hote_port"
+
 #define REGLAGES_CLE_BACKEND "backend"
 
 #define REGLAGES_PORT_DEFAUT    7125u
+#define REGLAGES_PORT_MAX       65535u
 #define REGLAGES_BACKEND_DEFAUT "moonraker"
 
 /* Longueur maximale d'un nom de backend stocké ("moonraker", "factice", et
  * ceux à venir) : large marge au-delà des noms connus, pour ne pas avoir à
  * revenir ici à chaque backend ajouté. */
 #define REGLAGES_BACKEND_LONGUEUR_MAX 32
+
+/* Longueur maximale de la chaîne combinée "adresse:port" : la partie adresse
+ * (BACKEND_HOTE_LONGUEUR_MAX octets, nul compris), un ':', jusqu'à 5 chiffres
+ * de port ("65535"), et le nul terminal de la chaîne combinée elle-même. */
+#define REGLAGES_HOTE_CHAINE_MAX (BACKEND_HOTE_LONGUEUR_MAX + 1 + 5 + 1)
 
 /* Cache en mémoire, peuplé par reglages_charger() depuis la NVS — ou laissé
  * à ces valeurs par défaut si la clé est absente ou si la NVS est
@@ -32,6 +49,71 @@ static backend_hote_t g_hote = {
     .port = REGLAGES_PORT_DEFAUT,
 };
 static char g_backend[REGLAGES_BACKEND_LONGUEUR_MAX] = REGLAGES_BACKEND_DEFAUT;
+
+/* Découpe "adresse:port" en peuplant g_hote. Le découpage se fait sur le
+ * DERNIER ':' : une adresse IPv6 littérale contient elle-même des ':', et
+ * splitter sur le premier casserait ce cas précis. Un port absent, non
+ * numérique ou hors de 1..65535 retombe sur le port par défaut plutôt que
+ * d'être fait confiance — la chaîne vient de la NVS, potentiellement écrite
+ * par une version passée ou future de ce fichier. */
+static void reglages_analyser_hote_chaine(const char *chaine)
+{
+    const char *separateur = strrchr(chaine, ':');
+    if (separateur == NULL) {
+        JOURNAL_ALERTE(TAG, "cle %s malformee (pas de ':') ; hote par defaut", REGLAGES_CLE_HOTE);
+        g_hote.adresse[0] = '\0';
+        g_hote.port = REGLAGES_PORT_DEFAUT;
+        return;
+    }
+
+    size_t longueur_adresse = (size_t)(separateur - chaine);
+    if (longueur_adresse >= sizeof(g_hote.adresse)) {
+        JOURNAL_ALERTE(TAG, "adresse trop longue dans %s ; hote par defaut", REGLAGES_CLE_HOTE);
+        g_hote.adresse[0] = '\0';
+        g_hote.port = REGLAGES_PORT_DEFAUT;
+        return;
+    }
+
+    char *fin = NULL;
+    unsigned long port = strtoul(separateur + 1, &fin, 10);
+    if (fin == separateur + 1 || *fin != '\0' || port < 1 || port > REGLAGES_PORT_MAX) {
+        JOURNAL_ALERTE(TAG, "port invalide dans %s (%s) ; port par defaut",
+                       REGLAGES_CLE_HOTE, separateur + 1);
+        port = REGLAGES_PORT_DEFAUT;
+    }
+
+    memcpy(g_hote.adresse, chaine, longueur_adresse);
+    g_hote.adresse[longueur_adresse] = '\0';
+    g_hote.port = (uint16_t)port;
+}
+
+/* Secours de migration : relit les deux anciennes clés séparées quand
+ * REGLAGES_CLE_HOTE est absente. `handle` est déjà ouvert par l'appelant. */
+static void reglages_charger_ancien_format(nvs_handle_t handle)
+{
+    size_t taille_adresse = sizeof(g_hote.adresse);
+    esp_err_t erreur_adresse =
+        nvs_get_str(handle, REGLAGES_CLE_ADRESSE_HERITEE, g_hote.adresse, &taille_adresse);
+    if (erreur_adresse != ESP_OK) {
+        g_hote.adresse[0] = '\0';
+        if (erreur_adresse != ESP_ERR_NVS_NOT_FOUND) {
+            JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; valeur par defaut",
+                           REGLAGES_CLE_ADRESSE_HERITEE, esp_err_to_name(erreur_adresse));
+        }
+    }
+
+    uint16_t port = REGLAGES_PORT_DEFAUT;
+    esp_err_t erreur_port = nvs_get_u16(handle, REGLAGES_CLE_PORT_HERITEE, &port);
+    if (erreur_port == ESP_OK) {
+        g_hote.port = port;
+    } else {
+        g_hote.port = REGLAGES_PORT_DEFAUT;
+        if (erreur_port != ESP_ERR_NVS_NOT_FOUND) {
+            JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; valeur par defaut",
+                           REGLAGES_CLE_PORT_HERITEE, esp_err_to_name(erreur_port));
+        }
+    }
+}
 
 esp_err_t reglages_charger(void)
 {
@@ -46,26 +128,22 @@ esp_err_t reglages_charger(void)
         return erreur;
     }
 
-    size_t taille_adresse = sizeof(g_hote.adresse);
-    esp_err_t erreur_adresse = nvs_get_str(handle, REGLAGES_CLE_ADRESSE, g_hote.adresse, &taille_adresse);
-    if (erreur_adresse != ESP_OK) {
-        g_hote.adresse[0] = '\0';
-        if (erreur_adresse != ESP_ERR_NVS_NOT_FOUND) {
-            JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; valeur par defaut",
-                           REGLAGES_CLE_ADRESSE, esp_err_to_name(erreur_adresse));
-        }
-    }
-
-    uint16_t port = REGLAGES_PORT_DEFAUT;
-    esp_err_t erreur_port = nvs_get_u16(handle, REGLAGES_CLE_PORT, &port);
-    if (erreur_port == ESP_OK) {
-        g_hote.port = port;
+    char tampon_hote[REGLAGES_HOTE_CHAINE_MAX];
+    size_t taille_hote = sizeof(tampon_hote);
+    esp_err_t erreur_hote = nvs_get_str(handle, REGLAGES_CLE_HOTE, tampon_hote, &taille_hote);
+    if (erreur_hote == ESP_OK) {
+        reglages_analyser_hote_chaine(tampon_hote);
+    } else if (erreur_hote == ESP_ERR_NVS_NOT_FOUND) {
+        /* Migration : un appareil déjà configuré par une version antérieure
+         * (avant le regroupement en une seule clé) a ses réglages dans les
+         * deux anciennes clés séparées — les relire évite de le réinitialiser
+         * silencieusement au premier démarrage sur ce firmware. */
+        reglages_charger_ancien_format(handle);
     } else {
+        JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; hote par defaut",
+                       REGLAGES_CLE_HOTE, esp_err_to_name(erreur_hote));
+        g_hote.adresse[0] = '\0';
         g_hote.port = REGLAGES_PORT_DEFAUT;
-        if (erreur_port != ESP_ERR_NVS_NOT_FOUND) {
-            JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; valeur par defaut",
-                           REGLAGES_CLE_PORT, esp_err_to_name(erreur_port));
-        }
     }
 
     size_t taille_backend = sizeof(g_backend);
@@ -107,6 +185,32 @@ esp_err_t reglages_definir_hote(const backend_hote_t *hote)
         return ESP_ERR_INVALID_ARG;
     }
 
+    /* hote->adresse doit être terminée par un octet nul dans les
+     * sizeof(hote->adresse) octets du tampon fourni par l'appelant : sans
+     * cette garde, le snprintf() ci-dessous lirait au-delà de ce tampon.
+     * Aucun appelant actuel ne viole ce contrat (tous construisent l'adresse
+     * via snprintf/strlcpy), mais la garde protège le premier qui le fera. */
+    if (strnlen(hote->adresse, sizeof(hote->adresse)) >= sizeof(hote->adresse)) {
+        JOURNAL_ALERTE(TAG, "adresse hote non terminee par un octet nul ; ecriture refusee");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Adresse et port sont sérialisés dans une seule chaîne et écrits sous
+     * une seule clé NVS. NVS rend chaque nvs_set_*() durable individuellement
+     * : nvs_commit() n'est PAS une frontière transactionnelle qui engloberait
+     * plusieurs clés. Avec deux clés séparées, une écriture interrompue entre
+     * les deux (usure flash, NVS pleine, coupure d'alimentation) laisserait
+     * une adresse neuve associée à un port jamais saisi — un hote qui se
+     * relit "configuré" sans jamais avoir existé tel quel. Une clé unique
+     * rend l'écriture atomique au niveau NVS : soit l'ancienne valeur
+     * complète, soit la nouvelle, jamais un mélange des deux. */
+    char tampon[REGLAGES_HOTE_CHAINE_MAX];
+    int longueur = snprintf(tampon, sizeof(tampon), "%s:%u", hote->adresse, (unsigned)hote->port);
+    if (longueur < 0 || (size_t)longueur >= sizeof(tampon)) {
+        JOURNAL_ERREUR(TAG, "hote trop long pour etre serialise ; ecriture refusee");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     nvs_handle_t handle;
     esp_err_t erreur = nvs_open(REGLAGES_ESPACE_NOMS, NVS_READWRITE, &handle);
     if (erreur != ESP_OK) {
@@ -114,10 +218,7 @@ esp_err_t reglages_definir_hote(const backend_hote_t *hote)
         return erreur;
     }
 
-    erreur = nvs_set_str(handle, REGLAGES_CLE_ADRESSE, hote->adresse);
-    if (erreur == ESP_OK) {
-        erreur = nvs_set_u16(handle, REGLAGES_CLE_PORT, hote->port);
-    }
+    erreur = nvs_set_str(handle, REGLAGES_CLE_HOTE, tampon);
     if (erreur == ESP_OK) {
         erreur = nvs_commit(handle);
     }

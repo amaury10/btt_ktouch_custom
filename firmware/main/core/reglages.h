@@ -12,6 +12,12 @@
 
 #define REGLAGES_ESPACE_NOMS "ktouch"
 
+/* reglages_charger() est censé être appelé une fois au démarrage, avant tout
+ * accesseur ci-dessous. Ce n'est pas une exigence dure : grâce aux
+ * initialiseurs statiques du .c, un accesseur appelé avant tout chargement
+ * (ou après un chargement qui a échoué) rend simplement les valeurs par
+ * défaut — adresse vide, port 7125, backend "moonraker" — jamais une valeur
+ * indéterminée. */
 esp_err_t   reglages_charger(void);
 bool        reglages_configures(void);   /* faux au tout premier démarrage */
 
