@@ -18,7 +18,7 @@ add_executable(tests
     tests/test_contrat.c
 )
 target_link_libraries(tests PRIVATE cjson)
-target_include_directories(tests PRIVATE ${CORE_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(tests PRIVATE ${CORE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.
