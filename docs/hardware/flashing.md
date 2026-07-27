@@ -142,6 +142,17 @@ relue en direct : il ne change pas entre deux requêtes sur un même
 démarrage, même si une connexion WiFi réussit entre-temps et le remet à zéro
 en coulisse pour le prochain démarrage.
 
+Dans la réponse de `/state`, `"generation":0` signifie précisément « aucun
+relevé n'a encore été validé » — hôte non configuré (l'écran de première
+configuration du sous-jalon 2b n'existe pas encore), boucle pas encore
+démarrée, ou aucun cycle réussi depuis le démarrage. C'est le seul signal qui
+distingue cet état de « la machine existe et tous ses champs valent
+authentiquement zéro » : tant que `generation` vaut 0, `"etat":null` dans la
+même réponse et rien sous cette clé ne doit être interprété comme une lecture
+réelle de la machine. Une fois qu'un premier cycle a réussi, `generation`
+avance à chaque nouveau relevé validé (voir `boucle_generation()` dans
+`firmware/main/core/boucle.h`) et `etat` cesse d'être `null`.
+
 ## Revenir au firmware d'origine (le WiFi marche, l'affichage est raté)
 
 C'est le cas couvert par `/revert` : le firmware custom a démarré, le WiFi a

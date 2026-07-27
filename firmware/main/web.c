@@ -43,6 +43,7 @@
 
 #include "boucle.h"
 #include "etat_klipper.h"
+#include "journal.h"
 #include "liaison.h"
 #include "netlog.h"
 #include "rescue.h"
@@ -136,13 +137,18 @@ static esp_err_t gestion_status(httpd_req_t *req)
 static esp_err_t gestion_state(httpd_req_t *req)
 {
     etat_klipper_t etat;
-    memset(&etat, 0, sizeof(etat));
-    /* Rend false si la boucle n'a jamais démarré (hôte non configuré, ou
-     * boucle_demarrer() en échec) : `etat` reste alors la structure remise à
-     * zéro ci-dessus plutôt qu'indéterminée, et liaison/generation ci-dessous
-     * décrivent fidèlement cet état initial (LIAISON_CONNEXION, génération
-     * 0) — pas d'erreur HTTP pour ce qui est un état normal de l'appareil. */
-    boucle_etat_copier(&etat, sizeof(etat));
+    /* La valeur de retour est examinée, pas ignorée : rend false si la
+     * boucle n'a jamais démarré (hôte non configuré, ou boucle_demarrer() en
+     * échec) — mais aussi, dès qu'un futur backend déclarera une
+     * etat_klipper_t d'une autre taille, si `taille` ne correspond plus à
+     * celle du backend réellement actif (voir boucle_etat_copier() dans
+     * boucle.c). Dans les deux cas, `etat` n'a PAS été écrit par la copie et
+     * ne contient que ce que la pile de la tâche httpd contenait avant cet
+     * appel : le publier quand même serait une lecture fabriquée présentée
+     * comme mesurée, à côté d'une `liaison`/`generation` pourtant valides —
+     * exactement ce que ce jalon interdit. `etat_disponible` ci-dessous est
+     * ce qui empêche ça. */
+    bool etat_disponible = boucle_etat_copier(&etat, sizeof(etat));
 
     cJSON *racine = cJSON_CreateObject();
     if (racine == NULL) {
@@ -150,29 +156,51 @@ static esp_err_t gestion_state(httpd_req_t *req)
     }
 
     cJSON_AddStringToObject(racine, "liaison", liaison_nom(boucle_liaison()));
+    /* generation vaut 0 tant qu'aucun relevé n'a jamais été validé par la
+     * boucle (boucle non démarrée, ou démarrée mais pas encore de premier
+     * cycle réussi) — c'est le seul signal qui distingue « pas encore de
+     * lecture » de « tous les champs valent authentiquement zéro », d'où son
+     * importance documentée ici et dans flashing.md. */
     cJSON_AddNumberToObject(racine, "generation", (double)boucle_generation());
 
-    cJSON *etat_json = cJSON_AddObjectToObject(racine, "etat");
-    if (etat_json != NULL) {
-        cJSON_AddStringToObject(etat_json, "etat", etat.etat);
+    if (etat_disponible) {
+        cJSON *etat_json = cJSON_AddObjectToObject(racine, "etat");
+        if (etat_json != NULL) {
+            cJSON_AddStringToObject(etat_json, "etat", etat.etat);
 
-        cJSON *buse = cJSON_AddObjectToObject(etat_json, "buse");
-        if (buse != NULL) {
-            cJSON_AddNumberToObject(buse, "actuelle", (double)etat.buse_actuelle);
-            cJSON_AddNumberToObject(buse, "consigne", (double)etat.buse_consigne);
+            cJSON *buse = cJSON_AddObjectToObject(etat_json, "buse");
+            if (buse != NULL) {
+                /* Les températures sont des `float` (etat_klipper_t),
+                 * promues en `double` pour cJSON_AddNumberToObject().
+                 * cJSON les imprime avec "%1.15g"/"%1.17g" (cJSON_Print,
+                 * print_number()) : ce format dépend de la libc fournir une
+                 * implémentation complète de %g pour les doubles.
+                 * CONFIG_LIBC_NEWLIB_NANO_FORMAT DOIT rester désactivé
+                 * (c'est le cas par défaut de ce projet) — la newlib "nano"
+                 * n'implémente pas %g/%e sur les doubles et rendrait ces
+                 * nombres silencieusement faux si jamais quelqu'un
+                 * l'activait pour gagner de la place en flash. */
+                cJSON_AddNumberToObject(buse, "actuelle", (double)etat.buse_actuelle);
+                cJSON_AddNumberToObject(buse, "consigne", (double)etat.buse_consigne);
+            }
+
+            cJSON *plateau = cJSON_AddObjectToObject(etat_json, "plateau");
+            if (plateau != NULL) {
+                cJSON_AddNumberToObject(plateau, "actuel", (double)etat.plateau_actuel);
+                cJSON_AddNumberToObject(plateau, "consigne", (double)etat.plateau_consigne);
+            }
+
+            cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
+            cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);
+            cJSON_AddNumberToObject(etat_json, "temps_restant_s", (double)etat.temps_restant_s);
+            cJSON_AddBoolToObject(etat_json, "impression_en_cours", etat.impression_en_cours);
+            cJSON_AddBoolToObject(etat_json, "impression_en_pause", etat.impression_en_pause);
         }
-
-        cJSON *plateau = cJSON_AddObjectToObject(etat_json, "plateau");
-        if (plateau != NULL) {
-            cJSON_AddNumberToObject(plateau, "actuel", (double)etat.plateau_actuel);
-            cJSON_AddNumberToObject(plateau, "consigne", (double)etat.plateau_consigne);
-        }
-
-        cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
-        cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);
-        cJSON_AddNumberToObject(etat_json, "temps_restant_s", (double)etat.temps_restant_s);
-        cJSON_AddBoolToObject(etat_json, "impression_en_cours", etat.impression_en_cours);
-        cJSON_AddBoolToObject(etat_json, "impression_en_pause", etat.impression_en_pause);
+    } else {
+        /* `null`, jamais un objet rempli de zéros : dit honnêtement "rien à
+         * publier" plutôt que de laisser croire à une machine au repos.
+         * `liaison` et `generation` ci-dessus restent significatifs seuls. */
+        cJSON_AddNullToObject(racine, "etat");
     }
 
     /* cJSON plutôt qu'un snprintf à la main (voir gestion_status()
@@ -191,6 +219,16 @@ static esp_err_t gestion_state(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     esp_err_t resultat = httpd_resp_send(req, texte, HTTPD_RESP_USE_STRLEN);
     cJSON_free(texte);
+
+    /* Mesure, pas estimation : la tâche httpd garde la pile par défaut de
+     * 4096 octets, et ce gestionnaire ajoute un arbre cJSON complet plus le
+     * formatage %g pleine précision de newlib pour chaque flottant. Cette
+     * ligne rend lisible dans /log, sur l'appareil réel, la marge
+     * effectivement restante — une seule fois suffit à trancher la question
+     * pour de bon plutôt que pour cette seule charge utile. */
+    JOURNAL_INFO(TAG, "gestion_state : marge de pile restante %u octets",
+                 (unsigned)uxTaskGetStackHighWaterMark(NULL));
+
     return resultat;
 }
 
