@@ -1,0 +1,8 @@
+# Ce simulateur se compile et s'exécute sous WSL (bash/gcc), qui n'accepte
+# pas les fins de ligne CRLF dans un script shell exécuté directement
+# (`./run.sh` échoue si le shebang ou le corps du script contient des \r).
+# Le dépôt a core.autocrlf=true côté Windows ; sans cette déclaration,
+# run.sh serait converti en CRLF au prochain checkout et casserait le
+# simulateur pour tout contributeur. Voir host-test/.gitattributes pour le
+# même problème déjà rencontré, et host-test/README.md pour le détail.
+* text=auto eol=lf

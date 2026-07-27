@@ -18,6 +18,12 @@ managed_components/
 dependencies.lock
 compile_commands.json
 
+# --- Simulateur (répertoire de compilation déjà couvert par build/
+# ci-dessus ; entrées explicites pour que la règle reste lisible sans
+# remonter au bloc ESP-IDF) ---
+simulateur/build/
+simulateur/build/*.png
+
 # --- Outils ---
 .venv/
 __pycache__/
