@@ -19,7 +19,46 @@ option(KTOUCH_HOST_TEST_SANITIZERS
 # compilables hors ESP-IDF : c'est la contrainte qui garantit qu'elles ne
 # dependent pas du materiel.
 set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
+# La couche ui/ (descripteur d'ecran, navigation) doit rester compilable hors
+# ESP-IDF au meme titre que core/ : voir firmware/main/ui/navigation.c, qui
+# n'inclut que "lvgl.h" et le shim esp_err.h ci-dessous, jamais de header
+# FreeRTOS/ESP-IDF.
+set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
 
+# LVGL entre dans le harnais de test hote pour rendre la navigation testable
+# sur PC : reutilise le SEUL sous-module et la SEULE lv_conf.h de
+# simulateur/, plutot que d'en cloner une deuxieme copie qui pourrait
+# diverger silencieusement de ce que rend l'appareil (voir le commentaire de
+# tete de simulateur/afficheur.c sur ce risque precis).
+set(LV_CONF_BUILD_DISABLE_DEMOS   1 CACHE INTERNAL "")
+set(LV_CONF_BUILD_DISABLE_EXAMPLES 1 CACHE INTERNAL "")
+set(LV_CONF_BUILD_DISABLE_THORVG_INTERNAL 1 CACHE INTERNAL "")
+set(LV_CONF_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../simulateur/lv_conf.h CACHE STRING "" FORCE)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../simulateur/lvgl lvgl-build)
+
+# lv_conf.h (partagee avec le simulateur) active LV_USE_SDL : la cible lvgl
+# compile donc elle-meme src/drivers/sdl/*.c, qui font #include <SDL2/SDL.h>
+# inconditionnellement (voir le meme commentaire dans
+# simulateur/CMakeLists.txt). Sans ce chemin d'inclusion sur la cible lvgl
+# elle-meme, la compilation de la bibliotheque echoue avant d'atteindre notre
+# propre code — meme si aucun test ici n'appelle jamais le pilote SDL.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SDL2 REQUIRED sdl2)
+target_include_directories(lvgl PRIVATE ${SDL2_INCLUDE_DIRS})
+
+# Desinfecteurs et LVGL : LVGL est du code tiers, et le compiler sous
+# ASan/UBSan allongerait la compilation pour signaler d'eventuels motifs
+# internes qui ne sont pas nos defauts. La cible `lvgl` ci-dessus ne recoit
+# donc AUCUN des drapeaux KTOUCH_SANITIZE_FLAGS definis plus bas : ceux-ci ne
+# sont ajoutes qu'a la cible `tests` (nos propres objets, y compris
+# ui/navigation.c). A l'edition de liens, un executable instrumente peut
+# sans probleme incorporer une bibliotheque statique non instrumentee tant
+# que le runtime des desinfecteurs est present sur le lien final (ce qui est
+# le cas ici, KTOUCH_SANITIZE_FLAGS etant aussi passe a target_link_options
+# de `tests`). Si l'editeur de liens finissait par s'en plaindre sur une
+# future chaine de compilation, le repli documente serait d'activer les
+# desinfecteurs aussi sur `lvgl` plutot que de laisser le probleme se
+# reproduire en silence.
 add_library(cjson STATIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/cJSON.c)
 target_include_directories(cjson PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
 # La cible reelle (firmware/CMakeLists.txt) ramene deja CJSON_NESTING_LIMIT
@@ -52,6 +91,7 @@ add_executable(tests
     tests/test_hote_parse.c
     tests/test_boucle_cycle.c
     tests/test_plateforme.c
+    tests/test_navigation.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -59,9 +99,10 @@ add_executable(tests
     ${CORE_DIR}/hote_parse.c
     ${CORE_DIR}/boucle_cycle.c
     ${CORE_DIR}/plateforme.c
+    ${UI_DIR}/navigation.c
 )
-target_link_libraries(tests PRIVATE cjson)
-target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)
+target_link_libraries(tests PRIVATE cjson lvgl)
+target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.

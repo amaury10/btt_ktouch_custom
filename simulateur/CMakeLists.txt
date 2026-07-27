@@ -28,8 +28,18 @@ target_include_directories(lvgl PRIVATE ${SDL2_INCLUDE_DIRS})
 # que d'en garder une copie, pour ne jamais diverger de ce que rend le
 # firmware au même signal.
 set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
+# ui/ (descripteur d'écran, pile de navigation) vit sous firmware/main pour la
+# même raison : un seul navigation.c, compilé ici comme sur la cible, jamais
+# une copie qui pourrait diverger.
+set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
+# navigation.c rend esp_err_t (ESP_OK, ESP_ERR_NO_MEM, ...) pour rester le
+# même contrat des deux côtés (voir core/backend.h) ; hors ESP-IDF, ce type
+# vient du même shim que le harnais de test hôte (host-test/shim/esp_err.h)
+# plutôt que d'une deuxième copie qui pourrait diverger sur les valeurs
+# numériques des codes d'erreur.
+set(ESP_ERR_SHIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../host-test/shim)
 
-add_executable(ktouch-sim main.c afficheur.c plateforme_sim.c ${CORE_DIR}/plateforme.c)
-target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${SDL2_INCLUDE_DIRS})
+add_executable(ktouch-sim main.c afficheur.c plateforme_sim.c ${CORE_DIR}/plateforme.c ${UI_DIR}/navigation.c)
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)
