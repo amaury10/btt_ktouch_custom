@@ -32,6 +32,9 @@ set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
 # même raison : un seul navigation.c, compilé ici comme sur la cible, jamais
 # une copie qui pourrait diverger.
 set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
+# tuile.{c,h} / progression.{c,h} (tâche 5) : même raison que UI_DIR
+# ci-dessus, un seul répertoire de widgets partagés, jamais une copie.
+set(WIDGETS_DIR ${UI_DIR}/widgets)
 # navigation.c rend esp_err_t (ESP_OK, ESP_ERR_NO_MEM, ...) pour rester le
 # même contrat des deux côtés (voir core/backend.h) ; hors ESP-IDF, ce type
 # vient du même shim que le harnais de test hôte, sous un répertoire de
@@ -61,7 +64,9 @@ add_executable(ktouch-sim
     ${CORE_DIR}/boucle_cycle.c
     ${UI_DIR}/navigation.c
     ${UI_DIR}/habillage.c
+    ${WIDGETS_DIR}/tuile.c
+    ${WIDGETS_DIR}/progression.c
 )
-target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)

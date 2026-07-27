@@ -28,14 +28,22 @@
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
+#include "progression.h"
 #include "source_etat_sim.h"
+#include "tuile.h"
 
-/* --- Écran de démonstration --------------------------------------------- */
+/* --- Écran de démonstration --------------------------------------------- *
+ * Tâche 5 : le label de buse et la barre de progression "faits main" sont
+ * remplacés par les widgets partagés (tuile_t / progression_t) — la
+ * démonstration la plus simple qu'ils s'intègrent réellement à l'habillage
+ * et au rendu SDL réel, pas seulement à l'afficheur hors écran 32x32 du
+ * harnais de test (voir host-test/tests/test_widgets.c pour la preuve
+ * mécanique, ceci pour la preuve visuelle). */
 
 typedef struct {
-    lv_obj_t *etat_label;
-    lv_obj_t *buse_label;
-    lv_obj_t *barre_progression;
+    lv_obj_t     *etat_label;
+    tuile_t       buse;
+    progression_t progression;
 } demo_ctx_t;
 
 static void demo_construire(lv_obj_t *parent, void *contexte)
@@ -50,29 +58,24 @@ static void demo_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_style_text_font(ctx->etat_label, &lv_font_montserrat_28, 0);
     lv_obj_set_style_text_color(ctx->etat_label, lv_color_hex(0xFFFFFF), 0);
     lv_label_set_text(ctx->etat_label, "...");
-    lv_obj_align(ctx->etat_label, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_align(ctx->etat_label, LV_ALIGN_TOP_MID, 0, 30);
 
-    ctx->buse_label = lv_label_create(parent);
-    lv_obj_set_style_text_font(ctx->buse_label, &lv_font_montserrat_20, 0);
-    lv_obj_set_style_text_color(ctx->buse_label, lv_color_hex(0xC9D1D9), 0);
-    lv_label_set_text(ctx->buse_label, "");
-    lv_obj_align(ctx->buse_label, LV_ALIGN_TOP_MID, 0, 100);
+    tuile_creer(&ctx->buse, parent, "Nozzle");
+    lv_obj_set_size(ctx->buse.racine, 220, 140);
+    lv_obj_align(ctx->buse.racine, LV_ALIGN_CENTER, 0, -30);
 
-    ctx->barre_progression = lv_bar_create(parent);
-    lv_obj_set_size(ctx->barre_progression, 500, 24);
-    lv_obj_align(ctx->barre_progression, LV_ALIGN_CENTER, 0, 60);
-    lv_bar_set_range(ctx->barre_progression, 0, 1000);
-    lv_bar_set_value(ctx->barre_progression, 0, LV_ANIM_OFF);
+    progression_creer(&ctx->progression, parent);
+    lv_obj_set_size(ctx->progression.racine, 500, 40);
+    lv_obj_align(ctx->progression.racine, LV_ALIGN_CENTER, 0, 130);
 }
 
-/* Grise ses deux labels et la couleur de la barre sur `donnees_perimees`
- * (calculé par l'habillage depuis la seule liaison, voir habillage_pomper()
- * dans firmware/main/ui/habillage.c) — c'est tout ce qu'un écran doit faire
- * de ce champ : ni boîte d'erreur, ni texte différent, juste une couleur
- * plus terne pour signaler que ces valeurs ne sont plus fraîches
- * (spécification §5.3, voir le commentaire de ecran.h sur `mettre_a_jour`). */
+/* Grise le label d'état et les deux widgets sur `donnees_perimees` (calculé
+ * par l'habillage depuis la seule liaison, voir habillage_pomper() dans
+ * firmware/main/ui/habillage.c) — c'est tout ce qu'un écran doit faire de ce
+ * champ : ni boîte d'erreur, ni texte différent, juste une couleur plus
+ * terne pour signaler que ces valeurs ne sont plus fraîches (spécification
+ * §5.3, voir le commentaire de ecran.h sur `mettre_a_jour`). */
 #define COULEUR_TEXTE_NORMAL_ETAT 0xFFFFFF
-#define COULEUR_TEXTE_NORMAL_BUSE 0xC9D1D9
 #define COULEUR_TEXTE_PERIME      0x6B7280
 
 static void demo_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
@@ -83,25 +86,25 @@ static void demo_mettre_a_jour(const void *etat, bool donnees_perimees, void *co
      * qu'un calcul exact, pour ne pas avoir à revenir ici si le gabarit
      * change. */
     char tampon[64 + KLIPPER_FICHIER_MAX];
+    char val[16];
+    char consigne[16];
 
-    snprintf(tampon, sizeof(tampon), "state: %s", e->etat);
+    snprintf(tampon, sizeof(tampon), "state: %s   file: %s", e->etat,
+             e->fichier[0] != '\0' ? e->fichier : "-");
     lv_label_set_text(ctx->etat_label, tampon);
 
-    snprintf(tampon, sizeof(tampon), "nozzle %.0f / %.0f C   file: %s", (double)e->buse_actuelle,
-             (double)e->buse_consigne, e->fichier[0] != '\0' ? e->fichier : "-");
-    lv_label_set_text(ctx->buse_label, tampon);
+    ui_format_temperature(val, sizeof(val), e->buse_actuelle);
+    ui_format_temperature(consigne, sizeof(consigne), e->buse_consigne);
+    tuile_definir_valeur(&ctx->buse, val);
+    tuile_definir_consigne(&ctx->buse, consigne);
 
-    lv_bar_set_value(ctx->barre_progression, (int32_t)(e->progression * 1000.0f), LV_ANIM_OFF);
+    progression_definir(&ctx->progression, e->progression);
 
     lv_obj_set_style_text_color(
         ctx->etat_label,
         lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : COULEUR_TEXTE_NORMAL_ETAT), 0);
-    lv_obj_set_style_text_color(
-        ctx->buse_label,
-        lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : COULEUR_TEXTE_NORMAL_BUSE), 0);
-    lv_obj_set_style_bg_color(ctx->barre_progression,
-                               lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : 0x2E86F5),
-                               LV_PART_INDICATOR);
+    tuile_griser(&ctx->buse, donnees_perimees);
+    progression_griser(&ctx->progression, donnees_perimees);
 }
 
 static const ecran_desc_t ECRAN_DEMO = {

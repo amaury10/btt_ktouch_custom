@@ -33,6 +33,10 @@ set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
 # habillage.c les appelle aussi, et core/plateforme.c ne fournit que la
 # conversion pure (plateforme_wifi_barres).
 set(SIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../simulateur)
+# tuile.{c,h} / progression.{c,h} (tâche 5) vivent sous ui/widgets, un
+# répertoire de plus sous UI_DIR : même raison que UI_DIR lui-même, une seule
+# implémentation compilée ici comme sur la cible et dans le simulateur.
+set(WIDGETS_DIR ${UI_DIR}/widgets)
 
 # LVGL entre dans le harnais de test hote pour rendre la navigation testable
 # sur PC : reutilise le SEUL sous-module et la SEULE lv_conf.h de
@@ -102,6 +106,7 @@ add_executable(tests
     tests/test_plateforme.c
     tests/test_navigation.c
     tests/test_habillage.c
+    tests/test_widgets.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -111,14 +116,16 @@ add_executable(tests
     ${CORE_DIR}/plateforme.c
     ${UI_DIR}/navigation.c
     ${UI_DIR}/habillage.c
+    ${WIDGETS_DIR}/tuile.c
+    ${WIDGETS_DIR}/progression.c
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c
 )
-target_link_libraries(tests PRIVATE cjson lvgl)
+target_link_libraries(tests PRIVATE cjson lvgl m)
 # Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
 # neutre entre host-test/ et simulateur/ : les deux le consomment (voir
 # simulateur/CMakeLists.txt), et aucun des deux ne le possede plus.
-target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${SIM_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
+target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.
