@@ -30,9 +30,11 @@ add_executable(tests
     tests/test_moonraker_parse.c
     tests/test_etat_store.c
     tests/test_liaison.c
+    tests/test_backend_factice.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
+    ${CORE_DIR}/backend_factice.c
 )
 target_link_libraries(tests PRIVATE cjson)
 target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)
