@@ -39,14 +39,18 @@ typedef struct {
      * `construire` et relu dans `mettre_a_jour`, par exemple) le range dans
      * ce contexte — jamais dans une variable statique du fichier, qui
      * survivrait à une destruction et confondrait deux instances du même
-     * écran empilées à des profondeurs différentes. */
+     * écran empilées à des profondeurs différentes. Un écran purement
+     * statique, sans widget à créer dynamiquement, peut laisser ce pointeur
+     * à NULL (navigation.c le vérifie avant d'appeler). */
     void (*construire)(lv_obj_t *parent, void *contexte);
 
     /* Appelé uniquement quand cet écran est au sommet de la pile (voir
      * navigation_mettre_a_jour()) : un écran couvert par un autre ne reçoit
      * aucune mise à jour tant qu'il n'est pas redevenu visible. `etat`
      * pointe vers une structure dont la forme dépend de l'application (voir
-     * apps/klipper) ; un écran générique la traite comme opaque. */
+     * apps/klipper) ; un écran générique la traite comme opaque. Un écran
+     * qui n'affiche rien de dynamique (un menu de boutons fixes, par
+     * exemple) peut laisser ce pointeur à NULL. */
     void (*mettre_a_jour)(const void *etat, void *contexte);
 
     /* Appelé par navigation_depiler() avant que le socle ne détruise le

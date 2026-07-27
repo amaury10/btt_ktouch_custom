@@ -34,10 +34,14 @@ set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
 set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
 # navigation.c rend esp_err_t (ESP_OK, ESP_ERR_NO_MEM, ...) pour rester le
 # même contrat des deux côtés (voir core/backend.h) ; hors ESP-IDF, ce type
-# vient du même shim que le harnais de test hôte (host-test/shim/esp_err.h)
-# plutôt que d'une deuxième copie qui pourrait diverger sur les valeurs
-# numériques des codes d'erreur.
-set(ESP_ERR_SHIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../host-test/shim)
+# vient du même shim que le harnais de test hôte, sous un répertoire de
+# premier niveau (../shim, ni sous host-test/ ni sous simulateur/, pour
+# qu'aucun des deux ne semble le posséder) plutôt que d'une deuxième copie
+# qui pourrait diverger sur les valeurs numériques des codes d'erreur.
+# Écart corrigé après revue : ce shim vivait initialement sous
+# host-test/shim/, ce qui faisait dépendre le simulateur — un artefact livré
+# — d'un répertoire d'outillage de test sans contrat garanti envers lui.
+set(ESP_ERR_SHIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 
 add_executable(ktouch-sim main.c afficheur.c plateforme_sim.c ${CORE_DIR}/plateforme.c ${UI_DIR}/navigation.c)
 target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})

@@ -26,16 +26,28 @@ aucun en-tête fourni uniquement par le SDK ESP-IDF. Une exception délibérée 
 cette règle : `esp_err.h`, dont `firmware/main/core/backend.h` a besoin pour
 le type `esp_err_t` et les constantes `ESP_OK`/`ESP_ERR_*`. Plutôt que de
 faire dépendre `core/` du SDK complet pour ces quelques définitions,
-`host-test/shim/esp_err.h` fournit une doublure — un fichier séparé, aux
-valeurs vérifiées une par une contre le vrai en-tête ESP-IDF et gardées par
-des `_Static_assert` (voir ce fichier) — que `CMakeLists.txt` place en tête
-des chemins d'inclusion pour la cible `tests`. `esp_*.h` au sens large (le
-SDK complet) reste hors de portée ; `esp_err.h` seul a sa doublure
-explicitement maintenue ici. Si un fichier de `core/` a besoin d'un autre
-en-tête ESP-IDF ou FreeRTOS, c'est le signe qu'il fait trop de choses et
-qu'il faut en extraire la partie pure et testable — voir
+`shim/esp_err.h` (à la racine du dépôt, pas sous `host-test/` — voir
+ci-dessous) fournit une doublure — un fichier séparé, aux valeurs vérifiées
+une par une contre le vrai en-tête ESP-IDF et gardées par des
+`_Static_assert` (voir ce fichier) — que `CMakeLists.txt` place en tête des
+chemins d'inclusion pour la cible `tests`. `esp_*.h` au sens large (le SDK
+complet) reste hors de portée ; `esp_err.h` seul a sa doublure explicitement
+maintenue ici. Si un fichier de `core/` a besoin d'un autre en-tête ESP-IDF
+ou FreeRTOS, c'est le signe qu'il fait trop de choses et qu'il faut en
+extraire la partie pure et testable — voir
 `firmware/main/core/boucle_cycle.c`, extrait de `boucle.c` pour exactement
 cette raison.
+
+**Pourquoi ce shim vit à la racine du dépôt et pas sous `host-test/`.** Il
+n'est plus seulement de l'outillage de test : `firmware/main/ui/navigation.c`
+en a aussi besoin pour compiler hors ESP-IDF, et le simulateur
+(`simulateur/CMakeLists.txt`) le lie. Un fichier de convenance de test ne
+doit rien promettre à un artefact livré (le simulateur) — l'inverse est ce
+qui s'est produit ici avant d'être corrigé : quiconque déplacerait
+`host-test/shim/` sans lire `simulateur/CMakeLists.txt` aurait cassé le
+simulateur sans le savoir. `shim/`, à la racine, dit explicitement « doublure
+d'en-tête cible, utilisée par toute compilation côté PC » plutôt que de
+laisser croire que `host-test/` en est l'unique propriétaire.
 
 ## Paquets à installer sous WSL
 

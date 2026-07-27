@@ -102,7 +102,10 @@ add_executable(tests
     ${UI_DIR}/navigation.c
 )
 target_link_libraries(tests PRIVATE cjson lvgl)
-target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)
+# Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
+# neutre entre host-test/ et simulateur/ : les deux le consomment (voir
+# simulateur/CMakeLists.txt), et aucun des deux ne le possede plus.
+target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.

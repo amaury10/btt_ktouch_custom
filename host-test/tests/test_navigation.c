@@ -45,11 +45,25 @@ static const ecran_desc_t ECRAN_B = {
     .construire = b_construire, .mettre_a_jour = b_maj, .detruire = b_detruire,
 };
 
+/* Écran purement inerte, sans état, sans widget dynamique : les trois
+ * rappels sont NULL (voir ecran.h — construire/mettre_a_jour/detruire
+ * peuvent tous l'être). Sert de plancher jetable ci-dessous : il permet de
+ * dépiler A elle-même sans jamais franchir le garde-fou « dernier écran »,
+ * et exerce au passage les trois gardes NULL de navigation.c (aucune ne
+ * doit planter). */
+static const ecran_desc_t ECRAN_DECOR = {
+    .id = "decor", .titre = "Decor", .taille_contexte = 0,
+    .construire = NULL, .mettre_a_jour = NULL, .detruire = NULL,
+};
+
+/* Compteurs simples (construction/destruction), réutilisés par plusieurs
+ * écrans jouets qui n'ont besoin ni d'état ni de suivre une mise à jour. */
+typedef struct { int construits; int detruits; } trace_simple_t;
+
 /* Écran jouet dédié au test de profondeur maximale : sert uniquement à
  * prouver qu'une tentative refusée (pile pleine) ne construit ni ne détruit
  * rien, jamais réellement empilé avec succès. */
-typedef struct { int construits; int detruits; } trace_trop_t;
-static trace_trop_t g_trace_trop;
+static trace_simple_t g_trace_trop;
 static void trop_construire(lv_obj_t *parent, void *ctx) { (void)parent; (void)ctx; g_trace_trop.construits++; }
 static void trop_maj(const void *etat, void *ctx) { (void)etat; (void)ctx; }
 static void trop_detruire(void *ctx) { (void)ctx; g_trace_trop.detruits++; }
@@ -59,13 +73,60 @@ static const ecran_desc_t ECRAN_TROP = {
     .construire = trop_construire, .mettre_a_jour = trop_maj, .detruire = trop_detruire,
 };
 
+/* Troisième écran jouet, utilisé uniquement par le test de
+ * navigation_accueil() (empilé au sommet, au-dessus de A et B). */
+static trace_simple_t g_trace_c;
+static void c_construire(lv_obj_t *parent, void *ctx) { (void)parent; (void)ctx; g_trace_c.construits++; }
+static void c_detruire(void *ctx) { (void)ctx; g_trace_c.detruits++; }
+
+static const ecran_desc_t ECRAN_C = {
+    .id = "c", .titre = "C", .taille_contexte = 0,
+    .construire = c_construire, .mettre_a_jour = NULL, .detruire = c_detruire,
+};
+
 void suite_navigation(void)
 {
     printf("suite : navigation\n");
+
+    /* ------------------------------------------------------------------
+     * Preuve DISCRIMINANTE que le contexte est réellement remis à zéro à
+     * chaque construction — pas seulement lu à zéro parce qu'une toute
+     * première allocation touche une page fraîche de l'OS, ce qui se lit à
+     * zéro que le socle utilise calloc() ou malloc() (revue tâche 3,
+     * Important 1 : le test précédent ne dépilait jamais A, donc son
+     * contexte n'avait jamais servi et ne prouvait rien sur le
+     * réemploi). Séquence : empiler DECOR (plancher, pour pouvoir dépiler A
+     * elle-même sans franchir le garde-fou « dernier écran »), empiler A
+     * (contexte neuf, marqueur à 0 -> construits passe à 1, a_construire
+     * pose marqueur = 0x5A), dépiler A (libère ce contexte, qui porte
+     * encore 0x5A en mémoire), empiler A UNE SECONDE FOIS : si le socle
+     * utilisait malloc() au lieu de calloc(), l'allocateur a de bonnes
+     * chances de rendre exactement le même bloc, le plus récemment libéré
+     * et de la même taille (comportement de réutilisation immédiate d'un
+     * "tcache" glibc pour un petit objet libéré puis aussitôt redemandé) ;
+     * a_construire lirait alors marqueur == 0x5A et construits resterait à
+     * 1 au lieu de passer à 2. C'est cette divergence-là que ce bloc
+     * observe, pas la première construction seule. */
+    navigation_init(lv_screen_active());
+    memset(&g_trace_a, 0, sizeof(g_trace_a));
+    VERIFIER(navigation_empiler(&ECRAN_DECOR) == ESP_OK);
+    VERIFIER(navigation_empiler(&ECRAN_A) == ESP_OK);
+    /* premiere construction, contexte neuf */ VERIFIER(g_trace_a.construits == 1);
+    navigation_depiler();
+    /* A detruite, son contexte libere */ VERIFIER(g_trace_a.detruits == 1);
+    VERIFIER(navigation_empiler(&ECRAN_A) == ESP_OK);
+    /* reconstruite avec un contexte relu a zero, pas le residu 0x5A */
+    VERIFIER(g_trace_a.construits == 2);
+    navigation_depiler();
+
+    /* ------------------------------------------------------------------
+     * Scénario principal (brief de la tâche 3) : cycle de vie normal de la
+     * pile, un écran couvert qui ne reçoit plus de mise à jour, le
+     * garde-fou du dernier écran, l'empilement refusé. */
+    navigation_init(lv_screen_active());
     memset(&g_trace_a, 0, sizeof(g_trace_a));
     memset(&g_trace_b, 0, sizeof(g_trace_b));
     memset(&g_trace_trop, 0, sizeof(g_trace_trop));
-    navigation_init(lv_screen_active());
 
     /* pile vide au depart */ VERIFIER(navigation_profondeur() == 0);
     /* id courant NULL au depart */ VERIFIER(navigation_id_courant() == NULL);
@@ -114,4 +175,38 @@ void suite_navigation(void)
     /* rien construit pour l'ecran refuse */ VERIFIER(g_trace_trop.construits == 0);
     /* rien detruit pour l'ecran refuse */ VERIFIER(g_trace_trop.detruits == 0);
     /* profondeur inchangee */ VERIFIER(navigation_profondeur() == NAVIGATION_PROFONDEUR_MAX);
+
+    /* ------------------------------------------------------------------
+     * navigation_accueil() (revue tâche 3, Important 2 : cette fonction
+     * n'avait aucun test). Empile trois écrans (A au fond, B au milieu, C
+     * au sommet), appelle navigation_accueil(), et vérifie : la profondeur
+     * revient à 1, chaque écran intermédiaire a été détruit exactement une
+     * fois, l'écran du fond n'a PAS été reconstruit, et il est redevenu
+     * visible (démasqué). Reset complet d'abord : la pile contient encore
+     * quatre écrans issus du test de profondeur maximale ci-dessus. */
+    navigation_init(lv_screen_active());
+    memset(&g_trace_a, 0, sizeof(g_trace_a));
+    memset(&g_trace_b, 0, sizeof(g_trace_b));
+    memset(&g_trace_c, 0, sizeof(g_trace_c));
+
+    VERIFIER(navigation_empiler(&ECRAN_A) == ESP_OK);
+    VERIFIER(navigation_empiler(&ECRAN_B) == ESP_OK);
+    VERIFIER(navigation_empiler(&ECRAN_C) == ESP_OK);
+    /* trois ecrans empiles */ VERIFIER(navigation_profondeur() == 3);
+
+    navigation_accueil();
+
+    /* ne garde que le fond */ VERIFIER(navigation_profondeur() == 1);
+    /* C (sommet) detruit une fois */ VERIFIER(g_trace_c.detruits == 1);
+    /* B (milieu) detruit une fois */ VERIFIER(g_trace_b.detruits == 1);
+    /* A (fond) jamais detruit */ VERIFIER(g_trace_a.detruits == 0);
+    /* A (fond) pas reconstruit */ VERIFIER(g_trace_a.construits == 1);
+    /* le fond redevient l'ecran courant */ VERIFIER(strcmp(navigation_id_courant(), "a") == 0);
+    /* le conteneur du fond, premier enfant du parent racine (les ecrans
+     * intermediaires ont ete detruits, donc supprimes de cette liste), est
+     * redemasque : sans ca, navigation_accueil() laisserait un ecran noir
+     * derriere elle malgre une pile qui se dit non vide. */
+    lv_obj_t *fond = lv_obj_get_child(lv_screen_active(), 0);
+    VERIFIER(fond != NULL);
+    VERIFIER(!lv_obj_has_flag(fond, LV_OBJ_FLAG_HIDDEN));
 }

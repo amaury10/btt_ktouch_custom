@@ -143,8 +143,19 @@ void navigation_depiler(void)
 
 void navigation_accueil(void)
 {
+    /* detruire_sommet() directement, pas navigation_depiler() en boucle :
+     * navigation_depiler() redémasque l'écran qui devient sommet à CHAQUE
+     * itération, y compris les écrans intermédiaires qu'une itération
+     * suivante va immédiatement redétruire — travail inutile, sans effet
+     * visible puisqu'un écran cache-puis-détruit dans le même passage
+     * n'est jamais rendu, mais du travail quand même. Même schéma que
+     * navigation_init() : détruire d'abord tout ce qui doit disparaître,
+     * ne redémasquer qu'une seule fois à la fin. */
     while (profondeur > 1) {
-        navigation_depiler();
+        detruire_sommet();
+    }
+    if (profondeur > 0) {
+        lv_obj_clear_flag(pile[profondeur - 1].racine, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
