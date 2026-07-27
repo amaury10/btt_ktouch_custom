@@ -24,6 +24,15 @@ set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
 # n'inclut que "lvgl.h" et le shim esp_err.h ci-dessous, jamais de header
 # FreeRTOS/ESP-IDF.
 set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
+# habillage.c (tâche 4) appelle ui_etat_instantane()/ui_commander() (voir
+# firmware/main/ui/source_etat.h) : sur PC, ces deux symboles viennent de
+# simulateur/source_etat_sim.c, réutilisé tel quel plutôt que dupliqué dans
+# host-test/ — même raison que UI_DIR/navigation.c ci-dessus, une seule
+# implémentation, jamais deux qui pourraient diverger. plateforme_sim.c
+# (heure/batterie/wifi synthétiques) est réutilisé pour la même raison :
+# habillage.c les appelle aussi, et core/plateforme.c ne fournit que la
+# conversion pure (plateforme_wifi_barres).
+set(SIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../simulateur)
 
 # LVGL entre dans le harnais de test hote pour rendre la navigation testable
 # sur PC : reutilise le SEUL sous-module et la SEULE lv_conf.h de
@@ -92,6 +101,7 @@ add_executable(tests
     tests/test_boucle_cycle.c
     tests/test_plateforme.c
     tests/test_navigation.c
+    tests/test_habillage.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -100,12 +110,15 @@ add_executable(tests
     ${CORE_DIR}/boucle_cycle.c
     ${CORE_DIR}/plateforme.c
     ${UI_DIR}/navigation.c
+    ${UI_DIR}/habillage.c
+    ${SIM_DIR}/source_etat_sim.c
+    ${SIM_DIR}/plateforme_sim.c
 )
 target_link_libraries(tests PRIVATE cjson lvgl)
 # Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
 # neutre entre host-test/ et simulateur/ : les deux le consomment (voir
 # simulateur/CMakeLists.txt), et aucun des deux ne le possede plus.
-target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
+target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${SIM_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.

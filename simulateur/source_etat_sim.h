@@ -1,0 +1,44 @@
+/* Fait tourner, côté PC et sans FreeRTOS, le même protocole que
+ * core/boucle.c (magasin d'état + liaison + file de commandes), pour que
+ * source_etat_sim.c puisse implémenter ui_etat_instantane()/ui_commander()
+ * (voir firmware/main/ui/source_etat.h) en lisant exactement ce qu'un écran
+ * lirait sur cible.
+ *
+ * Ce petit couple de fonctions n'appartient pas au contrat de la façade
+ * elle-même (source_etat.h, identique des deux côtés) : c'est ce dont
+ * simulateur/main.c a besoin pour la piloter — l'équivalent, en un appel
+ * explicite plutôt qu'une tâche FreeRTOS en boucle, de boucle_demarrer() et
+ * d'une itération de boucle_tache(). Réutilisé tel quel par
+ * host-test/CMakeLists.txt : le harnais de tests hôte a besoin des mêmes
+ * symboles ui_etat_instantane()/ui_commander() pour lier habillage.c, même
+ * si aucun test ne les exerce directement (voir test_habillage.c, qui ne
+ * teste que les fonctions pures). */
+#pragma once
+
+#include <stdbool.h>
+
+#include "backend.h"
+
+/* Démarre la boucle simulée : initialise le magasin d'état à la taille du
+ * backend, appelle une fois `desc->demarrer(..., NULL)` (aucun hôte réseau
+ * réel côté simulateur), puis valide l'état initial — même séquence que
+ * boucle_demarrer() (core/boucle.c), sans tâche ni mutex ni file avec
+ * attente : le simulateur est mono-thread, rien ici ne peut être préempté
+ * entre deux instructions.
+ *
+ * Rend false si `desc` est incomplet (un des quatre pointeurs de rappel est
+ * NULL), si un backend est déjà démarré, ou si l'initialisation du magasin
+ * d'état échoue — mêmes cas que boucle_demarrer(), qui rend ESP_ERR_INVALID_ARG
+ * / ESP_ERR_INVALID_STATE / ESP_ERR_NO_MEM pour les trois mêmes situations. */
+bool source_etat_sim_demarrer(const backend_desc_t *desc);
+
+/* Un cycle : dépile et exécute les commandes en attente (déposées par
+ * ui_commander()), puis appelle boucle_cycle() et valide le magasin d'état
+ * en cas de succès — même ordre que boucle_tache() (traiter les commandes
+ * avant de rafraîchir, pour qu'une commande acceptée entre deux cycles ne
+ * dorme jamais plus d'un cycle avant d'être exécutée).
+ *
+ * Ne fait rien si source_etat_sim_demarrer() n'a pas été appelé. Ne fait
+ * jamais avancer le temps ni ne bloque : c'est à l'appelant (simulateur/main.c)
+ * de décider du rythme auquel il appelle cette fonction. */
+void source_etat_sim_cycle(void);

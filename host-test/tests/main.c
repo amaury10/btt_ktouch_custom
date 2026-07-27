@@ -15,6 +15,7 @@ void suite_hote_parse(void);
 void suite_boucle_cycle(void);
 void suite_plateforme(void);
 void suite_navigation(void);
+void suite_habillage(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -64,6 +65,7 @@ int main(void)
     suite_boucle_cycle();
     suite_plateforme();
     suite_navigation();
+    suite_habillage();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

@@ -1,0 +1,201 @@
+/* Implémentation simulateur de la façade d'état (voir
+ * firmware/main/ui/source_etat.h) : possède elle-même le magasin d'état, la
+ * liaison et une petite file de commandes à profondeur bornée — un décalque
+ * mono-thread de core/boucle.c, sans FreeRTOS. Voir source_etat_sim.h pour
+ * les deux fonctions supplémentaires (source_etat_sim_demarrer/_cycle) qui
+ * pilotent ce module depuis simulateur/main.c et depuis le harnais de tests
+ * hôte. */
+#include "source_etat_sim.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "source_etat.h"
+
+#include "boucle_cycle.h"
+#include "etat_store.h"
+#include "journal.h"
+#include "liaison.h"
+
+static const char *TAG = "source_etat_sim";
+
+/* Mêmes valeurs et même raison d'être que BOUCLE_FILE_PROFONDEUR/
+ * BOUCLE_ACTION_MAX/BOUCLE_ARGUMENTS_MAX dans core/boucle.c : profondeur 4
+ * pour absorber une rafale de boutons pressés pendant un cycle, tampons
+ * assez larges pour "arret_urgence" et pour un futur arguments_json. Non
+ * partagées avec boucle.c (qui reste privé à sa propre traduction) : ce
+ * fichier n'a pas vocation à dépendre de constantes internes d'un module
+ * qu'il n'inclut jamais. */
+#define FILE_PROFONDEUR 4
+#define ACTION_MAX       32
+#define ARGUMENTS_MAX   128
+
+typedef struct {
+    char action[ACTION_MAX];
+    char arguments_json[ARGUMENTS_MAX];
+    bool avec_arguments;
+} commande_t;
+
+static etat_store_t          g_store;
+static liaison_t             g_liaison;
+static const backend_desc_t *g_desc = NULL;
+static bool                  g_demarre = false;
+
+/* File circulaire à taille fixe, sans allocation : profondeur bornée comme
+ * la file FreeRTOS de boucle.c, sans avoir besoin de xQueueCreate() côté PC. */
+static commande_t g_file[FILE_PROFONDEUR];
+static size_t      g_file_tete = 0;
+static size_t      g_file_taille = 0;
+
+static bool file_pousser(const commande_t *cmd)
+{
+    if (g_file_taille >= FILE_PROFONDEUR) {
+        return false;
+    }
+    size_t indice = (g_file_tete + g_file_taille) % FILE_PROFONDEUR;
+    g_file[indice] = *cmd;
+    g_file_taille++;
+    return true;
+}
+
+static bool file_depiler(commande_t *dest)
+{
+    if (g_file_taille == 0) {
+        return false;
+    }
+    *dest = g_file[g_file_tete];
+    g_file_tete = (g_file_tete + 1) % FILE_PROFONDEUR;
+    g_file_taille--;
+    return true;
+}
+
+bool source_etat_sim_demarrer(const backend_desc_t *desc)
+{
+    if (desc == NULL || desc->demarrer == NULL || desc->rafraichir == NULL ||
+        desc->arreter == NULL || desc->commande == NULL) {
+        JOURNAL_ERREUR(TAG, "source_etat_sim_demarrer : descripteur incomplet");
+        return false;
+    }
+    if (g_demarre) {
+        JOURNAL_ALERTE(TAG, "source_etat_sim_demarrer appele une seconde fois ; ignore");
+        return false;
+    }
+    if (!etat_store_init(&g_store, desc->taille_etat)) {
+        JOURNAL_ERREUR(TAG, "etat_store_init a echoue (taille=%u)", (unsigned)desc->taille_etat);
+        return false;
+    }
+
+    /* Mêmes seuils par défaut que boucle_demarrer() (voir liaison.h pour la
+     * raison de ces deux nombres précis). */
+    liaison_init(&g_liaison, LIAISON_SEUIL_DEGRADE_DEFAUT, LIAISON_SEUIL_HORS_LIGNE_DEFAUT);
+    g_desc = desc;
+    g_file_tete = 0;
+    g_file_taille = 0;
+
+    void *initial = etat_store_tampon_arriere(&g_store);
+    esp_err_t erreur = desc->demarrer(initial, NULL);
+    if (erreur != ESP_OK) {
+        JOURNAL_ERREUR(TAG, "demarrer() du backend %s a echoue",
+                       desc->nom != NULL ? desc->nom : "?");
+        etat_store_liberer(&g_store);
+        g_desc = NULL;
+        return false;
+    }
+    etat_store_valider(&g_store);
+
+    g_demarre = true;
+    JOURNAL_INFO(TAG, "boucle simulee demarree (backend=%s)", desc->nom != NULL ? desc->nom : "?");
+    return true;
+}
+
+/* Dépile et exécute toutes les commandes en attente, avant le rafraîchissement
+ * du cycle — même ordre que boucle_traiter_commandes() dans core/boucle.c. */
+static void traiter_commandes(void)
+{
+    commande_t cmd;
+    while (file_depiler(&cmd)) {
+        void *etat = etat_store_tampon_arriere(&g_store);
+        const char *arguments = cmd.avec_arguments ? cmd.arguments_json : NULL;
+
+        esp_err_t erreur = g_desc->commande(etat, cmd.action, arguments);
+        if (erreur == ESP_OK) {
+            JOURNAL_INFO(TAG, "commande %s executee", cmd.action);
+        } else {
+            JOURNAL_ALERTE(TAG, "commande %s en echec", cmd.action);
+        }
+    }
+}
+
+void source_etat_sim_cycle(void)
+{
+    if (!g_demarre) {
+        return;
+    }
+
+    traiter_commandes();
+
+    bool succes = boucle_cycle(&g_store, &g_liaison, g_desc);
+    if (succes) {
+        etat_store_valider(&g_store);
+    }
+}
+
+bool ui_etat_instantane(void *dest, size_t taille, uint32_t *generation, liaison_etat_t *liaison)
+{
+    if (!g_demarre || dest == NULL) {
+        return false;
+    }
+    if (taille != g_store.taille) {
+        JOURNAL_ALERTE(TAG, "ui_etat_instantane : taille %u attendue, %u recue",
+                       (unsigned)g_store.taille, (unsigned)taille);
+        return false;
+    }
+
+    /* Pas de verrou : mono-thread, rien ne peut permuter le magasin d'état
+     * entre les trois lectures ci-dessous (contrairement à boucle_instantane()
+     * côté ESP, qui protège ce même triplet contre la tâche d'interrogation
+     * concurrente — voir le commentaire de g_mutex_etat dans core/boucle.c). */
+    memcpy(dest, etat_store_lire(&g_store), taille);
+    if (generation != NULL) {
+        *generation = etat_store_generation(&g_store);
+    }
+    if (liaison != NULL) {
+        *liaison = liaison_etat(&g_liaison);
+    }
+    return true;
+}
+
+esp_err_t ui_commander(const char *action, const char *arguments_json)
+{
+    if (!g_demarre) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (action == NULL || action[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(action) >= ACTION_MAX) {
+        JOURNAL_ALERTE(TAG, "action trop longue pour la file (%s)", action);
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (arguments_json != NULL && strlen(arguments_json) >= ARGUMENTS_MAX) {
+        JOURNAL_ALERTE(TAG, "arguments_json trop long pour la file (action=%s)", action);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    commande_t cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    /* snprintf plutôt que strlcpy (non standard hors BSD/newlib) : ce
+     * fichier est aussi lié par host-test, qui tourne sous la libc du
+     * système hôte. Toujours tronqué et terminé par NUL. */
+    snprintf(cmd.action, sizeof(cmd.action), "%s", action);
+    if (arguments_json != NULL) {
+        snprintf(cmd.arguments_json, sizeof(cmd.arguments_json), "%s", arguments_json);
+        cmd.avec_arguments = true;
+    }
+
+    if (!file_pousser(&cmd)) {
+        JOURNAL_ALERTE(TAG, "file de commandes pleine ; commande %s perdue", action);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
