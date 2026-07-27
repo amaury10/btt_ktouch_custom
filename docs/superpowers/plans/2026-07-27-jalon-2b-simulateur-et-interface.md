@@ -384,15 +384,20 @@ git commit -m "feat(core): facade plateforme (heure, batterie, qualite wifi)"
       const char *titre;              /* affiché dans la barre d'état */
       size_t      taille_contexte;    /* le socle alloue ; l'écran n'alloue jamais */
       void (*construire)(lv_obj_t *parent, void *contexte);
-      void (*mettre_a_jour)(const void *etat, void *contexte);
+      void (*mettre_a_jour)(const void *etat, bool donnees_perimees, void *contexte);
       void (*detruire)(void *contexte);
   } ecran_desc_t;
+```
+
+  *(`donnees_perimees` ajouté en cours de jalon — revue de la tâche 4 : sans lui, un écran n'a aucun chemin structurel pour recevoir la péremption et griser, et rien n'empêche d'afficher des zéros comme des mesures. Le chrome le calcule via `habillage_donnees_perimees()` et le propage par `navigation_mettre_a_jour()`.)*
+
+```c
 
   void        navigation_init(lv_obj_t *conteneur);
   esp_err_t   navigation_empiler(const ecran_desc_t *desc);
   void        navigation_depiler(void);
   void        navigation_accueil(void);
-  void        navigation_mettre_a_jour(const void *etat);
+  void        navigation_mettre_a_jour(const void *etat, bool donnees_perimees);
   const char *navigation_titre_courant(void);
   const char *navigation_id_courant(void);
   size_t      navigation_profondeur(void);
@@ -708,7 +713,7 @@ Mise en page, 800×436 sous la barre d'état :
 - Temps restant à droite du pourcentage, format `ui_format_duree`.
 - Trois boutons en bas — `Pause`, `Cancel`, `E-STOP` — créés ici mais **inertes jusqu'à la tâche 9** ; les câbler tout de suite ferait passer un appel réseau par un rappel de bouton avant que la file de commandes ne soit en place.
 
-Quand `habillage_donnees_perimees()` est vrai, toutes les valeurs passent en gris `0x6B7280`. Aucune boîte d'erreur, aucun texte « déconnecté » : la barre d'état s'en charge.
+Quand le paramètre `donnees_perimees` de `mettre_a_jour` est vrai (le chrome le calcule via `habillage_donnees_perimees()` et le propage — l'écran ne rappelle pas la façade lui-même), toutes les valeurs passent en gris `0x6B7280`. Aucune boîte d'erreur, aucun texte « déconnecté » : la barre d'état s'en charge.
 
 - [ ] **Step 4: Capturer et REGARDER quatre images**
 
