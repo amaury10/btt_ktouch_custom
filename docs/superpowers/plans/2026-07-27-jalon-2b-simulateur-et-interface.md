@@ -1,4 +1,4 @@
-# Jalon 2b — Simulateur et interface — Plan d'implémentation
+﻿# Jalon 2b — Simulateur et interface — Plan d'implémentation
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -29,6 +29,16 @@ Ces contraintes s'appliquent à **toutes** les tâches, sans rappel.
 ## Une note sur la forme de ce plan
 
 Les tests et les contrats d'en-tête sont donnés **en entier**, y compris les cas limites et leur justification : c'est là que les jalons précédents ont trouvé leurs défauts, et c'est la partie qu'un plan a le plus intérêt à figer. En revanche, le code de **mise en page LVGL** est spécifié par des contraintes précises (dimensions, polices, couleurs, ordre des opérations, pièges nommés) plutôt que recopié ligne à ligne. C'est un écart délibéré à la règle « pas de description sans code » de la compétence `writing-plans`, et sa raison est concrète : ces lignes-là, je ne peux ni les compiler ni les regarder au moment où j'écris le plan, alors que l'implémenteur, lui, aura le compilateur et une capture PNG sous les yeux à chaque étape. Un pavé de code de mise en page non vérifié dans un plan est du texte que l'implémenteur recopie sans le tester — et sur ce projet, la majorité des défauts trouvés en revue venaient précisément de texte de plan.
+
+**Signatures réelles du harnais de test**, à ne pas réinventer — vérifiées dans `host-test/tests/petit_test.h` :
+
+```c
+VERIFIER(condition)                          /* un seul argument */
+VERIFIER_FLOAT(obtenu, attendu, tolerance)
+VERIFIER_TEXTE(obtenu, attendu)
+```
+
+En cas d'échec, la macro imprime `ECHEC <fichier>:<ligne> : <condition stringifiée>` : le libellé descriptif n'a pas sa place dans l'appel, il se met en commentaire juste avant. Les extraits de test de ce plan suivent cette forme.
 
 ## Faits d'environnement établis avant ce plan
 
@@ -315,17 +325,17 @@ uint8_t plateforme_wifi_barres(int8_t rssi);
 void suite_plateforme(void)
 {
     printf("suite : plateforme\n");
-    VERIFIER("signal excellent", plateforme_wifi_barres(-40) == 4);
-    VERIFIER("borne haute 4 barres", plateforme_wifi_barres(-55) == 4);
-    VERIFIER("juste sous 4 barres", plateforme_wifi_barres(-56) == 3);
-    VERIFIER("borne 3 barres", plateforme_wifi_barres(-65) == 3);
-    VERIFIER("borne 2 barres", plateforme_wifi_barres(-75) == 2);
-    VERIFIER("borne 1 barre", plateforme_wifi_barres(-85) == 1);
-    VERIFIER("signal inutilisable", plateforme_wifi_barres(-90) == 0);
+    /* signal excellent */ VERIFIER(plateforme_wifi_barres(-40) == 4);
+    /* borne haute 4 barres */ VERIFIER(plateforme_wifi_barres(-55) == 4);
+    /* juste sous 4 barres */ VERIFIER(plateforme_wifi_barres(-56) == 3);
+    /* borne 3 barres */ VERIFIER(plateforme_wifi_barres(-65) == 3);
+    /* borne 2 barres */ VERIFIER(plateforme_wifi_barres(-75) == 2);
+    /* borne 1 barre */ VERIFIER(plateforme_wifi_barres(-85) == 1);
+    /* signal inutilisable */ VERIFIER(plateforme_wifi_barres(-90) == 0);
     /* Le RSSI d'un ESP32 non associé vaut 0 : ne pas le rendre comme un
      * signal parfait, sans quoi la barre d'état afficherait quatre barres
      * pleines sur un appareil hors réseau. */
-    VERIFIER("rssi 0 (non associe) ne vaut pas 4 barres", plateforme_wifi_barres(0) == 4);
+    /* rssi 0 (non associe) ne vaut pas 4 barres */ VERIFIER(plateforme_wifi_barres(0) == 4);
 }
 ```
 
@@ -450,42 +460,41 @@ void suite_navigation(void)
     memset(&g_trace_b, 0, sizeof(g_trace_b));
     navigation_init(lv_screen_active());
 
-    VERIFIER("pile vide au depart", navigation_profondeur() == 0);
-    VERIFIER("id courant NULL au depart", navigation_id_courant() == NULL);
+    /* pile vide au depart */ VERIFIER(navigation_profondeur() == 0);
+    /* id courant NULL au depart */ VERIFIER(navigation_id_courant() == NULL);
 
-    VERIFIER("empiler A", navigation_empiler(&ECRAN_A) == ESP_OK);
-    VERIFIER("A construit une fois", g_trace_a.construits == 1);
-    VERIFIER("profondeur 1", navigation_profondeur() == 1);
-    VERIFIER("titre courant", strcmp(navigation_titre_courant(), "A") == 0);
+    /* empiler A */ VERIFIER(navigation_empiler(&ECRAN_A) == ESP_OK);
+    /* A construit une fois */ VERIFIER(g_trace_a.construits == 1);
+    /* profondeur 1 */ VERIFIER(navigation_profondeur() == 1);
+    /* titre courant */ VERIFIER(strcmp(navigation_titre_courant(), "A") == 0);
 
     int etat = 7;
     navigation_mettre_a_jour(&etat);
-    VERIFIER("A recoit la mise a jour", g_trace_a.maj == 1);
-    VERIFIER("A recoit le bon etat", g_trace_a.dernier_etat == 7);
+    /* A recoit la mise a jour */ VERIFIER(g_trace_a.maj == 1);
+    /* A recoit le bon etat */ VERIFIER(g_trace_a.dernier_etat == 7);
 
-    VERIFIER("empiler B", navigation_empiler(&ECRAN_B) == ESP_OK);
-    VERIFIER("A n'est PAS detruit sous B", g_trace_a.detruits == 0);
+    /* empiler B */ VERIFIER(navigation_empiler(&ECRAN_B) == ESP_OK);
+    /* A n'est PAS detruit sous B */ VERIFIER(g_trace_a.detruits == 0);
     etat = 9;
     navigation_mettre_a_jour(&etat);
     /* Règle de la spécification 5.4 : seul l'écran visible est mis à jour. */
-    VERIFIER("A ne recoit plus rien sous B", g_trace_a.maj == 1);
-    VERIFIER("B recoit la mise a jour", g_trace_b.maj == 1);
+    /* A ne recoit plus rien sous B */ VERIFIER(g_trace_a.maj == 1);
+    /* B recoit la mise a jour */ VERIFIER(g_trace_b.maj == 1);
 
     navigation_depiler();
-    VERIFIER("B detruit au depilement", g_trace_b.detruits == 1);
-    VERIFIER("profondeur revenue a 1", navigation_profondeur() == 1);
+    /* B detruit au depilement */ VERIFIER(g_trace_b.detruits == 1);
+    /* profondeur revenue a 1 */ VERIFIER(navigation_profondeur() == 1);
     etat = 11;
     navigation_mettre_a_jour(&etat);
-    VERIFIER("A recoit a nouveau", g_trace_a.maj == 2);
-    VERIFIER("A n'a PAS ete reconstruit", g_trace_a.construits == 1);
+    /* A recoit a nouveau */ VERIFIER(g_trace_a.maj == 2);
+    /* A n'a PAS ete reconstruit */ VERIFIER(g_trace_a.construits == 1);
 
     navigation_depiler();
-    VERIFIER("depiler le dernier ecran ne le detruit pas", g_trace_a.detruits == 0);
-    VERIFIER("profondeur reste 1", navigation_profondeur() == 1);
+    /* depiler le dernier ecran ne le detruit pas */ VERIFIER(g_trace_a.detruits == 0);
+    /* profondeur reste 1 */ VERIFIER(navigation_profondeur() == 1);
 
-    VERIFIER("empiler NULL est refuse", navigation_empiler(NULL) == ESP_ERR_INVALID_ARG);
-    VERIFIER("mise a jour sans etat ne plante pas",
-             (navigation_mettre_a_jour(NULL), true));
+    /* empiler NULL est refuse */ VERIFIER(navigation_empiler(NULL) == ESP_ERR_INVALID_ARG);
+    /* mise a jour sans etat ne plante pas */ VERIFIER((navigation_mettre_a_jour(NULL), true));
 }
 ```
 
@@ -561,24 +570,23 @@ bool        habillage_donnees_perimees(liaison_etat_t etat);
 void suite_habillage(void)
 {
     printf("suite : habillage\n");
-    VERIFIER_TEXTE("connexion", habillage_texte_liaison(LIAISON_CONNEXION), "connecting");
-    VERIFIER_TEXTE("en ligne", habillage_texte_liaison(LIAISON_EN_LIGNE), "online");
-    VERIFIER_TEXTE("degradee", habillage_texte_liaison(LIAISON_DEGRADEE), "unstable");
-    VERIFIER_TEXTE("hors ligne", habillage_texte_liaison(LIAISON_HORS_LIGNE), "offline");
+    /* connexion */ VERIFIER_TEXTE(habillage_texte_liaison(LIAISON_CONNEXION), "connecting");
+    /* en ligne */ VERIFIER_TEXTE(habillage_texte_liaison(LIAISON_EN_LIGNE), "online");
+    /* degradee */ VERIFIER_TEXTE(habillage_texte_liaison(LIAISON_DEGRADEE), "unstable");
+    /* hors ligne */ VERIFIER_TEXTE(habillage_texte_liaison(LIAISON_HORS_LIGNE), "offline");
     /* Un état inconnu ne doit jamais rendre NULL : lv_label_set_text(NULL)
      * déréférence et fait tomber l'interface. */
-    VERIFIER("etat inconnu rend un texte", habillage_texte_liaison((liaison_etat_t)99) != NULL);
+    /* etat inconnu rend un texte */ VERIFIER(habillage_texte_liaison((liaison_etat_t)99) != NULL);
 
     /* Règle 5.3 : périmé dès qu'on n'est plus en ligne, y compris pendant la
      * connexion initiale — afficher des zéros en blanc franc pendant les
      * premières secondes ferait lire « buse à 0 C » comme une mesure. */
-    VERIFIER("en ligne : donnees fraiches", !habillage_donnees_perimees(LIAISON_EN_LIGNE));
-    VERIFIER("degradee : donnees perimees", habillage_donnees_perimees(LIAISON_DEGRADEE));
-    VERIFIER("hors ligne : donnees perimees", habillage_donnees_perimees(LIAISON_HORS_LIGNE));
-    VERIFIER("connexion : donnees perimees", habillage_donnees_perimees(LIAISON_CONNEXION));
+    /* en ligne : donnees fraiches */ VERIFIER(!habillage_donnees_perimees(LIAISON_EN_LIGNE));
+    /* degradee : donnees perimees */ VERIFIER(habillage_donnees_perimees(LIAISON_DEGRADEE));
+    /* hors ligne : donnees perimees */ VERIFIER(habillage_donnees_perimees(LIAISON_HORS_LIGNE));
+    /* connexion : donnees perimees */ VERIFIER(habillage_donnees_perimees(LIAISON_CONNEXION));
 
-    VERIFIER("couleurs distinctes en ligne / hors ligne",
-             habillage_couleur_liaison(LIAISON_EN_LIGNE) != habillage_couleur_liaison(LIAISON_HORS_LIGNE));
+    /* couleurs distinctes en ligne / hors ligne */ VERIFIER(habillage_couleur_liaison(LIAISON_EN_LIGNE) != habillage_couleur_liaison(LIAISON_HORS_LIGNE));
 }
 ```
 
@@ -627,27 +635,27 @@ void suite_widgets(void)
     char b[16];
     printf("suite : widgets (formateurs)\n");
 
-    ui_format_temperature(b, sizeof(b), 205.0f);   VERIFIER_TEXTE("buse nominale", b, "205.0");
-    ui_format_temperature(b, sizeof(b), 0.0f);     VERIFIER_TEXTE("zero est une vraie mesure", b, "0.0");
-    ui_format_temperature(b, sizeof(b), 59.94f);   VERIFIER_TEXTE("arrondi au dixieme", b, "59.9");
-    ui_format_temperature(b, sizeof(b), -12.0f);   VERIFIER_TEXTE("negatif invraisemblable", b, "--");
-    ui_format_temperature(b, sizeof(b), 999.0f);   VERIFIER_TEXTE("au-dela du plausible", b, "--");
-    ui_format_temperature(b, sizeof(b), NAN);      VERIFIER_TEXTE("NaN", b, "--");
-    ui_format_temperature(b, sizeof(b), INFINITY); VERIFIER_TEXTE("infini", b, "--");
+    ui_format_temperature(b, sizeof(b), 205.0f);   /* buse nominale */ VERIFIER_TEXTE(b, "205.0");
+    ui_format_temperature(b, sizeof(b), 0.0f);     /* zero est une vraie mesure */ VERIFIER_TEXTE(b, "0.0");
+    ui_format_temperature(b, sizeof(b), 59.94f);   /* arrondi au dixieme */ VERIFIER_TEXTE(b, "59.9");
+    ui_format_temperature(b, sizeof(b), -12.0f);   /* negatif invraisemblable */ VERIFIER_TEXTE(b, "--");
+    ui_format_temperature(b, sizeof(b), 999.0f);   /* au-dela du plausible */ VERIFIER_TEXTE(b, "--");
+    ui_format_temperature(b, sizeof(b), NAN);      /* NaN */ VERIFIER_TEXTE(b, "--");
+    ui_format_temperature(b, sizeof(b), INFINITY); /* infini */ VERIFIER_TEXTE(b, "--");
 
-    ui_format_duree(b, sizeof(b), 0);       VERIFIER_TEXTE("inconnu", b, "--");
-    ui_format_duree(b, sizeof(b), 59);      VERIFIER_TEXTE("moins d'une minute", b, "0m");
-    ui_format_duree(b, sizeof(b), 83);      VERIFIER_TEXTE("une minute", b, "1m");
-    ui_format_duree(b, sizeof(b), 3600);    VERIFIER_TEXTE("une heure pile", b, "1h 00m");
-    ui_format_duree(b, sizeof(b), 5025);    VERIFIER_TEXTE("heures et minutes", b, "1h 23m");
+    ui_format_duree(b, sizeof(b), 0);       /* inconnu */ VERIFIER_TEXTE(b, "--");
+    ui_format_duree(b, sizeof(b), 59);      /* moins d'une minute */ VERIFIER_TEXTE(b, "0m");
+    ui_format_duree(b, sizeof(b), 83);      /* une minute */ VERIFIER_TEXTE(b, "1m");
+    ui_format_duree(b, sizeof(b), 3600);    /* une heure pile */ VERIFIER_TEXTE(b, "1h 00m");
+    ui_format_duree(b, sizeof(b), 5025);    /* heures et minutes */ VERIFIER_TEXTE(b, "1h 23m");
     /* Borne haute de etat_klipper.h : KLIPPER_TEMPS_RESTANT_MAX_S = 359999. */
-    ui_format_duree(b, sizeof(b), 359999u); VERIFIER_TEXTE("borne haute", b, "99h 59m");
+    ui_format_duree(b, sizeof(b), 359999u); /* borne haute */ VERIFIER_TEXTE(b, "99h 59m");
 
     /* Un tampon trop court ne doit jamais déborder ni laisser la chaîne
      * sans terminateur : le résultat est tronqué, la chaîne reste valide. */
     char court[4];
     ui_format_duree(court, sizeof(court), 5025);
-    VERIFIER("tampon court reste termine", court[3] == '\0');
+    /* tampon court reste termine */ VERIFIER(court[3] == '\0');
 }
 ```
 
