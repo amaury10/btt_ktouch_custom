@@ -43,7 +43,25 @@ set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
 # — d'un répertoire d'outillage de test sans contrat garanti envers lui.
 set(ESP_ERR_SHIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 
-add_executable(ktouch-sim main.c afficheur.c plateforme_sim.c ${CORE_DIR}/plateforme.c ${UI_DIR}/navigation.c)
+# Tâche 4 (habillage) fait tourner, sur PC, le même protocole que
+# core/boucle.c (magasin d'état, liaison, backend factice) via boucle_cycle()
+# et source_etat_sim.c (voir son en-tête) : ces quatre fichiers de core/,
+# déjà réutilisés tels quels par host-test/CMakeLists.txt, entrent ici pour
+# la même raison — une seule implémentation, jamais une copie qui pourrait
+# diverger.
+add_executable(ktouch-sim
+    main.c
+    afficheur.c
+    plateforme_sim.c
+    source_etat_sim.c
+    ${CORE_DIR}/plateforme.c
+    ${CORE_DIR}/etat_store.c
+    ${CORE_DIR}/liaison.c
+    ${CORE_DIR}/backend_factice.c
+    ${CORE_DIR}/boucle_cycle.c
+    ${UI_DIR}/navigation.c
+    ${UI_DIR}/habillage.c
+)
 target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)
