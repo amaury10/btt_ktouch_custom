@@ -60,6 +60,16 @@ void progression_creer(progression_t *p, lv_obj_t *parent)
 
     p->barre = lv_bar_create(p->racine);
     lv_obj_set_size(p->barre, LV_PCT(100), BARRE_HAUTEUR);
+    /* Centree verticalement dans `racine`, pas clouee en haut (defaut LVGL
+     * pour un enfant sans position explicite) : `racine` peut etre plus
+     * haute que BARRE_HAUTEUR (700x36 par defaut ici, 760x40 dans l'ecran
+     * d'accueil, tache 6) pour loger l'etiquette de pourcentage centree
+     * dessus -- sans cet alignement, la barre restait plaquee en y=0 pendant
+     * que l'etiquette se centrait sur toute la hauteur de `racine`, et
+     * debordait visuellement sous le bord bas de la barre (revue tache 6,
+     * fix round 1, M-centre). LV_PCT(100) en largeur rend l'axe horizontal
+     * de l'alignement sans effet ; seul l'axe vertical compte ici. */
+    lv_obj_align(p->barre, LV_ALIGN_LEFT_MID, 0, 0);
     lv_bar_set_range(p->barre, 0, BARRE_PLAGE_MAX);
     lv_bar_set_value(p->barre, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(p->barre, lv_color_hex(COULEUR_FOND_BARRE), LV_PART_MAIN);

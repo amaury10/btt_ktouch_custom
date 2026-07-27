@@ -43,6 +43,17 @@
 #define COULEUR_BOUTON_URGENCE   0xE74C3C /* meme rouge que la pastille "hors ligne", habillage.c */
 #define COULEUR_TEXTE_BOUTON     0xFFFFFF
 
+/* Le commentaire de tête promet que ces macros dérivées empêchent un
+ * désalignement silencieux : ça ne vaut que si un débordement devient une
+ * erreur de compilation plutôt qu'un pixel qui sort du cadre sans que
+ * personne ne le remarque avant une capture (revue tâche 6, fix round 1,
+ * M-asserts). Vérifié une fois ici, à la compilation, pour les deux
+ * rangées dont la largeur est la somme de plusieurs constantes. */
+_Static_assert(MARGE + 2 * TUILE_LARGEUR + MARGE <= LARGEUR_CONTENU,
+                "les deux tuiles + marges debordent de la largeur du contenu");
+_Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_CONTENU,
+                "les trois boutons + marges/ecarts debordent de la largeur du contenu");
+
 /* Un bouton créé ici mais INERTE : aucun lv_obj_add_event_cb(). Câbler une
  * action est le travail de la tâche 9, une fois la file de commandes en
  * place (voir le commentaire de tête de ce fichier et celui de
@@ -100,11 +111,20 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_size(ctx->progression.racine, PROGRESSION_LARGEUR, PROGRESSION_HAUTEUR);
     lv_obj_set_pos(ctx->progression.racine, MARGE, PROGRESSION_Y);
 
-    ctx->temps = lv_label_create(ctx->progression.racine);
+    /* Enfant de `parent` (l'ecran), PAS de ctx->progression.racine : le
+     * contrat de progression.h limite l'ecran appelant a lire/dimensionner
+     * `racine` et a passer par les fonctions publiques pour le reste
+     * (progression_definir/_griser) -- devenir un enfant LVGL de son arbre
+     * interne sort de ce contrat (revue tache 6, fix round 1, M-parent).
+     * lv_obj_align_to() positionne ce libelle relativement a
+     * ctx->progression.racine sans jamais s'y attacher : c'est exactement
+     * la lecture de position/taille que progression.h autorise, rien de
+     * plus. */
+    ctx->temps = lv_label_create(parent);
     lv_obj_set_style_text_font(ctx->temps, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(ctx->temps, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
     lv_label_set_text(ctx->temps, "");
-    lv_obj_align(ctx->temps, LV_ALIGN_CENTER, TEMPS_DECALAGE_X, 0);
+    lv_obj_align_to(ctx->temps, ctx->progression.racine, LV_ALIGN_CENTER, TEMPS_DECALAGE_X, 0);
 
     ctx->bouton_pause = bouton_creer(parent, "Pause", COULEUR_BOUTON, MARGE);
     ctx->bouton_annuler =

@@ -63,8 +63,53 @@ capture ecrite : <chemin> (800x480)
 ```
 
 avec un code de sortie 0. En mode fenêtre, une fenêtre SDL 800×480 s'ouvre et
-affiche la même mire ; le pointeur de souris agit comme le tactile simulé
-(`lv_sdl_mouse_create()`), donc les widgets réagissent au clic.
+affiche l'écran d'accueil Klipper (`ECRAN_ACCUEIL`, tâche 6) branché sur la
+boucle simulée ; le pointeur de souris agit comme le tactile simulé
+(`lv_sdl_mouse_create()`), donc les widgets réagissent au clic. (Avant la
+tâche 6, les deux modes affichaient un écran de démonstration jetable — plus
+le cas depuis que `simulateur/main.c` empile l'écran réel.)
+
+### Options de ligne de commande
+
+`run.sh` transmet tous les arguments reçus après `--` à l'exécutable ; voir
+`main()` dans `simulateur/main.c` pour la liste exacte. Résumé :
+
+- `--capture <chemin>` : mode hors écran, écrit un PNG à `<chemin>` puis
+  quitte (code de sortie 0). Sans cette option : mode fenêtre SDL interactif.
+- `--scenario <n>` : choisit le scénario du backend factice (voir
+  `backend_factice_scenario()` dans `firmware/main/core/backend_factice.h`,
+  la seule source de vérité pour cette numérotation — elle a déjà changé une
+  fois pendant ce jalon). Numérotation actuelle :
+  - `0` — repos (`etat = "standby"`, rien ne chauffe, rien n'imprime) ;
+  - `1` — impression en cours, la progression avance à chaque cycle ;
+  - `2` — **pause** (impression en cours, `impression_en_pause = true`,
+    progression figée à 50 %) — PAS un état de repos, malgré ce qu'un nom de
+    variable ou un commentaire pourrait laisser croire à distance (piège
+    déjà rencontré une fois pendant la revue de la tâche 6 : ne pas
+    supposer, relire `backend_factice.c`) ;
+  - `3` — valeurs extrêmes mais **plausibles** (fichier au maximum de sa
+    capacité sans octet nul, 350 °C) — sert à vérifier qu'un affichage ne
+    déborde nulle part ;
+  - `4` — valeurs **aberrantes**, hors plage (999 °C / -999 °C) — sert à
+    vérifier qu'un affichage rend `"--"` plutôt qu'un nombre faux
+    (`ui_format_temperature()`, voir `firmware/main/ui/widgets/tuile.h`).
+  - tout autre numéro retombe sur le comportement du scénario 3 (voir
+    `backend_factice_rafraichir()`).
+- `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`
+  cycles (un cycle = un rafraîchissement du backend + validation du magasin
+  d'état, ce que ferait `boucle_tache()` une fois par seconde sur cible)
+  avant de capturer. Sans cette option (ou avec `--cycles 0`), la capture se
+  fait à l'instant zéro : tout vaut zéro, l'écran est grisé (liaison encore
+  `LIAISON_CONNEXION`). Sans effet en mode fenêtre (qui avance d'un cycle par
+  seconde écoulée, en continu).
+- `--echec` : remplace `backend_factice` par un backend jouet local à
+  `simulateur/main.c` qui échoue systématiquement (`ESP_FAIL` à chaque
+  rafraîchissement). Sert à faire progresser `liaison_t` vers `DEGRADEE` (3
+  échecs) puis `HORS_LIGNE` (10 échecs) comme le ferait un hôte injoignable
+  sur cible, pour capturer l'état périmé/grisé d'un écran (voir §5.3 de la
+  spécification : la barre d'état est seule à afficher cet état, jamais une
+  boîte d'erreur sur l'écran lui-même). Incompatible en pratique avec
+  `--scenario` (le backend d'échec ignore ce choix).
 
 **Toute image produite ici doit être ouverte et regardée, pas seulement
 générée.** Un PNG que personne n'a ouvert ne prouve rien de plus qu'une
