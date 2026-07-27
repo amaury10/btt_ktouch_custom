@@ -12,6 +12,11 @@
 #define KLIPPER_ETAT_TEXTE_MAX  24
 #define KLIPPER_FICHIER_MAX     64
 
+/* Plafond d'affichage du temps restant estimé : 99 h 59 min 59 s. Au-delà,
+ * l'estimation n'a plus de sens (impression malformée ou début aberrant) et
+ * un afficheur peut représenter cette valeur sans cas particulier. */
+#define KLIPPER_TEMPS_RESTANT_MAX_S 359999u
+
 typedef struct {
     char  etat[KLIPPER_ETAT_TEXTE_MAX];   /* "ready", "printing", "paused", "error" */
 

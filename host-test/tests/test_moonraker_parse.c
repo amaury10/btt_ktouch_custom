@@ -106,4 +106,47 @@ void suite_moonraker_parse(void)
     memset(&e, 0, sizeof(e));
     VERIFIER(moonraker_parse_status(LONG_NOM, strlen(LONG_NOM), &e));
     VERIFIER(strlen(e.fichier) == KLIPPER_FICHIER_MAX - 1);
+
+    /* --- print_duration demesure (1e40) : le flottant devient +infini une
+     * fois retreci en float, la conversion doit etre bornee plutot que de
+     * produire un comportement indefini --- */
+    static const char *DUREE_INFINIE =
+        "{\"result\":{\"status\":{"
+        "\"print_stats\":{\"state\":\"printing\",\"print_duration\":1e40},"
+        "\"virtual_sdcard\":{\"progress\":0.5,\"is_active\":true}"
+        "}}}";
+    memset(&e, 0, sizeof(e));
+    VERIFIER(moonraker_parse_status(DUREE_INFINIE, strlen(DUREE_INFINIE), &e));
+    VERIFIER(e.temps_restant_s == KLIPPER_TEMPS_RESTANT_MAX_S);
+
+    /* --- duree finie mais assez grande pour deborder un uint32_t une fois
+     * divisee par une progression proche du seuil bas --- */
+    static const char *DUREE_DEBORDANTE =
+        "{\"result\":{\"status\":{"
+        "\"print_stats\":{\"state\":\"printing\",\"print_duration\":400000000.0},"
+        "\"virtual_sdcard\":{\"progress\":0.02,\"is_active\":true}"
+        "}}}";
+    memset(&e, 0, sizeof(e));
+    VERIFIER(moonraker_parse_status(DUREE_DEBORDANTE, strlen(DUREE_DEBORDANTE), &e));
+    VERIFIER(e.temps_restant_s == KLIPPER_TEMPS_RESTANT_MAX_S);
+
+    /* --- bornes exactes du garde-fou de progression : 1 % pile et 100 % pile
+     * doivent toutes deux neutraliser l'estimation --- */
+    static const char *PROGRESSION_UN_POURCENT_PILE =
+        "{\"result\":{\"status\":{"
+        "\"print_stats\":{\"state\":\"printing\",\"print_duration\":1000.0},"
+        "\"virtual_sdcard\":{\"progress\":0.01,\"is_active\":true}"
+        "}}}";
+    memset(&e, 0, sizeof(e));
+    VERIFIER(moonraker_parse_status(PROGRESSION_UN_POURCENT_PILE, strlen(PROGRESSION_UN_POURCENT_PILE), &e));
+    VERIFIER(e.temps_restant_s == 0);
+
+    static const char *PROGRESSION_CENT_POURCENT_PILE =
+        "{\"result\":{\"status\":{"
+        "\"print_stats\":{\"state\":\"printing\",\"print_duration\":1000.0},"
+        "\"virtual_sdcard\":{\"progress\":1.0,\"is_active\":true}"
+        "}}}";
+    memset(&e, 0, sizeof(e));
+    VERIFIER(moonraker_parse_status(PROGRESSION_CENT_POURCENT_PILE, strlen(PROGRESSION_CENT_POURCENT_PILE), &e));
+    VERIFIER(e.temps_restant_s == 0);
 }
