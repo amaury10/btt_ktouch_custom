@@ -143,15 +143,31 @@ démarrage, même si une connexion WiFi réussit entre-temps et le remet à zér
 en coulisse pour le prochain démarrage.
 
 Dans la réponse de `/state`, `"generation":0` signifie précisément « aucun
-relevé n'a encore été validé » — hôte non configuré (l'écran de première
-configuration du sous-jalon 2b n'existe pas encore), boucle pas encore
-démarrée, ou aucun cycle réussi depuis le démarrage. C'est le seul signal qui
-distingue cet état de « la machine existe et tous ses champs valent
-authentiquement zéro » : tant que `generation` vaut 0, `"etat":null` dans la
-même réponse et rien sous cette clé ne doit être interprété comme une lecture
-réelle de la machine. Une fois qu'un premier cycle a réussi, `generation`
-avance à chaque nouveau relevé validé (voir `boucle_generation()` dans
-`firmware/main/core/boucle.h`) et `etat` cesse d'être `null`.
+relevé n'a encore été validé » — hôte non configuré, boucle pas encore
+démarrée, démarrée mais aucun cycle réussi depuis, ou hôte configuré mais
+injoignable (Moonraker down : `boucle_demarrer()` réussit dès que
+`demarrer()` du backend réussit — pour Moonraker, cela ne fait que créer un
+client HTTP, sans contacter la machine, voir `backend_moonraker.c`). C'est le
+seul signal qui distingue cet état de « la machine existe et tous ses champs
+valent authentiquement zéro » : tant que `generation` vaut 0, `"etat":null`
+dans la même réponse et rien sous cette clé ne doit être interprété comme une
+lecture réelle de la machine. Une fois qu'un premier cycle a réussi,
+`generation` avance à chaque nouveau relevé validé (voir `boucle_generation()`
+dans `firmware/main/core/boucle.h`) et `etat` cesse d'être `null`.
+
+**`generation` n'est PAS un signal de vivacité de la boucle.** Il n'avance
+QUE lorsque le contenu de l'état change réellement d'un cycle à l'autre
+(comparaison mémoire dans `etat_store_valider()`) — une imprimante au repos,
+dont chaque relevé Klipper est identique au précédent, laisse `generation`
+figée indéfiniment alors même que la boucle interroge Moonraker avec succès
+une fois par seconde. Pour savoir si la boucle est en train de fonctionner,
+c'est le champ `liaison` qu'il faut lire : `"en ligne"` signifie que le
+dernier cycle a réussi (que son contenu ait changé ou non), `"degradee"` ou
+`"hors ligne"` signalent des échecs consécutifs, et `"connexion"` veut dire
+qu'aucun cycle n'a encore abouti depuis le démarrage. `generation` répond à
+« l'affichage doit-il se redessiner ? », `liaison` répond à « la liaison
+fonctionne-t-elle en ce moment ? » — deux questions différentes, à ne pas
+confondre.
 
 ## Revenir au firmware d'origine (le WiFi marche, l'affichage est raté)
 

@@ -23,6 +23,20 @@ typedef struct {
     size_t      taille_etat;  /* le socle alloue ; le backend n'alloue jamais */
 
     esp_err_t (*demarrer)(void *etat, const backend_hote_t *hote);
+
+    /* `etat` pointe TOUJOURS vers un tampon remis à zéro par le socle juste
+     * avant cet appel (voir etat_store_tampon_arriere() dans etat_store.c,
+     * appelée par boucle_cycle() dans core/boucle_cycle.c immédiatement avant
+     * chaque rafraîchissement) — jamais le contenu du cycle précédent. Un
+     * backend qui a besoin de mémoriser quelque chose d'un appel à l'autre
+     * (un compteur de progression, par exemple) doit porter cet état
+     * lui-même, typiquement dans une variable statique du fichier — voir
+     * backend_factice.c — jamais en le relisant depuis `etat`. C'est le
+     * contrat inverse d'un rappel qui recevrait l'état précédent à modifier
+     * en place ; il est délibéré : le socle ne garantit rien de plus fort
+     * qu'un tampon neuf, pour ne jamais laisser un backend fautif publier un
+     * débris du cycle d'avant si `rafraichir` échoue de ne remplir qu'une
+     * partie de la structure. */
     esp_err_t (*rafraichir)(void *etat);
     void      (*arreter)(void *etat);
 

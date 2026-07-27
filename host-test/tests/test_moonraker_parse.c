@@ -152,4 +152,36 @@ void suite_moonraker_parse(void)
     memset(&e, 0, sizeof(e));
     VERIFIER(moonraker_parse_status(PROGRESSION_CENT_POURCENT_PILE, strlen(PROGRESSION_CENT_POURCENT_PILE), &e));
     VERIFIER(e.temps_restant_s == 0);
+
+    /* --- entree profondement imbriquee : host-test/CMakeLists.txt abaisse
+     * CJSON_NESTING_LIMIT a 32 pour que ce garde-fou (deja present dans le
+     * cJSON vendorise, mais jamais exerce par aucun test avant la revue de
+     * fin de jalon 2a) soit reellement declenchable par un test hote court.
+     * 40 niveaux d'imbrication depassent cette limite : cJSON_ParseWithLength
+     * doit rendre NULL proprement (jamais deborder de pile), donc
+     * moonraker_parse_status() doit rendre false sans toucher `sortie` -
+     * meme contrat que les autres entrees invalides testees plus haut. */
+    {
+        /* Tampon largement dimensionne (40 * strlen("{\"a\":") + 1 + 40 = 241
+         * caracteres au maximum, jamais tronque) : construit une seule fois,
+         * les VERIFIER portent sur le resultat de l'analyse, pas sur chaque
+         * caractere ecrit. */
+        char profond[300];
+        size_t pos = 0;
+        const int niveaux = 40;
+        for (int i = 0; i < niveaux; i++) {
+            pos += (size_t)snprintf(profond + pos, sizeof(profond) - pos, "{\"a\":");
+        }
+        pos += (size_t)snprintf(profond + pos, sizeof(profond) - pos, "1");
+        for (int i = 0; i < niveaux; i++) {
+            pos += (size_t)snprintf(profond + pos, sizeof(profond) - pos, "}");
+        }
+        VERIFIER(pos < sizeof(profond));
+
+        etat_klipper_t temoin_profond;
+        memset(&temoin_profond, 0x5A, sizeof(temoin_profond));
+        e = temoin_profond;
+        VERIFIER(!moonraker_parse_status(profond, pos, &e));
+        VERIFIER(memcmp(&e, &temoin_profond, sizeof(e)) == 0);
+    }
 }

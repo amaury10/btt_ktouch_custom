@@ -55,6 +55,7 @@ au stock tout seul, deux fois.
 | Chemin | Rôle |
 |---|---|
 | [`firmware/`](firmware/) | Le firmware ESP-IDF et ses instructions de compilation — voir [`firmware/README.md`](firmware/README.md) |
+| [`host-test/`](host-test/) | Tests unitaires (C, sur PC) du code « non visuel » de `firmware/main/core/` et `firmware/main/apps/klipper/` — voir [`host-test/README.md`](host-test/README.md) |
 | [`tools/ktouch/`](tools/ktouch/) | Bibliothèque Python (standard uniquement) : images ESP32, table de partitions, `otadata` |
 | `ktouch-cli.py` | Lanceur : `verify`, `otadata`, `make-otadata`, `image` |
 | [`docs/hardware/`](docs/hardware/) | Pinout vérifié, partitionnement, procédure d'installation et de retour |
@@ -62,6 +63,9 @@ au stock tout seul, deux fois.
 Pour compiler, il faut ESP-IDF v5.5.5 et renseigner son réseau WiFi ; tout est
 dans [`firmware/README.md`](firmware/README.md). Pour l'outillage Python,
 `python -m pip install -r tools/requirements.txt` puis `python -m pytest`.
+Pour la suite de tests C (analyseurs JSON, store d'état, machine à états de
+connexion — aucun besoin de matériel ni d'ESP-IDF, quelques secondes sous
+WSL), voir [`host-test/README.md`](host-test/README.md).
 
 ## Avertissement
 

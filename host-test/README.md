@@ -4,9 +4,12 @@
 
 Ce répertoire fait tourner, sur PC, les tests unitaires du code « non
 visuel » du firmware : analyseurs JSON, store d'état, machine à états de
-connexion (`firmware/main/core/`). Aucun de ces modules ne touche au
-matériel (écran, Wi-Fi, GPIO) — ce sont des fonctions pures qui prennent du
-JSON ou des structures en entrée et produisent des structures en sortie.
+connexion (`firmware/main/core/`), ainsi que le backend Klipper
+(`firmware/main/apps/klipper/`, via `moonraker_parse.c` — voir
+`CMakeLists.txt` de ce répertoire pour la liste exacte des fichiers
+compilés). Aucun de ces modules ne touche au matériel (écran, Wi-Fi, GPIO) —
+ce sont des fonctions pures qui prennent du JSON ou des structures en entrée
+et produisent des structures en sortie.
 
 **Pourquoi `core/` doit rester compilable hors ESP-IDF.** C'est ce qui rend
 ce harnais possible. Si `core/` en venait à dépendre d'un en-tête ESP-IDF ou
@@ -18,10 +21,21 @@ analyseurs JSON sont l'endroit où vivront la plupart des bugs du jalon 2a,
 car c'est là qu'on interprète le JSON parfois surprenant renvoyé par
 Moonraker : les tester vite est ce qui permet de les tester souvent.
 
-Concrètement : rien sous `host-test/` ne doit inclure `esp_*.h`,
-`freertos/*.h`, ni aucun en-tête fourni uniquement par le SDK ESP-IDF. Si un
-fichier de `core/` a besoin d'un en-tête pareil, c'est le signe qu'il fait
-trop de choses et qu'il faut en extraire la partie pure et testable.
+Concrètement : rien sous `host-test/` ne doit inclure `freertos/*.h`, ni
+aucun en-tête fourni uniquement par le SDK ESP-IDF. Une exception délibérée à
+cette règle : `esp_err.h`, dont `firmware/main/core/backend.h` a besoin pour
+le type `esp_err_t` et les constantes `ESP_OK`/`ESP_ERR_*`. Plutôt que de
+faire dépendre `core/` du SDK complet pour ces quelques définitions,
+`host-test/shim/esp_err.h` fournit une doublure — un fichier séparé, aux
+valeurs vérifiées une par une contre le vrai en-tête ESP-IDF et gardées par
+des `_Static_assert` (voir ce fichier) — que `CMakeLists.txt` place en tête
+des chemins d'inclusion pour la cible `tests`. `esp_*.h` au sens large (le
+SDK complet) reste hors de portée ; `esp_err.h` seul a sa doublure
+explicitement maintenue ici. Si un fichier de `core/` a besoin d'un autre
+en-tête ESP-IDF ou FreeRTOS, c'est le signe qu'il fait trop de choses et
+qu'il faut en extraire la partie pure et testable — voir
+`firmware/main/core/boucle_cycle.c`, extrait de `boucle.c` pour exactement
+cette raison.
 
 ## Paquets à installer sous WSL
 
@@ -40,10 +54,11 @@ de compilation, pour rendre la liste copiable telle quelle.)
 ## Lancer la suite
 
 Depuis un shell Windows (PowerShell), avec le dépôt visible sous
-`/mnt/<lettre>/...` dans WSL :
+`/mnt/<lettre>/...` dans WSL (remplacer `<chemin-vers-le-depot>` par
+l'emplacement local, par exemple `/mnt/c/Users/vous/BTT-KTouch-Custom`) :
 
 ```powershell
-wsl -d Debian -- sh "/mnt/e/Dev/BTT KTouch Custom/host-test/run.sh"
+wsl -d Debian -- sh "<chemin-vers-le-depot>/host-test/run.sh"
 ```
 
 Ou, une fois dans un shell WSL, depuis la racine du dépôt :
@@ -61,14 +76,26 @@ transfert (partage réseau, archive zip, etc.).
 lance l'exécutable `tests`. Il rend le code de sortie de `tests` : non nul
 dès qu'une vérification échoue.
 
-Sortie attendue (suite actuelle, avant que les tâches suivantes n'ajoutent
-les leurs) :
+Sortie attendue (sept suites au moment d'écrire ceci ; ce nombre grandit à
+mesure que de nouveaux fichiers `tests/test_*.c` s'ajoutent) :
 
 ```
 suite : harnais
+suite : contrat
+suite : analyseur moonraker
+suite : magasin d'etat
+suite : liaison
+suite : backend factice
+suite : analyseur d'hote (adresse:port)
+suite : boucle_cycle
 
-3 verification(s), 0 echec(s)
+168 verification(s), 0 echec(s)
 ```
+
+(Quelques lignes `I backend_factice: ...` / `W backend_factice: ...`
+s'intercalent aussi : ce sont des logs applicatifs normaux du backend
+factice pendant `suite : backend factice` et `suite : boucle_cycle`, pas des
+échecs — un échec s'annonce toujours par une ligne commençant par `ECHEC`.)
 
 ## Sanitizers (ASan + UBSan)
 

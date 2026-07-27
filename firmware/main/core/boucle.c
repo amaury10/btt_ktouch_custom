@@ -2,11 +2,13 @@
 
 #include <string.h>
 
+#include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "boucle_cycle.h"
 #include "etat_store.h"
 #include "journal.h"
 
@@ -45,14 +47,6 @@ static const char *TAG = "boucle";
 #define BOUCLE_PILE_OCTETS 8192
 #define BOUCLE_PRIORITE    (tskIDLE_PRIORITY + 5)
 
-/* Seuils de liaison_init() : à une interrogation par seconde, 3 échecs
- * consécutifs (~3 s) suffisent à distinguer une vraie dégradation d'un paquet
- * isolé perdu sur le réseau local (voir le commentaire de liaison_echec()) ;
- * 10 échecs (~10 s) signalent une coupure réelle sans réagir au moindre creux
- * passager d'un réseau WiFi domestique. */
-#define BOUCLE_SEUIL_DEGRADE     3
-#define BOUCLE_SEUIL_HORS_LIGNE 10
-
 typedef struct {
     char action[BOUCLE_ACTION_MAX];
     char arguments_json[BOUCLE_ARGUMENTS_MAX];
@@ -65,6 +59,14 @@ static QueueHandle_t          g_file_commandes;
 static TaskHandle_t           g_tache;
 static const backend_desc_t  *g_desc;
 static bool                   g_demarre = false;
+
+/* Plus petit tas libre jamais observé par boucle_tache() (voir son log en
+ * fin de boucle ci-dessous) : UINT32_MAX au départ, jamais réellement
+ * atteinte par esp_get_free_heap_size(), donc le premier cycle journalise
+ * toujours. Lue et écrite uniquement par cette tâche (aucun accès
+ * concurrent, donc pas de mutex nécessaire) — même principe que
+ * s_marge_pile_min dans web.c. */
+static uint32_t               s_tas_libre_min = UINT32_MAX;
 
 /* Protège uniquement l'instant de la permutation (etat_store_valider()) et
  * la copie faite par boucle_etat_copier() — jamais le rafraîchissement
@@ -111,40 +113,64 @@ static void boucle_tache(void *parametre)
     for (;;) {
         boucle_traiter_commandes();
 
-        /* Remis à zéro ici, après boucle_traiter_commandes() : une commande
-         * qui aurait (contre le contrat) écrit dans le tampon arrière ne
-         * doit jamais contaminer le prochain rafraîchissement. */
-        void *arriere = etat_store_tampon_arriere(&g_store);
-        esp_err_t erreur = g_desc->rafraichir(arriere);
+        /* Le corps du cycle (remise à zéro du tampon arrière, appel à
+         * desc->rafraichir(), mise à jour de la liaison) vit désormais dans
+         * boucle_cycle() (core/boucle_cycle.c), pur et testable sur PC — voir
+         * host-test/tests/test_boucle_cycle.c. Cette fonction-ci (le "shell"
+         * FreeRTOS) ne garde que ce qui ne peut pas être autrement : la
+         * tâche, la file de commandes, et le mutex ci-dessous. */
+        bool succes = boucle_cycle(&g_store, &g_liaison, g_desc);
 
-        if (erreur == ESP_OK) {
-            liaison_succes(&g_liaison);
+        if (succes) {
             /* Validé seulement en cas de succès : c'est ce qui tient la
              * promesse de moonraker_parse.h (« sortie n'est pas modifiée en
              * cas d'échec, l'appelant garde son dernier état connu ») au
-             * niveau du magasin double tampon. Le tampon arrière vient
-             * d'être remis à zéro par etat_store_tampon_arriere() ci-dessus
-             * ; si rafraichir() a échoué avant de le remplir (panne réseau,
-             * JSON illisible), il est resté à zéro. Le valider quand même
-             * permuterait ce zéro à la place du dernier état réellement
+             * niveau du magasin double tampon. Le tampon arrière a été remis
+             * à zéro par boucle_cycle() ci-dessus (via
+             * etat_store_tampon_arriere()) ; si rafraichir() avait échoué
+             * avant de le remplir (panne réseau, JSON illisible), succes
+             * vaudrait false et ce bloc ne s'exécuterait pas. Valider quand
+             * même permuterait ce zéro à la place du dernier état réellement
              * connu, effaçant l'écran au lieu de le griser — exactement ce
              * que liaison.h interdit ("un écran ne montre jamais de boîte
              * d'erreur réseau, il grise ses données périmées"). Ne pas
              * valider laisse le tampon avant (donc etat_store_lire()) sur
-             * le dernier succès, pendant que liaison_echec() ci-dessous fait
-             * savoir à l'habillage que ces données sont périmées.
+             * le dernier succès, pendant que liaison_echec() (dans
+             * boucle_cycle()) a déjà fait savoir à l'habillage que ces
+             * données sont périmées si succes est false.
              *
              * Sous mutex : c'est le seul instant où le tampon "avant" change
              * de pointeur. Sans ce verrou, un boucle_etat_copier() concurrent
              * pourrait lire le pointeur juste avant la permutation puis
              * copier depuis un tampon qui devient "arrière" entre-temps —
              * possiblement déjà remis à zéro par le etat_store_tampon_arriere()
-             * du cycle suivant avant que la copie n'ait fini. */
+             * du cycle suivant avant que la copie n'ait fini. Ce même verrou
+             * ne protège JAMAIS l'appel à boucle_cycle() lui-même : il peut
+             * contenir une requête HTTP de plusieurs secondes
+             * (desc->rafraichir()), et un lecteur concurrent (l'interface
+             * LVGL du sous-jalon 2b, via boucle_etat_copier()/
+             * boucle_instantane()) ne doit jamais attendre derrière elle. */
             xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
             etat_store_valider(&g_store);
             xSemaphoreGive(g_mutex_etat);
-        } else {
-            liaison_echec(&g_liaison);
+        }
+
+        /* Mesure, pas estimation : voir gestion_state() dans web.c pour le
+         * même principe appliqué à la marge de pile, et le commentaire de
+         * MOONRAKER_TAMPON_OCTETS dans backend_moonraker.c pour la raison
+         * précise (moonraker_parse_status() alloue et libère un arbre cJSON
+         * complet à chaque cycle réussi — équilibré, mais une churn de tas
+         * bien réelle sur un appareil qui tourne des jours sans redémarrer).
+         * Même filtre que web.c, pour la même raison : cette tâche tourne en
+         * continu, une trace à CHAQUE cycle chasserait la séquence de
+         * démarrage du netlog (16 Kio) en quelques minutes. Une ligne au
+         * premier cycle, puis seulement quand le pire jamais observé
+         * s'aggrave. */
+        uint32_t tas_libre = (uint32_t)esp_get_free_heap_size();
+        if (tas_libre < s_tas_libre_min) {
+            s_tas_libre_min = tas_libre;
+            JOURNAL_INFO(TAG, "boucle_tache : nouveau minimum de tas libre %u octets",
+                         (unsigned)tas_libre);
         }
 
         vTaskDelay(pdMS_TO_TICKS(BOUCLE_PERIODE_MS));
@@ -189,7 +215,12 @@ esp_err_t boucle_demarrer(const backend_desc_t *desc, const backend_hote_t *hote
         return ESP_ERR_NO_MEM;
     }
 
-    liaison_init(&g_liaison, BOUCLE_SEUIL_DEGRADE, BOUCLE_SEUIL_HORS_LIGNE);
+    /* Seuils par défaut de liaison.h (voir leur commentaire dans liaison.h,
+     * qui les nomme précisément pour que ce fichier n'ait pas à les
+     * dupliquer) : à une interrogation par seconde, 3 échecs consécutifs
+     * suffisent à distinguer une vraie dégradation d'un paquet isolé perdu
+     * sur le réseau local ; 10 échecs signalent une coupure réelle. */
+    liaison_init(&g_liaison, LIAISON_SEUIL_DEGRADE_DEFAUT, LIAISON_SEUIL_HORS_LIGNE_DEFAUT);
     g_desc = desc;
 
     /* Premier appel à demarrer() sur le tampon arrière (déjà à zéro par
@@ -279,6 +310,34 @@ liaison_etat_t boucle_liaison(void)
         return LIAISON_CONNEXION;
     }
     return liaison_etat(&g_liaison);
+}
+
+bool boucle_instantane(void *dest, size_t taille, uint32_t *generation, liaison_etat_t *liaison)
+{
+    if (!g_demarre || dest == NULL) {
+        return false;
+    }
+    if (taille != g_store.taille) {
+        JOURNAL_ALERTE(TAG, "boucle_instantane : taille %u attendue, %u recue",
+                       (unsigned)g_store.taille, (unsigned)taille);
+        return false;
+    }
+
+    /* Même verrou que boucle_etat_copier() et etat_store_valider() : la
+     * lecture des trois valeurs ci-dessous se fait sans jamais laisser la
+     * tâche d'interrogation permuter le magasin d'état entre deux d'entre
+     * elles (voir le commentaire de g_mutex_etat plus haut dans ce
+     * fichier). */
+    xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
+    memcpy(dest, etat_store_lire(&g_store), taille);
+    if (generation != NULL) {
+        *generation = etat_store_generation(&g_store);
+    }
+    if (liaison != NULL) {
+        *liaison = liaison_etat(&g_liaison);
+    }
+    xSemaphoreGive(g_mutex_etat);
+    return true;
 }
 
 esp_err_t boucle_commander(const char *action, const char *arguments_json)

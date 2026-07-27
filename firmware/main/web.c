@@ -132,45 +132,63 @@ static esp_err_t gestion_status(httpd_req_t *req)
  * l'analyseur (moonraker_parse.c) lit correctement une vraie machine : il
  * n'y a pas encore d'écran pour l'afficher (sous-jalon 2b).
  *
- * boucle_etat_copier() est utilisé ici, JAMAIS boucle_etat() : ce dernier
+ * boucle_instantane() est utilisé ici, JAMAIS boucle_etat() : ce dernier
  * rend un pointeur BRUT vers le tampon interne de la boucle, valide
  * seulement jusqu'au prochain cycle de la tâche d'interrogation (~1 s, voir
  * le commentaire de boucle_etat() dans boucle.h). Cette tâche httpd tourne
  * dans son propre contexte, sans aucune garantie d'être relue avant que la
  * tâche d'interrogation ne remette à zéro ce même tampon pour le cycle
  * suivant — un simple délai de scheduler suffirait à transformer un
- * pointeur brut en lecture de mémoire déjà écrasée. boucle_etat_copier()
- * copie sous mutex dans une structure locale à cette fonction, qui reste
+ * pointeur brut en lecture de mémoire déjà écrasée. boucle_instantane()
+ * copie sous mutex dans une structure locale à cette fonction (qui reste
  * valable et exacte quel que soit le temps que la construction du JSON
- * ci-dessous prend ensuite. */
+ * ci-dessous prend ensuite) ET lit `generation`/`liaison` dans la même
+ * prise de verrou — contrairement à trois appels séparés
+ * (boucle_etat_copier()+boucle_generation()+boucle_liaison()), qui
+ * laisseraient la tâche d'interrogation permuter le magasin d'état entre
+ * deux d'entre eux et exposeraient un client à une `generation` qui ne
+ * correspond pas au contenu qu'il vient de lire. */
 static esp_err_t gestion_state(httpd_req_t *req)
 {
     etat_klipper_t etat;
-    /* La valeur de retour est examinée, pas ignorée : rend false si la
-     * boucle n'a jamais démarré (hôte non configuré, ou boucle_demarrer() en
-     * échec) — mais aussi, dès qu'un futur backend déclarera une
-     * etat_klipper_t d'une autre taille, si `taille` ne correspond plus à
-     * celle du backend réellement actif (voir boucle_etat_copier() dans
-     * boucle.c). Dans les deux cas, `etat` n'a PAS été écrit par la copie et
-     * ne contient que ce que la pile de la tâche httpd contenait avant cet
-     * appel : le publier quand même serait une lecture fabriquée présentée
-     * comme mesurée, à côté d'une `liaison`/`generation` pourtant valides —
-     * exactement ce que ce jalon interdit. `etat_disponible` ci-dessous est
-     * ce qui empêche ça. */
-    bool etat_disponible = boucle_etat_copier(&etat, sizeof(etat));
+    uint32_t generation = 0;
+    liaison_etat_t liaison = LIAISON_CONNEXION;
+    bool copie_reussie = boucle_instantane(&etat, sizeof(etat), &generation, &liaison);
+
+    /* Ni `copie_reussie` ni `generation != 0` ne suffisent seuls.
+     * `copie_reussie` est faux si la boucle n'a jamais démarré (hôte non
+     * configuré, ou boucle_demarrer() en échec) — mais RESTE VRAI dès que la
+     * boucle a démarré, même si elle n'a encore jamais réussi le moindre
+     * cycle : boucle_demarrer() réussit dès que demarrer() du backend
+     * réussit, et pour le backend Moonraker, demarrer() ne fait que créer un
+     * client HTTP, sans contacter quoi que ce soit (voir
+     * backend_moonraker.c). Un hôte configuré mais injoignable produit donc
+     * `copie_reussie == true` avec `etat` intégralement à zéro (le tampon
+     * initial, jamais rempli par un rafraîchissement réussi) — publier ce
+     * zéro reviendrait à présenter une machine jamais jointe comme une
+     * machine mesurée au repos. `generation != 0` est le seul signal qui
+     * distingue « pas encore de lecture réussie » de « tous les champs
+     * valent authentiquement zéro » (voir aussi flashing.md) : elle ne passe
+     * à une valeur non nulle qu'après un premier etat_store_valider()
+     * réussi, donc après un premier cycle de rafraîchissement réellement
+     * abouti. Publier `etat` sans ce garde serait une lecture fabriquée
+     * présentée comme mesurée, à côté d'une `liaison`/`generation` pourtant
+     * valides — exactement ce que ce jalon interdit. */
+    bool etat_disponible = copie_reussie && generation != 0;
 
     cJSON *racine = cJSON_CreateObject();
     if (racine == NULL) {
         return httpd_resp_send_500(req);
     }
 
-    cJSON_AddStringToObject(racine, "liaison", liaison_nom(boucle_liaison()));
+    cJSON_AddStringToObject(racine, "liaison", liaison_nom(liaison));
     /* generation vaut 0 tant qu'aucun relevé n'a jamais été validé par la
-     * boucle (boucle non démarrée, ou démarrée mais pas encore de premier
-     * cycle réussi) — c'est le seul signal qui distingue « pas encore de
-     * lecture » de « tous les champs valent authentiquement zéro », d'où son
-     * importance documentée ici et dans flashing.md. */
-    cJSON_AddNumberToObject(racine, "generation", (double)boucle_generation());
+     * boucle (boucle non démarrée, démarrée mais pas encore de premier cycle
+     * réussi, ou démarrée et en échec permanent) — c'est le seul signal qui
+     * distingue « pas encore de lecture » de « tous les champs valent
+     * authentiquement zéro », d'où son importance documentée ici et dans
+     * flashing.md. */
+    cJSON_AddNumberToObject(racine, "generation", (double)generation);
 
     if (etat_disponible) {
         cJSON *etat_json = cJSON_AddObjectToObject(racine, "etat");

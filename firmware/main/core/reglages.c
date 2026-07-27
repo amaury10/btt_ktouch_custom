@@ -104,6 +104,8 @@ esp_err_t reglages_charger(void)
              * le detail du pourquoi. */
             JOURNAL_ALERTE(TAG, "cle %s inexploitable (%s) ; hote par defaut",
                            REGLAGES_CLE_HOTE, tampon_hote);
+        } else {
+            JOURNAL_INFO(TAG, "hote source=nvs (%s:%u)", g_hote.adresse, (unsigned)g_hote.port);
         }
     } else if (erreur_hote == ESP_ERR_NVS_NOT_FOUND) {
         /* Migration : un appareil déjà configuré par une version antérieure
@@ -111,11 +113,41 @@ esp_err_t reglages_charger(void)
          * deux anciennes clés séparées — les relire évite de le réinitialiser
          * silencieusement au premier démarrage sur ce firmware. */
         reglages_charger_ancien_format(handle);
+        if (g_hote.adresse[0] != '\0') {
+            JOURNAL_INFO(TAG, "hote source=nvs (cles heritees) (%s:%u)",
+                         g_hote.adresse, (unsigned)g_hote.port);
+        }
     } else {
         JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; hote par defaut",
                        REGLAGES_CLE_HOTE, esp_err_to_name(erreur_hote));
         g_hote.adresse[0] = '\0';
         g_hote.port = REGLAGES_PORT_DEFAUT;
+    }
+
+    /* Secours Kconfig : uniquement si la NVS (clé actuelle ET anciennes clés
+     * de migration ci-dessus) n'a fourni aucune adresse exploitable. Priorité
+     * inverse de celle de wifi.c délibérément : ici c'est la NVS — un réglage
+     * que l'UTILISATEUR a réellement saisi (sous-jalon 2b) — qui prime sur le
+     * secours compilé, puisqu'un utilisateur qui a reconfiguré son hôte
+     * depuis l'écran ne doit jamais le voir écrasé par une valeur de
+     * compilation figée. Jamais réécrit en NVS (voir CONFIG_KTOUCH_KLIPPER_HOST
+     * dans Kconfig.projbuild) : un réglage jamais saisi par l'utilisateur ne
+     * doit pas devenir un état persistant. Sans ce secours, un appareil de
+     * développement sans écran de configuration (le sous-jalon 2b n'existe
+     * pas encore) et sans port série ne peut JAMAIS faire démarrer la boucle
+     * d'interrogation, quelle que soit la machine Klipper réellement
+     * joignable sur le réseau — voir app_main.c, qui refuse de démarrer la
+     * boucle tant que reglages_configures() rend faux. */
+    if (g_hote.adresse[0] == '\0' && CONFIG_KTOUCH_KLIPPER_HOST[0] != '\0') {
+        strlcpy(g_hote.adresse, CONFIG_KTOUCH_KLIPPER_HOST, sizeof(g_hote.adresse));
+        g_hote.port = (CONFIG_KTOUCH_KLIPPER_PORT > 0 && CONFIG_KTOUCH_KLIPPER_PORT <= 65535)
+                          ? (uint16_t)CONFIG_KTOUCH_KLIPPER_PORT
+                          : REGLAGES_PORT_DEFAUT;
+        JOURNAL_INFO(TAG, "hote source=kconfig (%s:%u), aucun reglage NVS",
+                     g_hote.adresse, (unsigned)g_hote.port);
+    } else if (g_hote.adresse[0] == '\0') {
+        JOURNAL_ALERTE(TAG, "aucun hote configure (ni NVS, ni Kconfig) ; "
+                       "la boucle d'interrogation ne demarrera pas");
     }
 
     size_t taille_backend = sizeof(g_backend);

@@ -11,6 +11,31 @@ menu "K-Touch custom"
         string "Mot de passe WiFi"
         default ""
 
+    config KTOUCH_KLIPPER_HOST
+        string "Adresse de l'hote Klipper (Moonraker)"
+        default ""
+        help
+            Secours utilise UNIQUEMENT si aucun hote n'est encore enregistre
+            en NVS (reglages_definir_hote() n'a jamais ete appelee, et aucune
+            des anciennes cles de migration n'en porte un non plus) : voir
+            reglages_charger() dans core/reglages.c. Sans secours ici, un
+            appareil sans port serie ni interface de configuration (l'ecran
+            de premiere configuration du sous-jalon 2b n'existe pas encore)
+            ne peut jamais faire demarrer la boucle d'interrogation, meme
+            avec un hote Klipper reellement joignable sur le reseau — c'est
+            le meme role que CONFIG_KTOUCH_WIFI_SSID joue pour le WiFi.
+            Jamais reecrit dans la NVS : un reglage jamais saisi par
+            l'utilisateur ne doit pas devenir un etat persistant.
+
+    config KTOUCH_KLIPPER_PORT
+        int "Port de l'hote Klipper (Moonraker)"
+        default 7125
+        range 1 65535
+        help
+            N'est consulte que si KTOUCH_KLIPPER_HOST ci-dessus l'est aussi
+            (secours NVS absente). 7125 est le port par defaut de Moonraker,
+            identique a HOTE_PARSE_PORT_DEFAUT (core/hote_parse.h).
+
     config KTOUCH_RESCUE_TIMEOUT_MS
         int "Délai avant sauvetage automatique (ms)"
         default 90000

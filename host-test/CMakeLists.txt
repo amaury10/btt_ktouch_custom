@@ -22,6 +22,24 @@ set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
 
 add_library(cjson STATIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor/cJSON.c)
 target_include_directories(cjson PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vendor)
+# La cible reelle (firmware/CMakeLists.txt) ramene deja CJSON_NESTING_LIMIT
+# de son defaut de 1000 a 32 : une reponse HTTP de 4 Kio remplie de
+# crochets/accolades imbriques atteint environ 1000 cadres d'appel et deborde
+# la pile de 8 Kio de la tache d'interrogation (core/boucle.c) bien avant que
+# la limite par defaut de cJSON ne se declenche, transformant une reponse
+# hostile ou corrompue en panique au lieu d'un simple echec d'analyse propre
+# (voir le commentaire de firmware/CMakeLists.txt pour le detail). Ce
+# garde-fou existait donc deja sur cible, mais RIEN ne l'exerçait cote hote :
+# le cJSON vendorise ici tournait avec son defaut de 1000, et aucun test ne
+# construisait une entree assez profonde pour le declencher. Reprendre ici la
+# meme valeur (32, plutot que le defaut vendorise) rend ce garde-fou
+# reellement testable par un test hote court (voir test_moonraker_parse.c),
+# et garantit que le harnais hote exerce la MEME configuration que la cible,
+# pas une plus permissive qui masquerait une regression. `#ifndef` dans
+# cJSON.h/.c : doit etre defini AVANT que vendor/cJSON.c ne soit compile,
+# donc sur la cible `cjson` elle-meme, pas sur `tests` qui ne fait qu'appeler
+# l'API deja compilee.
+target_compile_definitions(cjson PUBLIC CJSON_NESTING_LIMIT=32)
 
 add_executable(tests
     tests/main.c
@@ -32,11 +50,13 @@ add_executable(tests
     tests/test_liaison.c
     tests/test_backend_factice.c
     tests/test_hote_parse.c
+    tests/test_boucle_cycle.c
     ${CORE_DIR}/../apps/klipper/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c
     ${CORE_DIR}/hote_parse.c
+    ${CORE_DIR}/boucle_cycle.c
 )
 target_link_libraries(tests PRIVATE cjson)
 target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/shim)

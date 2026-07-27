@@ -21,6 +21,16 @@
 esp_err_t   reglages_charger(void);
 bool        reglages_configures(void);   /* faux au tout premier démarrage */
 
+/* Si aucun hôte n'a jamais été enregistré en NVS (ni sous la clé actuelle, ni
+ * sous les deux anciennes clés de migration), reglages_charger() se rabat sur
+ * CONFIG_KTOUCH_KLIPPER_HOST/CONFIG_KTOUCH_KLIPPER_PORT (Kconfig.projbuild) —
+ * même rôle que CONFIG_KTOUCH_WIFI_SSID pour le WiFi. Ce secours EST pris en
+ * compte par reglages_configures() ci-dessous (il rend vrai dès qu'une
+ * adresse est disponible, quelle qu'en soit la source) : c'est ce qui permet
+ * à app_main.c de démarrer la boucle d'interrogation même sur un appareil où
+ * personne n'a jamais pu saisir d'hôte (pas de port série, pas encore d'écran
+ * de configuration). Il n'est en revanche JAMAIS réécrit en NVS : un réglage
+ * jamais saisi par l'utilisateur ne doit pas devenir un état persistant. */
 bool        reglages_hote(backend_hote_t *sortie);
 esp_err_t   reglages_definir_hote(const backend_hote_t *hote);
 

@@ -14,6 +14,18 @@ static const char *TAG = "backend_factice";
  * etat_klipper_t. */
 static int g_scenario = 0;
 
+/* Progression du scénario 1, portée ICI plutôt que relue depuis `etat` : le
+ * socle remet `etat` à zéro avant CHAQUE appel de rafraichir() (voir le
+ * contrat documenté sur backend_desc_t::rafraichir dans backend.h), donc
+ * `e->progression` y vaut toujours 0 en entrée — un fait qui n'était pas
+ * documenté avant la revue de fin de jalon 2a, et que ce fichier lisait à
+ * l'envers (CRITICAL 1) : la progression restait figée à
+ * FACTICE_PAS_PROGRESSION pour toujours, etat_store_valider() ne détectait
+ * plus aucun changement après le premier cycle, et generation cessait
+ * d'avancer. Un compteur statique de fichier, comme g_scenario juste
+ * au-dessus, est la façon correcte de porter un état d'un appel à l'autre. */
+static float g_progression_scenario1 = 0.0f;
+
 /* Durée totale supposée du scénario 1, choisie arbitrairement mais fixe :
  * elle permet de recalculer temps_restant_s de façon cohérente avec la
  * progression, sans jamais tirer de nombre aléatoire. */
@@ -60,13 +72,17 @@ static esp_err_t backend_factice_rafraichir(void *etat)
 
     case 1: {
         /* Impression en cours : la progression avance à partir de sa valeur
-         * précédente, portée par `etat` lui-même — pas de compteur caché
-         * supplémentaire, et surtout pas de rand(). Au-delà de 1.0 elle
-         * reboucle à 0, comme une nouvelle impression qui démarrerait. */
-        float progression = e->progression + FACTICE_PAS_PROGRESSION;
-        if (progression > 1.0f) {
-            progression = 0.0f;
+         * précédente, portée par g_progression_scenario1 (fichier-statique,
+         * voir sa déclaration plus haut) — jamais relue depuis `etat`, que le
+         * socle remet à zéro avant cet appel. Pas de compteur caché "de
+         * plus" au sens propre du terme : c'est le seul état que porte ce
+         * scénario, et surtout pas de rand(). Au-delà de 1.0 elle reboucle à
+         * 0, comme une nouvelle impression qui démarrerait. */
+        g_progression_scenario1 += FACTICE_PAS_PROGRESSION;
+        if (g_progression_scenario1 > 1.0f) {
+            g_progression_scenario1 = 0.0f;
         }
+        float progression = g_progression_scenario1;
 
         snprintf(nouveau.etat, sizeof(nouveau.etat), "printing");
         nouveau.buse_actuelle = 210.0f;

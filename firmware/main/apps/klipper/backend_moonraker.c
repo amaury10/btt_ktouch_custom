@@ -8,6 +8,7 @@
 
 #include "etat_klipper.h"
 #include "journal.h"
+#include "liaison.h"
 #include "moonraker_parse.h"
 
 /* Étiquette de journalisation : convention reprise du reste du firmware
@@ -34,10 +35,20 @@ static const char *TAG = "backend_moonraker";
  * requêtes GET et POST : les deux ne s'exécutent jamais en même temps, elles
  * passent toutes deux par la même tâche unique (voir core/boucle.c).
  *
- * Ce tampon reste le SEUL stockage variable de ce fichier qui touche le tas :
+ * Ce tampon reste le SEUL stockage variable DE CE FICHIER qui touche le tas :
  * voir g_client ci-dessous pour ce qui a changé depuis la première version
  * (revue de la tâche 8, tour 1) — le client HTTP lui-même n'est plus recréé
- * à chaque cycle. */
+ * à chaque cycle. Précision qui compte (revue de fin de jalon 2a) : ce n'est
+ * vrai QUE de ce fichier. moonraker_parse_status() (moonraker_parse.c),
+ * appelée juste après par backend_moonraker_rafraichir() sur chaque cycle
+ * réussi, construit un arbre cJSON complet via cJSON_ParseWithLength() puis
+ * le détruit — mesuré à 84 allocations/libérations par cycle, ~2,4 millions
+ * sur huit heures. Équilibré (84 allocs pour 84 free, rien ne fuit) mais
+ * c'est une churn de tas bien réelle, pas rien : sur un appareil qui tourne
+ * des jours sans redémarrer, c'est exactement le genre de motif répété qui
+ * fragmente un allocateur, même sans fuite. Voir le log de minimum de tas
+ * libre dans core/boucle.c (boucle_tache()) pour transformer cette hypothèse
+ * en mesure sur le premier essai matériel. */
 #define MOONRAKER_TAMPON_OCTETS 4096
 static char g_tampon_reponse[MOONRAKER_TAMPON_OCTETS];
 
@@ -85,14 +96,25 @@ static bool           g_actif = false;
  * (structures client/requête/réponse, tampons d'émission et de réception,
  * settings et liste de parseur, et les strdup() du schéma, de l'hôte, du
  * chemin, de l'URL et de chaque en-tête — voir esp_http_client_init() dans
- * esp_http_client.c) et ouvre une nouvelle connexion TCP à chaque fois.
- * Une fois par seconde pendant des heures, c'est exactement l'allocation
- * répétée que la règle « pas d'allocation dans le chemin de rafraîchissement »
- * interdit, en plus d'épuiser au fil de la journée le pool de connexions en
- * TIME_WAIT du système (une connexion neuve par cycle, ~86 400 par jour,
- * contre un pool par défaut de 16 PCB). Ici, seule esp_http_client_set_url()
- * / esp_http_client_set_method() changent à chaque requête — schéma emprunté
- * tel quel à l'exemple officiel http_native_request() de esp_http_client. */
+ * esp_http_client.c). Une fois par seconde pendant des heures, c'est
+ * exactement l'allocation répétée que la règle « pas d'allocation dans le
+ * chemin de rafraîchissement » interdit ; réutiliser l'OBJET client élimine
+ * cette churn-là. Ici, seule esp_http_client_set_url()/
+ * esp_http_client_set_method() changent à chaque requête — schéma emprunté
+ * tel quel à l'exemple officiel http_native_request() de esp_http_client.
+ *
+ * Ce que ceci NE règle PAS (précision de la revue de fin de jalon 2a, la
+ * version précédente de ce commentaire le laissait entendre à tort) : la
+ * CONNEXION TCP, elle, reste ouverte puis fermée à CHAQUE requête —
+ * moonraker_fermer() appelle esp_http_client_close() en sortie de
+ * moonraker_requete(), objet client reutilisé ou non. C'est donc toujours une
+ * connexion TCP neuve par cycle, ~86 400 par jour, avec la pression en
+ * TIME_WAIT que cela entraîne côté client (un pool par défaut de 16 PCB côté
+ * lwIP). Cette pression est acceptée ici, pas éliminée : lwIP recycle les
+ * PCB en TIME_WAIT au besoin, et à un cycle par seconde le taux de
+ * renouvellement reste très en-dessous de ce qui saturerait ce pool. La
+ * distinguer clairement de la churn d'allocation (réglée, elle) évite de
+ * chercher plus tard une fuite de connexions qui n'existe pas. */
 static esp_http_client_handle_t g_client = NULL;
 
 /* Construit "http://<adresse>:<port>/<chemin>" dans `tampon`. `chemin` ne
@@ -100,6 +122,75 @@ static esp_http_client_handle_t g_client = NULL;
 static void moonraker_construire_url(char *tampon, size_t taille, const char *chemin)
 {
     snprintf(tampon, taille, "http://%s:%u/%s", g_hote.adresse, (unsigned)g_hote.port, chemin);
+}
+
+/* Cadencement du journal d'échecs de moonraker_requete() (revue de fin de
+ * jalon 2a, IMPORTANT 4) : sans lui, un hôte Moonraker injoignable produit un
+ * JOURNAL_ALERTE identique à CHAQUE cycle (une fois par seconde), chacun
+ * portant l'URL complète — environ 197 octets avec le préfixe de log. Le
+ * tampon netlog fait 16 Kio, soit ~83 lignes : une panne Moonraker de 83
+ * secondes remplacerait donc l'intégralité de la séquence de démarrage
+ * (partition, sauvetage armé, source des identifiants WiFi, réglages
+ * chargés) — le seul canal de diagnostic d'un appareil sans port série, et
+ * cela arrive précisément quand quelque chose ne va pas. Même défaut de
+ * conception que la marge de pile bornée dans bb16a08, un fichier plus loin.
+ *
+ * g_liaison_journal est un suivi PRIVÉ à ce fichier, indépendant du
+ * liaison_t réellement publié par /state (propriété de core/boucle.c) : il
+ * ne sert qu'à décider QUAND journaliser, jamais ce qui est publié. Mêmes
+ * seuils par défaut (liaison.h) pour garder la même sensibilité aux échecs
+ * consécutifs. */
+static liaison_t g_liaison_journal;
+static bool      g_liaison_journal_prete;
+static int64_t   g_dernier_journal_echec_us;
+
+#define MOONRAKER_JOURNAL_INTERVALLE_US (60LL * 1000 * 1000)
+
+/* À appeler pour CHAQUE échec de moonraker_requete(), avant de décider s'il
+ * faut le journaliser. Rend true si CET échec doit produire une ligne de
+ * journal — le tout premier d'une série, une transition d'état de
+ * g_liaison_journal (EN_LIGNE -> DEGRADEE -> HORS_LIGNE), ou l'écoulement de
+ * MOONRAKER_JOURNAL_INTERVALLE_US depuis la dernière ligne — et alors met
+ * `*avec_url` à true seulement pour le tout premier échec de la série :
+ * l'hôte est déjà journalisé au démarrage (voir backend_moonraker_demarrer())
+ * et au tout premier échec ci-dessous, le répéter à chaque ligne suivante
+ * coûte un espace de journal précieux pour une information déjà disponible. */
+static bool moonraker_journal_echec_pret(bool *avec_url)
+{
+    if (!g_liaison_journal_prete) {
+        liaison_init(&g_liaison_journal, LIAISON_SEUIL_DEGRADE_DEFAUT, LIAISON_SEUIL_HORS_LIGNE_DEFAUT);
+        g_liaison_journal_prete = true;
+        g_dernier_journal_echec_us = 0;
+    }
+
+    liaison_etat_t avant = liaison_etat(&g_liaison_journal);
+    liaison_echec(&g_liaison_journal);
+    liaison_etat_t apres = liaison_etat(&g_liaison_journal);
+
+    bool premier = (liaison_echecs_consecutifs(&g_liaison_journal) == 1);
+    bool transition = (apres != avant);
+    int64_t maintenant = esp_timer_get_time();
+    bool intervalle_ecoule = (maintenant - g_dernier_journal_echec_us) >= MOONRAKER_JOURNAL_INTERVALLE_US;
+
+    *avec_url = premier;
+
+    if (premier || transition || intervalle_ecoule) {
+        g_dernier_journal_echec_us = maintenant;
+        return true;
+    }
+    return false;
+}
+
+/* À appeler sur CHAQUE succès de moonraker_requete() : efface la série
+ * d'échecs en cours, pour que la prochaine panne recommence par un "premier
+ * échec" (journalisé avec l'URL complète) plutôt que de rester silencieuse si
+ * elle survient après une transition déjà consommée par une panne
+ * précédente. */
+static void moonraker_journal_echec_reinitialiser(void)
+{
+    if (g_liaison_journal_prete) {
+        liaison_succes(&g_liaison_journal);
+    }
 }
 
 /* Ferme la connexion ET libère le cache éventuellement rempli par
@@ -160,7 +251,15 @@ static esp_err_t moonraker_requete(esp_http_client_method_t methode, const char 
 
     esp_err_t erreur = esp_http_client_open(g_client, 0);
     if (erreur != ESP_OK) {
-        JOURNAL_ALERTE(TAG, "connexion a %s impossible (%s)", url, esp_err_to_name(erreur));
+        bool avec_url;
+        if (moonraker_journal_echec_pret(&avec_url)) {
+            if (avec_url) {
+                JOURNAL_ALERTE(TAG, "connexion a %s impossible (%s)", url, esp_err_to_name(erreur));
+            } else {
+                JOURNAL_ALERTE(TAG, "connexion impossible (%s) (echecs consecutifs : %u)",
+                               esp_err_to_name(erreur), (unsigned)liaison_echecs_consecutifs(&g_liaison_journal));
+            }
+        }
         moonraker_fermer(); /* sans effet si rien n'etait ouvert ; remet l'etat a plat */
         return erreur;
     }
@@ -203,40 +302,89 @@ static esp_err_t moonraker_requete(esp_http_client_method_t methode, const char 
          * evite d'afficher un trompeur "statut HTTP -1" qui masquerait la
          * vraie cause (delai depasse ou connexion coupee avant meme les
          * entetes) sur le seul canal de diagnostic de cet appareil. */
+        bool avec_url;
         if (depasse) {
-            JOURNAL_ALERTE(TAG, "%s : delai total de %d ms depasse avant reception des entetes",
-                           url, MOONRAKER_DELAI_TOTAL_MS);
+            if (moonraker_journal_echec_pret(&avec_url)) {
+                if (avec_url) {
+                    JOURNAL_ALERTE(TAG, "%s : delai total de %d ms depasse avant reception des entetes",
+                                   url, MOONRAKER_DELAI_TOTAL_MS);
+                } else {
+                    JOURNAL_ALERTE(TAG, "delai total de %d ms depasse avant reception des entetes",
+                                   MOONRAKER_DELAI_TOTAL_MS);
+                }
+            }
             return ESP_ERR_TIMEOUT;
         }
-        JOURNAL_ALERTE(TAG, "%s : connexion interrompue avant reception des entetes", url);
+        if (moonraker_journal_echec_pret(&avec_url)) {
+            if (avec_url) {
+                JOURNAL_ALERTE(TAG, "%s : connexion interrompue avant reception des entetes", url);
+            } else {
+                JOURNAL_ALERTE(TAG, "connexion interrompue avant reception des entetes");
+            }
+        }
         return ESP_FAIL;
     }
     if (statut < 200 || statut >= 300) {
-        JOURNAL_ALERTE(TAG, "statut HTTP %d sur %s", statut, url);
+        bool avec_url;
+        if (moonraker_journal_echec_pret(&avec_url)) {
+            if (avec_url) {
+                JOURNAL_ALERTE(TAG, "statut HTTP %d sur %s", statut, url);
+            } else {
+                JOURNAL_ALERTE(TAG, "statut HTTP %d", statut);
+            }
+        }
         return ESP_FAIL;
     }
     if (depasse) {
-        JOURNAL_ALERTE(TAG, "%s : delai total de %d ms depasse (recu %u octets)",
-                       url, MOONRAKER_DELAI_TOTAL_MS, (unsigned)total);
+        bool avec_url;
+        if (moonraker_journal_echec_pret(&avec_url)) {
+            if (avec_url) {
+                JOURNAL_ALERTE(TAG, "%s : delai total de %d ms depasse (recu %u octets)",
+                               url, MOONRAKER_DELAI_TOTAL_MS, (unsigned)total);
+            } else {
+                JOURNAL_ALERTE(TAG, "delai total de %d ms depasse (recu %u octets)",
+                               MOONRAKER_DELAI_TOTAL_MS, (unsigned)total);
+            }
+        }
         return ESP_ERR_TIMEOUT;
     }
     if (!complete) {
+        bool avec_url;
         if (total >= sizeof(g_tampon_reponse) - 1) {
             /* Le bord du tampon statique a ete atteint AVANT la fin des
              * donnees : c'est une vraie troncature, jamais grandie (voir le
              * commentaire sur MOONRAKER_TAMPON_OCTETS). */
-            JOURNAL_ALERTE(TAG, "reponse de %s tronquee au-dela de %u octets ; ignoree",
-                           url, (unsigned)sizeof(g_tampon_reponse) - 1u);
+            if (moonraker_journal_echec_pret(&avec_url)) {
+                if (avec_url) {
+                    JOURNAL_ALERTE(TAG, "reponse de %s tronquee au-dela de %u octets ; ignoree",
+                                   url, (unsigned)sizeof(g_tampon_reponse) - 1u);
+                } else {
+                    JOURNAL_ALERTE(TAG, "reponse tronquee au-dela de %u octets ; ignoree",
+                                   (unsigned)sizeof(g_tampon_reponse) - 1u);
+                }
+            }
             return ESP_ERR_INVALID_SIZE;
         }
         /* Incomplete SANS avoir rempli le tampon : la lecture s'est arretee
          * pour une autre raison (connexion coupee, reinitialisee par le
          * serveur...). Ne pas la confondre avec une troncature : le tampon
          * avait de la place, ce n'est pas lui la cause. */
-        JOURNAL_ALERTE(TAG, "%s : connexion interrompue apres %u octets (sur %u attendus)",
-                       url, (unsigned)total, (unsigned)sizeof(g_tampon_reponse) - 1u);
+        if (moonraker_journal_echec_pret(&avec_url)) {
+            if (avec_url) {
+                JOURNAL_ALERTE(TAG, "%s : connexion interrompue apres %u octets (sur %u attendus)",
+                               url, (unsigned)total, (unsigned)sizeof(g_tampon_reponse) - 1u);
+            } else {
+                JOURNAL_ALERTE(TAG, "connexion interrompue apres %u octets (sur %u attendus)",
+                               (unsigned)total, (unsigned)sizeof(g_tampon_reponse) - 1u);
+            }
+        }
         return ESP_FAIL;
     }
+
+    /* Succes : la serie d'echecs en cours (s'il y en avait une) se termine
+     * ici, pour que la prochaine panne reparte d'un "premier echec"
+     * journalise avec l'URL complete plutot que de rester silencieuse. */
+    moonraker_journal_echec_reinitialiser();
 
     if (longueur_lue != NULL) {
         *longueur_lue = total;
@@ -290,6 +438,12 @@ static esp_err_t backend_moonraker_demarrer(void *etat, const backend_hote_t *ho
     }
 
     g_actif = true;
+
+    /* Un nouveau demarrage repart d'un journal d'echecs vierge : un hote
+     * different (ou le meme, reconfigure) ne doit pas heriter du silence
+     * accumule par une panne du demarrage precedent. */
+    g_liaison_journal_prete = false;
+    g_dernier_journal_echec_us = 0;
 
     JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u)", hote->adresse, (unsigned)hote->port);
     return ESP_OK;

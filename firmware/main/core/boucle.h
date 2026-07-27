@@ -63,6 +63,24 @@ uint32_t boucle_generation(void);
 /* Santé de la liaison avec l'hôte. LIAISON_CONNEXION avant tout démarrage. */
 liaison_etat_t boucle_liaison(void);
 
+/* Lit, en UNE seule prise de mutex, la copie de l'état ET sa génération ET la
+ * santé de la liaison — contrairement à enchaîner boucle_etat_copier(),
+ * boucle_generation() et boucle_liaison() séparément, ce qui laisse la tâche
+ * d'interrogation permuter le magasin d'état ENTRE deux de ces trois appels :
+ * un appelant verrait alors une `generation` qui ne correspond pas au
+ * contenu qu'il vient de copier (N+1 affiché à côté du contenu de N), et
+ * comme rien ne redéclenche une nouvelle lecture avant le prochain
+ * changement réel, cet écart peut ne jamais se corriger tout seul —
+ * exactement le défaut qu'un compteur de génération est censé éviter. `dest`
+ * et `taille` suivent le contrat de boucle_etat_copier() ; `generation` et
+ * `liaison` peuvent valoir NULL si l'appelant ne s'y intéresse pas.
+ *
+ * Rend false sans toucher `dest`/`*generation`/`*liaison` dans les mêmes cas
+ * que boucle_etat_copier() (boucle non démarrée, `dest` NULL, ou `taille`
+ * incorrecte). Les accesseurs séparés ci-dessus restent disponibles pour un
+ * appelant qui n'a besoin que d'une seule de ces trois valeurs. */
+bool boucle_instantane(void *dest, size_t taille, uint32_t *generation, liaison_etat_t *liaison);
+
 /* Empile une commande pour la tâche d'interrogation et rend la main
  * immédiatement — la commande n'est JAMAIS exécutée par l'appelant.
  * `arguments_json` peut être NULL.
