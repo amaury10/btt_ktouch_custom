@@ -4,6 +4,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "etat_store.h"
@@ -65,6 +66,16 @@ static TaskHandle_t           g_tache;
 static const backend_desc_t  *g_desc;
 static bool                   g_demarre = false;
 
+/* Protège uniquement l'instant de la permutation (etat_store_valider()) et
+ * la copie faite par boucle_etat_copier() — jamais le rafraîchissement
+ * complet (la requête HTTP), qui reste hors verrou pour ne jamais faire
+ * attendre un appelant (typiquement l'interface LVGL du sous-jalon 2b)
+ * plusieurs secondes derrière un POST. En dehors de ces deux instants très
+ * courts (un memcmp et un memcpy de la taille de etat_klipper_t), le tampon
+ * avant est stable : etat_store_tampon_arriere() ne touche jamais que le
+ * tampon arrière, jamais celui qu'un lecteur consulte. */
+static SemaphoreHandle_t      g_mutex_etat;
+
 /* Dépile et exécute toutes les commandes en attente. Appelée par la tâche
  * d'interrogation elle-même, jamais par l'appelant de boucle_commander() —
  * c'est ce qui tient la promesse du brief : un appui bouton n'attend jamais
@@ -121,8 +132,17 @@ static void boucle_tache(void *parametre)
              * d'erreur réseau, il grise ses données périmées"). Ne pas
              * valider laisse le tampon avant (donc etat_store_lire()) sur
              * le dernier succès, pendant que liaison_echec() ci-dessous fait
-             * savoir à l'habillage que ces données sont périmées. */
+             * savoir à l'habillage que ces données sont périmées.
+             *
+             * Sous mutex : c'est le seul instant où le tampon "avant" change
+             * de pointeur. Sans ce verrou, un boucle_etat_copier() concurrent
+             * pourrait lire le pointeur juste avant la permutation puis
+             * copier depuis un tampon qui devient "arrière" entre-temps —
+             * possiblement déjà remis à zéro par le etat_store_tampon_arriere()
+             * du cycle suivant avant que la copie n'ait fini. */
+            xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
             etat_store_valider(&g_store);
+            xSemaphoreGive(g_mutex_etat);
         } else {
             liaison_echec(&g_liaison);
         }
@@ -160,19 +180,36 @@ esp_err_t boucle_demarrer(const backend_desc_t *desc, const backend_hote_t *hote
         return ESP_ERR_NO_MEM;
     }
 
+    g_mutex_etat = xSemaphoreCreateMutex();
+    if (g_mutex_etat == NULL) {
+        JOURNAL_ERREUR(TAG, "xSemaphoreCreateMutex a echoue");
+        vQueueDelete(g_file_commandes);
+        g_file_commandes = NULL;
+        etat_store_liberer(&g_store);
+        return ESP_ERR_NO_MEM;
+    }
+
     liaison_init(&g_liaison, BOUCLE_SEUIL_DEGRADE, BOUCLE_SEUIL_HORS_LIGNE);
     g_desc = desc;
 
     /* Premier appel à demarrer() sur le tampon arrière (déjà à zéro par
-     * etat_store_init()), puis validation : un état initial explicitement
-     * publié par le backend plutôt qu'un magasin resté dans l'état où
-     * etat_store_init() l'a laissé sans que personne ne l'ait vu passer par
-     * demarrer(). */
+     * etat_store_init()), puis validation. Les deux tampons du magasin sont
+     * encore à zéro à ce stade (etat_store_init() les a calloc'és) : si
+     * demarrer() ne fait qu'imiter cette remise à zéro, comme le font
+     * aujourd'hui backend_factice.c et backend_moonraker.c, memcmp() ne voit
+     * aucune différence et etat_store_valider() ci-dessous rend false — la
+     * génération reste à 0. C'est correct et attendu, pas une publication
+     * manquée : un backend qui donnerait un état initial non nul (par
+     * exemple relu d'une session précédente) déclencherait, lui, un vrai
+     * premier changement, et generation passerait à 1 comme n'importe quel
+     * autre. */
     void *initial = etat_store_tampon_arriere(&g_store);
     esp_err_t erreur = desc->demarrer(initial, hote);
     if (erreur != ESP_OK) {
         JOURNAL_ERREUR(TAG, "demarrer() du backend %s a echoue (%s)",
                        desc->nom != NULL ? desc->nom : "?", esp_err_to_name(erreur));
+        vSemaphoreDelete(g_mutex_etat);
+        g_mutex_etat = NULL;
         vQueueDelete(g_file_commandes);
         g_file_commandes = NULL;
         etat_store_liberer(&g_store);
@@ -189,6 +226,8 @@ esp_err_t boucle_demarrer(const backend_desc_t *desc, const backend_hote_t *hote
          * tiendrait une ressource a liberer (le backend Moonraker actuel n'en
          * a pas besoin, mais rien ne garantit que ce sera toujours le cas). */
         desc->arreter(initial);
+        vSemaphoreDelete(g_mutex_etat);
+        g_mutex_etat = NULL;
         vQueueDelete(g_file_commandes);
         g_file_commandes = NULL;
         etat_store_liberer(&g_store);
@@ -207,6 +246,23 @@ const void *boucle_etat(void)
         return NULL;
     }
     return etat_store_lire(&g_store);
+}
+
+bool boucle_etat_copier(void *dest, size_t taille)
+{
+    if (!g_demarre || dest == NULL) {
+        return false;
+    }
+    if (taille != g_store.taille) {
+        JOURNAL_ALERTE(TAG, "boucle_etat_copier : taille %u attendue, %u recue",
+                       (unsigned)g_store.taille, (unsigned)taille);
+        return false;
+    }
+
+    xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
+    memcpy(dest, etat_store_lire(&g_store), taille);
+    xSemaphoreGive(g_mutex_etat);
+    return true;
 }
 
 uint32_t boucle_generation(void)

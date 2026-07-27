@@ -8,6 +8,8 @@
  * il empile une commande et rend la main tout de suite. */
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "backend.h"
@@ -22,10 +24,36 @@
  * tâche qui se disputerait le même magasin d'état. */
 esp_err_t boucle_demarrer(const backend_desc_t *desc, const backend_hote_t *hote);
 
-/* Dernier état validé, à lire depuis n'importe quelle tâche (LVGL comprise) :
- * voir etat_store.h pour la garantie de double tampon. NULL si la boucle n'a
- * pas encore démarré. */
+/* Dernier état validé — pointeur BRUT vers le tampon interne du magasin
+ * d'état (voir etat_store.h). Il ne reste valable QUE jusqu'au prochain
+ * `etat_store_valider()` exécuté par la tâche d'interrogation, c'est-à-dire
+ * au plus tard le cycle suivant (~1 s) : passé ce point, il désigne le
+ * tampon arrière, que le cycle d'après remet à zéro avant de le remplir. Un
+ * appelant qui le garde au travers d'un yield (un rappel LVGL, par exemple)
+ * peut relire une structure remise à zéro sans le moindre avertissement.
+ *
+ * N'appeler cette fonction QUE depuis la tâche d'interrogation elle-même, ou
+ * en copiant son résultat avant de rendre la main sous quelque forme que ce
+ * soit. Depuis toute autre tâche — en particulier l'interface LVGL du
+ * sous-jalon 2b — préférer boucle_etat_copier(), qui ne laisse fuir aucun
+ * pointeur vers ce tampon interne.
+ *
+ * NULL si la boucle n'a pas encore démarré. */
 const void *boucle_etat(void);
+
+/* Copie sous mutex le dernier état validé dans `dest`, qui doit faire
+ * exactement `taille` octets (la taille du backend démarré, typiquement
+ * sizeof(etat_klipper_t)). Contrairement à boucle_etat(), aucun pointeur vers
+ * le tampon interne du magasin n'est jamais rendu à l'appelant : `dest` reste
+ * valable et exact quel que soit le temps que l'appelant met à s'en servir
+ * ensuite, y compris depuis une tâche qui cède la main entre deux instructions
+ * (l'interface LVGL du sous-jalon 2b). C'est la façon documentée de lire
+ * l'état depuis une tâche autre que celle d'interrogation.
+ *
+ * Rend false sans toucher `dest` si la boucle n'a pas démarré, si `dest` est
+ * NULL, ou si `taille` ne correspond pas à la taille réelle de l'état du
+ * backend en cours. */
+bool boucle_etat_copier(void *dest, size_t taille);
 
 /* Compteur de générations de l'état, pour qu'un afficheur sache s'il doit
  * redessiner sans comparer lui-même la structure entière. 0 avant tout

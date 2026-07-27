@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_http_client.h"
+#include "esp_timer.h"
 
 #include "etat_klipper.h"
 #include "journal.h"
@@ -31,7 +32,12 @@ static const char *TAG = "backend_moonraker";
  * centaines d'octets en pratique) ; au-delà, la réponse est tronquée et
  * l'appel rend une erreur plutôt que de grandir le tampon. Partagé entre les
  * requêtes GET et POST : les deux ne s'exécutent jamais en même temps, elles
- * passent toutes deux par la même tâche unique (voir core/boucle.c). */
+ * passent toutes deux par la même tâche unique (voir core/boucle.c).
+ *
+ * Ce tampon reste le SEUL stockage variable de ce fichier qui touche le tas :
+ * voir g_client ci-dessous pour ce qui a changé depuis la première version
+ * (revue de la tâche 8, tour 1) — le client HTTP lui-même n'est plus recréé
+ * à chaque cycle. */
 #define MOONRAKER_TAMPON_OCTETS 4096
 static char g_tampon_reponse[MOONRAKER_TAMPON_OCTETS];
 
@@ -42,12 +48,27 @@ static char g_tampon_reponse[MOONRAKER_TAMPON_OCTETS];
  * avoir à revenir ici si le chemin d'interrogation s'allonge d'un objet. */
 #define MOONRAKER_URL_OCTETS (BACKEND_HOTE_LONGUEUR_MAX + 128)
 
-/* Délai avant abandon d'une requête HTTP : assez long pour un aller-retour
- * LAN chargé (le Raspberry Pi qui héberge Moonraker peut lui-même être
- * occupé à écrire du G-code sur la carte SD), assez court pour ne jamais
- * bloquer la tâche d'interrogation plus de quelques cycles d'affilée — la
- * boucle appelante (core/boucle.c) ne fait rien d'autre pendant ce temps. */
+/* Délai appliqué à CHAQUE opération socket individuelle (connexion, lecture) :
+ * assez long pour un aller-retour LAN chargé (le Raspberry Pi qui héberge
+ * Moonraker peut lui-même être occupé à écrire du G-code sur la carte SD),
+ * assez court pour qu'un délai isolé ne bloque pas des dizaines de secondes.
+ *
+ * Ce délai NE borne PAS la durée totale d'un cycle : esp_http_client_read()
+ * rend un compte positif, pas une erreur, tant qu'il reste ne serait-ce qu'un
+ * octet avant l'expiration de CE délai précis — un hôte qui égoutte sa
+ * réponse un octet à la fois resterait donc sous ce seuil indéfiniment.
+ * MOONRAKER_DELAI_TOTAL_MS ci-dessous couvre ce cas. */
 #define MOONRAKER_DELAI_MS 3000
+
+/* Plafond du cycle entier (connexion + en-têtes + lecture du corps), mesuré
+ * au temps horloge via esp_timer_get_time() : deux fois le délai par
+ * opération. Sans ce plafond, un hôte qui dégoutte sa réponse ferait tourner
+ * rafraichir() indéfiniment (borné seulement par le remplissage des 4 Kio du
+ * tampon statique, potentiellement des heures) SANS jamais appeler
+ * liaison_echec() — l'écran afficherait alors des données vieilles de plusieurs
+ * heures comme si elles venaient d'arriver, exactement ce que le grisage de
+ * liaison.h existe pour empêcher. */
+#define MOONRAKER_DELAI_TOTAL_MS (2 * MOONRAKER_DELAI_MS)
 
 /* Hôte mémorisé par demarrer(), puisque rafraichir()/commande() ne le
  * reçoivent pas en paramètre (voir le contrat dans backend.h). Un seul
@@ -57,6 +78,23 @@ static char g_tampon_reponse[MOONRAKER_TAMPON_OCTETS];
 static backend_hote_t g_hote;
 static bool           g_actif = false;
 
+/* Client HTTP créé UNE SEULE FOIS par demarrer() et réutilisé à chaque appel
+ * de rafraichir()/commande(), libéré par arreter(). L'appeler depuis
+ * esp_http_client_init() à chaque cycle — comme le faisait la première
+ * version de ce fichier — coûte environ dix-sept paires alloc/free par appel
+ * (structures client/requête/réponse, tampons d'émission et de réception,
+ * settings et liste de parseur, et les strdup() du schéma, de l'hôte, du
+ * chemin, de l'URL et de chaque en-tête — voir esp_http_client_init() dans
+ * esp_http_client.c) et ouvre une nouvelle connexion TCP à chaque fois.
+ * Une fois par seconde pendant des heures, c'est exactement l'allocation
+ * répétée que la règle « pas d'allocation dans le chemin de rafraîchissement »
+ * interdit, en plus d'épuiser au fil de la journée le pool de connexions en
+ * TIME_WAIT du système (une connexion neuve par cycle, ~86 400 par jour,
+ * contre un pool par défaut de 16 PCB). Ici, seule esp_http_client_set_url()
+ * / esp_http_client_set_method() changent à chaque requête — schéma emprunté
+ * tel quel à l'exemple officiel http_native_request() de esp_http_client. */
+static esp_http_client_handle_t g_client = NULL;
+
 /* Construit "http://<adresse>:<port>/<chemin>" dans `tampon`. `chemin` ne
  * doit pas commencer par '/'. */
 static void moonraker_construire_url(char *tampon, size_t taille, const char *chemin)
@@ -64,120 +102,98 @@ static void moonraker_construire_url(char *tampon, size_t taille, const char *ch
     snprintf(tampon, taille, "http://%s:%u/%s", g_hote.adresse, (unsigned)g_hote.port, chemin);
 }
 
-/* Émet la requête GET d'interrogation périodique dans le tampon statique et
- * rend sa longueur utile dans `*longueur_lue`. Ne modifie jamais le tampon
- * fourni par l'appelant : c'est à `moonraker_parse_status` de décider, plus
- * haut, ce qu'il advient de l'état déjà en place. */
-static esp_err_t moonraker_get(const char *chemin, size_t *longueur_lue)
+/* Émet une requête (GET ou POST sans corps) vers `chemin` sur le client
+ * partagé `g_client`, lit la réponse dans le tampon statique et rend sa
+ * longueur utile dans `*longueur_lue` (peut être NULL si l'appelant — le
+ * chemin des commandes — n'a pas besoin du corps). Ne modifie jamais le
+ * tampon `etat` de l'appelant : c'est à `moonraker_parse_status`, plus haut
+ * dans `backend_moonraker_rafraichir()`, de décider ce qu'il advient de
+ * l'état déjà en place.
+ *
+ * Le statut HTTP est vérifié EN PREMIER, avant toute question de troncature
+ * ou de délai : un statut d'erreur (401, 503...) peut parfaitement
+ * accompagner une réponse courte que les tests suivants qualifieraient sinon
+ * à tort de « tronquée ». Sans câble série, /log est le seul canal de
+ * diagnostic de cet appareil — le distinguo compte. */
+static esp_err_t moonraker_requete(esp_http_client_method_t methode, const char *chemin,
+                                    size_t *longueur_lue)
 {
     char url[MOONRAKER_URL_OCTETS];
     moonraker_construire_url(url, sizeof(url), chemin);
 
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = HTTP_METHOD_GET,
-        .timeout_ms = MOONRAKER_DELAI_MS,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        JOURNAL_ERREUR(TAG, "esp_http_client_init a echoue pour %s", url);
+    if (esp_http_client_set_url(g_client, url) != ESP_OK ||
+        esp_http_client_set_method(g_client, methode) != ESP_OK) {
+        JOURNAL_ERREUR(TAG, "configuration de la requete impossible pour %s", url);
         return ESP_FAIL;
     }
 
-    esp_err_t erreur = esp_http_client_open(client, 0);
+    int64_t debut_us = esp_timer_get_time();
+
+    esp_err_t erreur = esp_http_client_open(g_client, 0);
     if (erreur != ESP_OK) {
         JOURNAL_ALERTE(TAG, "connexion a %s impossible (%s)", url, esp_err_to_name(erreur));
-        esp_http_client_cleanup(client);
+        esp_http_client_close(g_client); /* sans effet si rien n'etait ouvert ; remet l'etat a plat */
         return erreur;
     }
 
     /* content_length peut valoir -1 (reponse en chunked) : on ne s'y fie pas
      * pour dimensionner quoi que ce soit, la lecture ci-dessous s'arrete
      * d'elle-meme a la fin des donnees ou au bord du tampon statique. */
-    (void)esp_http_client_fetch_headers(client);
+    (void)esp_http_client_fetch_headers(g_client);
+
+    /* Verifie le plafond total des maintenant, meme si la boucle de lecture
+     * ci-dessous ne s'execute jamais : esp_http_client_fetch_headers() peut a
+     * elle seule avoir consomme tout le budget sur un hote qui degoutte ses
+     * en-tetes, et rien ne nous a permis de l'interrompre pendant qu'elle
+     * tournait (c'est un appel bloquant unique, pas une boucle qu'on
+     * controle). */
+    bool depasse = ((esp_timer_get_time() - debut_us) / 1000) >= MOONRAKER_DELAI_TOTAL_MS;
 
     size_t total = 0;
-    while (total < sizeof(g_tampon_reponse) - 1) {
-        int lu = esp_http_client_read(client, g_tampon_reponse + total,
+    while (!depasse && total < sizeof(g_tampon_reponse) - 1) {
+        int lu = esp_http_client_read(g_client, g_tampon_reponse + total,
                                        sizeof(g_tampon_reponse) - 1 - total);
         if (lu <= 0) {
             break;
         }
         total += (size_t)lu;
+        depasse = ((esp_timer_get_time() - debut_us) / 1000) >= MOONRAKER_DELAI_TOTAL_MS;
     }
     g_tampon_reponse[total] = '\0';
 
-    /* Une reponse qui deborde le tampon statique est tronquee, jamais
-     * grandie (voir le commentaire sur MOONRAKER_TAMPON_OCTETS) : on le
-     * detecte ici et on rend une erreur explicite plutot que de tenter un
-     * cJSON_ParseWithLength() sur un document coupe au milieu, qui
-     * echouerait de toute facon mais sans dire pourquoi dans le journal. */
-    bool complete = esp_http_client_is_complete_data_received(client);
-    int statut = esp_http_client_get_status_code(client);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-
-    if (!complete) {
-        JOURNAL_ALERTE(TAG, "reponse de %s tronquee au-dela de %u octets ; ignoree",
-                       url, (unsigned)sizeof(g_tampon_reponse) - 1u);
-        return ESP_ERR_INVALID_SIZE;
-    }
-    if (statut != 200) {
-        JOURNAL_ALERTE(TAG, "statut HTTP %d sur %s", statut, url);
-        return ESP_FAIL;
-    }
-
-    *longueur_lue = total;
-    return ESP_OK;
-}
-
-/* Émet un POST sans corps vers `chemin` (les quatre actions du tableau du
- * brief n'en prennent aucun) et vérifie seulement le code de statut. Le corps
- * de la réponse, s'il y en a un, est vidé dans le même tampon statique que
- * les interrogations puis ignoré. */
-static esp_err_t moonraker_post(const char *chemin)
-{
-    char url[MOONRAKER_URL_OCTETS];
-    moonraker_construire_url(url, sizeof(url), chemin);
-
-    esp_http_client_config_t config = {
-        .url = url,
-        .method = HTTP_METHOD_POST,
-        .timeout_ms = MOONRAKER_DELAI_MS,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) {
-        JOURNAL_ERREUR(TAG, "esp_http_client_init a echoue pour %s", url);
-        return ESP_FAIL;
-    }
-
-    /* write_len = 0 : requete sans corps. */
-    esp_err_t erreur = esp_http_client_open(client, 0);
-    if (erreur != ESP_OK) {
-        JOURNAL_ALERTE(TAG, "connexion a %s impossible (%s)", url, esp_err_to_name(erreur));
-        esp_http_client_cleanup(client);
-        return erreur;
-    }
-
-    (void)esp_http_client_fetch_headers(client);
-
-    size_t total = 0;
-    while (total < sizeof(g_tampon_reponse) - 1) {
-        int lu = esp_http_client_read(client, g_tampon_reponse + total,
-                                       sizeof(g_tampon_reponse) - 1 - total);
-        if (lu <= 0) {
-            break;
-        }
-        total += (size_t)lu;
-    }
-
-    int statut = esp_http_client_get_status_code(client);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+    bool complete = esp_http_client_is_complete_data_received(g_client);
+    int statut = esp_http_client_get_status_code(g_client);
+    esp_http_client_close(g_client);
 
     if (statut < 200 || statut >= 300) {
         JOURNAL_ALERTE(TAG, "statut HTTP %d sur %s", statut, url);
         return ESP_FAIL;
+    }
+    if (depasse) {
+        JOURNAL_ALERTE(TAG, "%s : delai total de %d ms depasse (recu %u octets)",
+                       url, MOONRAKER_DELAI_TOTAL_MS, (unsigned)total);
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!complete) {
+        if (total >= sizeof(g_tampon_reponse) - 1) {
+            /* Le bord du tampon statique a ete atteint AVANT la fin des
+             * donnees : c'est une vraie troncature, jamais grandie (voir le
+             * commentaire sur MOONRAKER_TAMPON_OCTETS). */
+            JOURNAL_ALERTE(TAG, "reponse de %s tronquee au-dela de %u octets ; ignoree",
+                           url, (unsigned)sizeof(g_tampon_reponse) - 1u);
+            return ESP_ERR_INVALID_SIZE;
+        }
+        /* Incomplete SANS avoir rempli le tampon : la lecture s'est arretee
+         * pour une autre raison (connexion coupee, reinitialisee par le
+         * serveur...). Ne pas la confondre avec une troncature : le tampon
+         * avait de la place, ce n'est pas lui la cause. */
+        JOURNAL_ALERTE(TAG, "%s : connexion interrompue apres %u octets (sur %u attendus)",
+                       url, (unsigned)total, (unsigned)sizeof(g_tampon_reponse) - 1u);
+        return ESP_FAIL;
+    }
+
+    if (longueur_lue != NULL) {
+        *longueur_lue = total;
     }
     return ESP_OK;
 }
@@ -193,7 +209,30 @@ static esp_err_t backend_moonraker_demarrer(void *etat, const backend_hote_t *ho
      * ne suppose rien de l'etat qu'on lui tend. */
     memset(etat, 0, sizeof(etat_klipper_t));
 
+    /* Au cas ou demarrer() serait rappele sans arreter() intermediaire (la
+     * boucle actuelle ne le fait jamais, mais rien dans ce fichier ne doit
+     * en dependre) : ne pas fuir un client deja cree. */
+    if (g_client != NULL) {
+        esp_http_client_cleanup(g_client);
+        g_client = NULL;
+    }
+
     g_hote = *hote;
+
+    /* URL de remplacement : esp_http_client_init() exige une URL ou un
+     * couple hote/chemin non nul, mais celle-ci n'est jamais utilisee telle
+     * quelle — chaque requete la remplace via esp_http_client_set_url() dans
+     * moonraker_requete(), qui seule connait le chemin a interroger. */
+    esp_http_client_config_t config = {
+        .url = "http://127.0.0.1/",
+        .timeout_ms = MOONRAKER_DELAI_MS,
+    };
+    g_client = esp_http_client_init(&config);
+    if (g_client == NULL) {
+        JOURNAL_ERREUR(TAG, "esp_http_client_init a echoue");
+        return ESP_FAIL;
+    }
+
     g_actif = true;
 
     JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u)", hote->adresse, (unsigned)hote->port);
@@ -207,7 +246,7 @@ static esp_err_t backend_moonraker_rafraichir(void *etat)
     }
 
     size_t longueur = 0;
-    esp_err_t erreur = moonraker_get(MOONRAKER_CHEMIN_INTERROGATION, &longueur);
+    esp_err_t erreur = moonraker_requete(HTTP_METHOD_GET, MOONRAKER_CHEMIN_INTERROGATION, &longueur);
     if (erreur != ESP_OK) {
         return erreur;
     }
@@ -223,6 +262,10 @@ static void backend_moonraker_arreter(void *etat)
 {
     (void)etat;
     g_actif = false;
+    if (g_client != NULL) {
+        esp_http_client_cleanup(g_client);
+        g_client = NULL;
+    }
     JOURNAL_INFO(TAG, "arret");
 }
 
@@ -231,6 +274,15 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
 {
     (void)etat;
     (void)arguments_json; /* aucune des quatre actions ci-dessous ne prend de corps */
+
+    if (!g_actif) {
+        /* Meme garde que backend_moonraker_rafraichir() : g_client n'existe
+         * que si demarrer() a reussi. Aucun chemin actuel de core/boucle.c ne
+         * peut appeler commande() avant cela, mais le verifier ici coute peu
+         * et evite qu'un futur changement d'ordonnancement ne deverrouille un
+         * appel a esp_http_client_set_url(NULL, ...). */
+        return ESP_ERR_INVALID_STATE;
+    }
 
     const char *chemin;
     if (strcmp(action, BACKEND_ACTION_PAUSE) == 0) {
@@ -250,7 +302,7 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
     }
 
     JOURNAL_INFO(TAG, "commande %s -> POST /%s", action, chemin);
-    return moonraker_post(chemin);
+    return moonraker_requete(HTTP_METHOD_POST, chemin, NULL);
 }
 
 static const backend_desc_t g_backend_moonraker_desc = {
