@@ -12,7 +12,7 @@
 
 Ces contraintes s'appliquent à **toutes** les tâches, sans rappel.
 
-- **Tout ce qui vit sous `firmware/main/ui/` et `firmware/main/apps/klipper/ecrans/` compile sur PC.** Aucune inclusion de `freertos/*`, `esp_wifi.h`, `esp_http_client.h`, `nvs.h` ou `driver/*` dans ces répertoires. `esp_err.h` reste la seule exception tolérée (le harnais fournit `host-test/shim/esp_err.h`), comme au jalon 2a. Un fichier d'interface qui a besoin d'un en-tête ESP-IDF est le signe qu'il fait trop de choses : en extraire la partie pure.
+- **Tout ce qui vit sous `firmware/main/ui/` et `firmware/main/apps/klipper/ecrans/` compile sur PC.** Aucune inclusion de `freertos/*`, `esp_wifi.h`, `esp_http_client.h`, `nvs.h` ou `driver/*` dans ces répertoires. `esp_err.h` reste la seule exception tolérée (le dépôt en fournit un tenant-lieu en `shim/esp_err.h`, partagé par le harnais de test et le simulateur), comme au jalon 2a. Un fichier d'interface qui a besoin d'un en-tête ESP-IDF est le signe qu'il fait trop de choses : en extraire la partie pure.
 - **Un écran ne parle jamais au backend ni au réseau.** Il lit `ui_etat_instantane()` et appelle `ui_commander()`, qui rend la main immédiatement. Aucun appel HTTP, aucune attente, aucun `vTaskDelay` dans un rappel LVGL — un `POST` peut prendre plusieurs secondes et gèlerait l'interface.
 - **La tâche réseau ne touche jamais un widget.** Sur cible, LVGL n'est manipulé que depuis la tâche LVGL du BSP. Aucun appel `lv_*` depuis `core/boucle.c` ni depuis un backend.
 - **Un écran n'affiche jamais de boîte d'erreur réseau.** Quand les données sont périmées il les grise ; la barre d'état de l'habillage explique pourquoi. Même règle pour les échecs de commande : le socle affiche la notification, l'écran ne s'en occupe pas.
