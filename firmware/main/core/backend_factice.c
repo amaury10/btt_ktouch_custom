@@ -1,7 +1,12 @@
 #include "backend_factice.h"
 
-#include <stdio.h>
 #include <string.h>
+
+#include "journal.h"
+
+/* Étiquette de journalisation : convention reprise du reste du firmware
+ * (voir app_main.c, rescue.c), pour que /log reste lisible par module. */
+static const char *TAG = "backend_factice";
 
 /* Scénario courant, choisi par backend_factice_scenario(). Un seul backend
  * factice tourne à la fois dans le socle : un compteur statique suffit, et
@@ -28,10 +33,16 @@ void backend_factice_scenario(int numero)
 static esp_err_t backend_factice_demarrer(void *etat, const backend_hote_t *hote)
 {
     etat_klipper_t *e = (etat_klipper_t *)etat;
+    /* Remise à zéro défensive : le brief ne l'exige pas (le socle est censé
+     * fournir un état déjà nul), mais un backend qui ne suppose rien de l'état
+     * qu'on lui tend est moins susceptible de propager un débris d'une session
+     * précédente si un futur appelant oublie de le faire. Ce n'est pas un
+     * oubli du contrat « demarrer ne fait que journaliser » : c'est un ajout
+     * volontaire, au-delà du minimum. */
     memset(e, 0, sizeof(*e));
-    printf("backend factice : demarrage (hote=%s port=%u)\n",
-           hote != NULL ? hote->adresse : "?",
-           hote != NULL ? (unsigned)hote->port : 0u);
+    JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u)",
+                 hote != NULL ? hote->adresse : "?",
+                 hote != NULL ? (unsigned)hote->port : 0u);
     return ESP_OK;
 }
 
@@ -113,7 +124,7 @@ static esp_err_t backend_factice_rafraichir(void *etat)
 static void backend_factice_arreter(void *etat)
 {
     (void)etat;
-    printf("backend factice : arret\n");
+    JOURNAL_INFO(TAG, "arret");
 }
 
 static esp_err_t backend_factice_commande(void *etat, const char *action,
@@ -126,14 +137,14 @@ static esp_err_t backend_factice_commande(void *etat, const char *action,
         strcmp(action, BACKEND_ACTION_REPRENDRE) == 0 ||
         strcmp(action, BACKEND_ACTION_ANNULER) == 0 ||
         strcmp(action, BACKEND_ACTION_URGENCE) == 0) {
-        printf("backend factice : commande %s\n", action);
+        JOURNAL_INFO(TAG, "commande %s", action);
         return ESP_OK;
     }
 
     /* Une action inconnue doit échouer fort et explicitement, pour que
      * l'interface puisse griser un bouton en connaissant la raison — jamais
      * l'ignorer en silence. */
-    printf("backend factice : commande inconnue %s\n", action);
+    JOURNAL_ALERTE(TAG, "commande inconnue %s", action);
     return ESP_ERR_NOT_SUPPORTED;
 }
 
