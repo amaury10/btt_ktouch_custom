@@ -108,8 +108,9 @@ void suite_moonraker_parse(void)
     VERIFIER(strlen(e.fichier) == KLIPPER_FICHIER_MAX - 1);
 
     /* --- print_duration demesure (1e40) : le flottant devient +infini une
-     * fois retreci en float, la conversion doit etre bornee plutot que de
-     * produire un comportement indefini --- */
+     * fois retreci en float. Une reponse malformee ne doit pas se travestir
+     * en estimation plausible : le champ garde son sens documente
+     * "0 si inconnu", pas un plafond d'allure credible --- */
     static const char *DUREE_INFINIE =
         "{\"result\":{\"status\":{"
         "\"print_stats\":{\"state\":\"printing\",\"print_duration\":1e40},"
@@ -117,10 +118,12 @@ void suite_moonraker_parse(void)
         "}}}";
     memset(&e, 0, sizeof(e));
     VERIFIER(moonraker_parse_status(DUREE_INFINIE, strlen(DUREE_INFINIE), &e));
-    VERIFIER(e.temps_restant_s == KLIPPER_TEMPS_RESTANT_MAX_S);
+    VERIFIER(e.temps_restant_s == 0);
 
     /* --- duree finie mais assez grande pour deborder un uint32_t une fois
-     * divisee par une progression proche du seuil bas --- */
+     * divisee par une progression proche du seuil bas : ici l'estimation est
+     * reelle, seulement trop grande pour etre affichee telle quelle, donc on
+     * la plafonne au lieu de la jeter --- */
     static const char *DUREE_DEBORDANTE =
         "{\"result\":{\"status\":{"
         "\"print_stats\":{\"state\":\"printing\",\"print_duration\":400000000.0},"
