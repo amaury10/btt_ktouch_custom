@@ -102,6 +102,35 @@ static void moonraker_construire_url(char *tampon, size_t taille, const char *ch
     snprintf(tampon, taille, "http://%s:%u/%s", g_hote.adresse, (unsigned)g_hote.port, chemin);
 }
 
+/* Ferme la connexion ET libère le cache éventuellement rempli par
+ * esp_http_client_fetch_headers() — à appeler sur CHAQUE sortie de
+ * moonraker_requete() qui a atteint esp_http_client_open(), pas seulement
+ * en cas d'erreur.
+ *
+ * Quand des octets de corps arrivent groupés avec les en-têtes dans le même
+ * segment TCP, esp_http_client_fetch_headers() les met de côté dans un
+ * tampon interne alloué par realloc() (cache_data_in_fetch_hdr, un champ
+ * privé de esp_http_client_t, jamais désactivable depuis l'API publique hors
+ * esp_http_client_perform() — voir le commentaire sur g_client). Avant que
+ * g_client ne soit réutilisé d'un cycle à l'autre (revue tâche 8, tour 1),
+ * ce cache disparaissait avec esp_http_client_cleanup() à chaque appel :
+ * personne n'avait besoin de le vider explicitement. Ce n'est plus vrai :
+ * ni esp_http_client_close(), ni esp_http_client_prepare() (appelé par
+ * open() au cycle suivant), ni esp_http_client_set_url() (qui ne touche au
+ * cache que si l'hôte ou le port CHANGENT — jamais le cas ici, un seul hôte
+ * pour toute la durée de vie du backend) ne le libèrent. Sans cet appel
+ * explicite, un cycle qui n'atteint jamais la boucle de lecture (délai total
+ * déjà dépassé à la sortie de fetch_headers(), voir moonraker_requete())
+ * laisse ce cache en place ; http_on_body() y AJOUTE au cycle suivant plutôt
+ * que de l'écraser, sans jamais remettre raw_len à zéro — la "réponse"
+ * grandit d'un corps par cycle tant que l'hôte reste lent, jusqu'à épuiser
+ * le tas sur l'appareil qu'on ne peut pas rebrancher pendant des heures. */
+static void moonraker_fermer(void)
+{
+    esp_http_client_close(g_client);
+    esp_http_client_clear_response_buffer(g_client);
+}
+
 /* Émet une requête (GET ou POST sans corps) vers `chemin` sur le client
  * partagé `g_client`, lit la réponse dans le tampon statique et rend sa
  * longueur utile dans `*longueur_lue` (peut être NULL si l'appelant — le
@@ -132,7 +161,7 @@ static esp_err_t moonraker_requete(esp_http_client_method_t methode, const char 
     esp_err_t erreur = esp_http_client_open(g_client, 0);
     if (erreur != ESP_OK) {
         JOURNAL_ALERTE(TAG, "connexion a %s impossible (%s)", url, esp_err_to_name(erreur));
-        esp_http_client_close(g_client); /* sans effet si rien n'etait ouvert ; remet l'etat a plat */
+        moonraker_fermer(); /* sans effet si rien n'etait ouvert ; remet l'etat a plat */
         return erreur;
     }
 
@@ -163,8 +192,25 @@ static esp_err_t moonraker_requete(esp_http_client_method_t methode, const char 
 
     bool complete = esp_http_client_is_complete_data_received(g_client);
     int statut = esp_http_client_get_status_code(g_client);
-    esp_http_client_close(g_client);
+    moonraker_fermer();
 
+    if (statut <= 0) {
+        /* esp_http_client_fetch_headers() initialise status_code a -1 et ne
+         * le change que si des entetes ont effectivement ete recues et
+         * analysees : un statut <= 0 ici ne decrit donc PAS une reponse HTTP
+         * (ce n'est le code d'aucun serveur reel), seulement l'absence totale
+         * d'entetes exploitables. Le distinguer du "statut HTTP %d" ci-dessous
+         * evite d'afficher un trompeur "statut HTTP -1" qui masquerait la
+         * vraie cause (delai depasse ou connexion coupee avant meme les
+         * entetes) sur le seul canal de diagnostic de cet appareil. */
+        if (depasse) {
+            JOURNAL_ALERTE(TAG, "%s : delai total de %d ms depasse avant reception des entetes",
+                           url, MOONRAKER_DELAI_TOTAL_MS);
+            return ESP_ERR_TIMEOUT;
+        }
+        JOURNAL_ALERTE(TAG, "%s : connexion interrompue avant reception des entetes", url);
+        return ESP_FAIL;
+    }
     if (statut < 200 || statut >= 300) {
         JOURNAL_ALERTE(TAG, "statut HTTP %d sur %s", statut, url);
         return ESP_FAIL;
@@ -219,12 +265,22 @@ static esp_err_t backend_moonraker_demarrer(void *etat, const backend_hote_t *ho
 
     g_hote = *hote;
 
-    /* URL de remplacement : esp_http_client_init() exige une URL ou un
-     * couple hote/chemin non nul, mais celle-ci n'est jamais utilisee telle
-     * quelle — chaque requete la remplace via esp_http_client_set_url() dans
-     * moonraker_requete(), qui seule connait le chemin a interroger. */
+    /* URL initiale construite avec le VRAI hôte, pas un espace réservé :
+     * esp_http_client_init() calcule l'en-tête "Host: <hote>:<port>" une
+     * fois pour toutes à partir de cette URL (_get_host_header() dans
+     * esp_http_client.c) ; esp_http_client_set_url(), appelée à chaque
+     * requête dans moonraker_requete(), ne recalcule cet en-tête que si
+     * l'hôte OU le port changent d'un appel à l'autre — ce qui n'arrive
+     * jamais ici, un seul hôte pour toute la durée de vie du backend. Un
+     * espace réservé du genre "http://127.0.0.1/" laisserait donc le port
+     * hors de l'en-tête Host pour toutes les requêtes suivantes (Moonraker
+     * ne s'en soucie pas, mais un éventuel relais inverse devant lui le
+     * pourrait). Le chemin importe peu : chaque requête le remplace de toute
+     * façon via set_url(). */
+    char url_initiale[MOONRAKER_URL_OCTETS];
+    moonraker_construire_url(url_initiale, sizeof(url_initiale), "");
     esp_http_client_config_t config = {
-        .url = "http://127.0.0.1/",
+        .url = url_initiale,
         .timeout_ms = MOONRAKER_DELAI_MS,
     };
     g_client = esp_http_client_init(&config);
