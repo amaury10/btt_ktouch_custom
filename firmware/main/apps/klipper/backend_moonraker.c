@@ -42,8 +42,9 @@ static const char *TAG = "backend_moonraker";
  * vrai QUE de ce fichier. moonraker_parse_status() (moonraker_parse.c),
  * appelée juste après par backend_moonraker_rafraichir() sur chaque cycle
  * réussi, construit un arbre cJSON complet via cJSON_ParseWithLength() puis
- * le détruit — mesuré à 84 allocations/libérations par cycle, ~2,4 millions
- * sur huit heures. Équilibré (84 allocs pour 84 free, rien ne fuit) mais
+ * le détruit — de l'ordre de 80 allocations/libérations par cycle (estimation
+ * de la revue, jamais mesurée sur l'appareil), soit quelques millions sur
+ * huit heures. Équilibré (autant de free que d'allocs, rien ne fuit) mais
  * c'est une churn de tas bien réelle, pas rien : sur un appareil qui tourne
  * des jours sans redémarrer, c'est exactement le genre de motif répété qui
  * fragmente un allocateur, même sans fuite. Voir le log de minimum de tas
