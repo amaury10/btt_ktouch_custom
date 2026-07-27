@@ -112,11 +112,35 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         nouveau.impression_en_pause = true;
         break;
 
+    case 4:
+        /* Valeurs aberrantes : sonde de buse largement hors plage plausible
+         * (voir TEMPERATURE_MIN_C/MAX_C dans ui/widgets/tuile.c, [-5, 500])
+         * et plateau négatif comme le ferait une sonde déconnectée -- ne
+         * vérifie pas la même chose que le scénario 3 (fichier au maximum de
+         * sa capacité, mais températures restées PLAUSIBLES à 350°C).
+         * Ce scénario-ci exerce ui_format_temperature() côté "--", pas côté
+         * débordement d'affichage : un écran qui afficherait 999.0 ou
+         * -999.0 comme s'il s'agissait d'une vraie mesure reproduirait
+         * exactement le défaut que ce champ existe pour empêcher (même
+         * politique que le grisage sur donnees_perimees, voir ecran.h). */
+        snprintf(nouveau.etat, sizeof(nouveau.etat), "printing");
+        snprintf(nouveau.fichier, sizeof(nouveau.fichier), "piece_test.gcode");
+        nouveau.buse_actuelle = 999.0f;
+        nouveau.buse_consigne = 210.0f;
+        nouveau.plateau_actuel = -999.0f;
+        nouveau.plateau_consigne = 60.0f;
+        nouveau.progression = 0.42f;
+        nouveau.temps_restant_s = 1800u;
+        nouveau.impression_en_cours = true;
+        nouveau.impression_en_pause = false;
+        break;
+
     case 3:
     default:
-        /* Valeurs extrêmes : nom de fichier au maximum de sa capacité et
-         * température de buse largement au-dessus du raisonnable, pour
-         * vérifier qu'un affichage ne déborde nulle part. Sert aussi de
+        /* Valeurs extrêmes mais PLAUSIBLES : nom de fichier au maximum de sa
+         * capacité et température de buse haute-mais-crédible, pour
+         * vérifier qu'un affichage ne déborde nulle part sans pour autant
+         * déclencher le rendu "--" du scénario 4 ci-dessus. Sert aussi de
          * scénario par défaut pour tout numéro inconnu — mieux vaut une
          * valeur voyante qu'un comportement silencieusement indéfini. */
         snprintf(nouveau.etat, sizeof(nouveau.etat), "printing");

@@ -1,18 +1,20 @@
 /* Point d'entrée du simulateur : construit l'habillage (tâche 4 — barre
- * d'état, bandeau de notifications) et un écran jouet qui affiche l'état
- * factice, fait tourner la boucle simulée (source_etat_sim.c) contre
- * backend_factice (ou un backend qui échoue toujours, pour démontrer l'état
- * dégradé/hors ligne), puis soit capture le tout en PNG, soit l'affiche
- * dans une fenêtre SDL interactive.
+ * d'état, bandeau de notifications) et l'écran d'accueil Klipper (tâche 6),
+ * fait tourner la boucle simulée (source_etat_sim.c) contre backend_factice
+ * (ou un backend qui échoue toujours, pour démontrer l'état dégradé/hors
+ * ligne), puis soit capture le tout en PNG, soit l'affiche dans une fenêtre
+ * SDL interactive.
  *
- * Remplace la mire de vérification de la tâche 1 (fond, quatre polices,
- * cadrage) plutôt que de la garder à côté sous un second mode : elle a
- * rempli son rôle une fois (voir task-1-report.md), et la garder vivante
- * ici forcerait soit un indicateur de ligne de commande supplémentaire pour
- * choisir entre les deux, soit deux chemins de code jamais tous deux
- * exercés le même jour. L'écran jouet ci-dessous, plus modeste qu'un futur
- * écran d'accueil Klipper (tâche 6), suffit à prouver que l'habillage
- * transmet réellement etat/generation/liaison à un écran empilé. */
+ * C'est ici que la chaîne complète tourne pour la première fois : backend
+ * factice -> boucle_cycle() -> magasin d'état -> génération -> ECRAN_ACCUEIL
+ * (voir apps/klipper/ecrans/ecran_accueil.h). Jusqu'à la tâche 5, ce fichier
+ * assemblait un écran jouet local (ECRAN_DEMO) pour prouver que l'habillage
+ * transmet réellement etat/generation/liaison à un écran empilé ; la tâche 6
+ * le remplace par l'écran réel plutôt que de garder les deux, exactement
+ * comme ce fichier avait lui-même remplacé la mire de vérification de la
+ * tâche 1 (voir task-1-report.md) — un écran jouet qui a rempli son rôle une
+ * fois ne mérite pas un second indicateur de ligne de commande pour choisir
+ * entre lui et l'écran réel. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,97 +26,11 @@
 
 #include "backend.h"
 #include "backend_factice.h"
-#include "ecran.h"
+#include "ecran_accueil.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
-#include "progression.h"
 #include "source_etat_sim.h"
-#include "tuile.h"
-
-/* --- Écran de démonstration --------------------------------------------- *
- * Tâche 5 : le label de buse et la barre de progression "faits main" sont
- * remplacés par les widgets partagés (tuile_t / progression_t) — la
- * démonstration la plus simple qu'ils s'intègrent réellement à l'habillage
- * et au rendu SDL réel, pas seulement à l'afficheur hors écran 32x32 du
- * harnais de test (voir host-test/tests/test_widgets.c pour la preuve
- * mécanique, ceci pour la preuve visuelle). */
-
-typedef struct {
-    lv_obj_t     *etat_label;
-    tuile_t       buse;
-    progression_t progression;
-} demo_ctx_t;
-
-static void demo_construire(lv_obj_t *parent, void *contexte)
-{
-    demo_ctx_t *ctx = contexte;
-
-    lv_obj_set_style_bg_color(parent, lv_color_hex(0x10161D), 0);
-    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
-
-    ctx->etat_label = lv_label_create(parent);
-    lv_obj_set_style_text_font(ctx->etat_label, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_color(ctx->etat_label, lv_color_hex(0xFFFFFF), 0);
-    lv_label_set_text(ctx->etat_label, "...");
-    lv_obj_align(ctx->etat_label, LV_ALIGN_TOP_MID, 0, 30);
-
-    tuile_creer(&ctx->buse, parent, "Nozzle");
-    lv_obj_set_size(ctx->buse.racine, 220, 140);
-    lv_obj_align(ctx->buse.racine, LV_ALIGN_CENTER, 0, -30);
-
-    progression_creer(&ctx->progression, parent);
-    lv_obj_set_size(ctx->progression.racine, 500, 40);
-    lv_obj_align(ctx->progression.racine, LV_ALIGN_CENTER, 0, 130);
-}
-
-/* Grise le label d'état et les deux widgets sur `donnees_perimees` (calculé
- * par l'habillage depuis la seule liaison, voir habillage_pomper() dans
- * firmware/main/ui/habillage.c) — c'est tout ce qu'un écran doit faire de ce
- * champ : ni boîte d'erreur, ni texte différent, juste une couleur plus
- * terne pour signaler que ces valeurs ne sont plus fraîches (spécification
- * §5.3, voir le commentaire de ecran.h sur `mettre_a_jour`). */
-#define COULEUR_TEXTE_NORMAL_ETAT 0xFFFFFF
-#define COULEUR_TEXTE_PERIME      0x6B7280
-
-static void demo_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
-{
-    demo_ctx_t *ctx = contexte;
-    const etat_klipper_t *e = etat;
-    /* KLIPPER_FICHIER_MAX (64) + le reste du gabarit : marge large plutôt
-     * qu'un calcul exact, pour ne pas avoir à revenir ici si le gabarit
-     * change. */
-    char tampon[64 + KLIPPER_FICHIER_MAX];
-    char val[16];
-    char consigne[16];
-
-    snprintf(tampon, sizeof(tampon), "state: %s   file: %s", e->etat,
-             e->fichier[0] != '\0' ? e->fichier : "-");
-    lv_label_set_text(ctx->etat_label, tampon);
-
-    ui_format_temperature(val, sizeof(val), e->buse_actuelle);
-    ui_format_temperature(consigne, sizeof(consigne), e->buse_consigne);
-    tuile_definir_valeur(&ctx->buse, val);
-    tuile_definir_consigne(&ctx->buse, consigne);
-
-    progression_definir(&ctx->progression, e->progression);
-
-    lv_obj_set_style_text_color(
-        ctx->etat_label,
-        lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : COULEUR_TEXTE_NORMAL_ETAT), 0);
-    tuile_griser(&ctx->buse, donnees_perimees);
-    progression_griser(&ctx->progression, donnees_perimees);
-}
-
-static const ecran_desc_t ECRAN_DEMO = {
-    .id = "demo",
-    .titre = "Demo",
-    .taille_contexte = sizeof(demo_ctx_t),
-    .construire = demo_construire,
-    .mettre_a_jour = demo_mettre_a_jour,
-    .detruire = NULL,
-};
 
 /* --- Backend qui échoue systématiquement -------------------------------- *
  * Sert uniquement à démontrer, dans le simulateur, l'état dégradé/hors
@@ -188,7 +104,7 @@ int main(int argc, char **argv)
 
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
-    navigation_empiler(&ECRAN_DEMO);
+    navigation_empiler(&ECRAN_ACCUEIL);
 
     const backend_desc_t *backend = echec ? &BACKEND_ECHEC_DESC : backend_factice_desc();
     if (!echec) {

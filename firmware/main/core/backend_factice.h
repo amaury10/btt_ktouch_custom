@@ -12,5 +12,8 @@
 
 const backend_desc_t *backend_factice_desc(void);
 
-/* 0 repos · 1 impression qui progresse · 2 pause · 3 valeurs extrêmes */
+/* 0 repos · 1 impression qui progresse · 2 pause · 3 valeurs extrêmes
+ * (plausibles) · 4 valeurs aberrantes (hors plage -- vérifie qu'un
+ * affichage rend "--" plutôt qu'un nombre faux, voir ui_format_temperature()
+ * dans firmware/main/ui/widgets/tuile.h) */
 void backend_factice_scenario(int numero);

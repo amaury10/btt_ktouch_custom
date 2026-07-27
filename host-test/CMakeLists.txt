@@ -37,6 +37,10 @@ set(SIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../simulateur)
 # répertoire de plus sous UI_DIR : même raison que UI_DIR lui-même, une seule
 # implémentation compilée ici comme sur la cible et dans le simulateur.
 set(WIDGETS_DIR ${UI_DIR}/widgets)
+# ecran_accueil.{c,h} (tâche 6) vit sous apps/klipper/ecrans : même raison
+# que WIDGETS_DIR ci-dessus, une seule implémentation, jamais une copie.
+set(KLIPPER_DIR ${CORE_DIR}/../apps/klipper)
+set(ECRANS_DIR ${KLIPPER_DIR}/ecrans)
 
 # LVGL entre dans le harnais de test hote pour rendre la navigation testable
 # sur PC : reutilise le SEUL sous-module et la SEULE lv_conf.h de
@@ -107,7 +111,8 @@ add_executable(tests
     tests/test_navigation.c
     tests/test_habillage.c
     tests/test_widgets.c
-    ${CORE_DIR}/../apps/klipper/moonraker_parse.c
+    tests/test_ecran_accueil.c
+    ${KLIPPER_DIR}/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c
@@ -118,6 +123,7 @@ add_executable(tests
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
+    ${ECRANS_DIR}/ecran_accueil.c
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c
 )
@@ -125,7 +131,7 @@ target_link_libraries(tests PRIVATE cjson lvgl m)
 # Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
 # neutre entre host-test/ et simulateur/ : les deux le consomment (voir
 # simulateur/CMakeLists.txt), et aucun des deux ne le possede plus.
-target_include_directories(tests PRIVATE ${CORE_DIR} ${CORE_DIR}/../apps/klipper ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
+target_include_directories(tests PRIVATE ${CORE_DIR} ${KLIPPER_DIR} ${ECRANS_DIR} ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.

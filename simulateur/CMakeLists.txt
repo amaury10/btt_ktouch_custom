@@ -35,6 +35,11 @@ set(UI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/ui)
 # tuile.{c,h} / progression.{c,h} (tâche 5) : même raison que UI_DIR
 # ci-dessus, un seul répertoire de widgets partagés, jamais une copie.
 set(WIDGETS_DIR ${UI_DIR}/widgets)
+# ecran_accueil.{c,h} (tâche 6) vit sous apps/klipper/ecrans : même raison
+# que WIDGETS_DIR ci-dessus, un seul écran compilé ici comme sur la cible et
+# dans le harnais de tests hôte (voir host-test/CMakeLists.txt).
+set(KLIPPER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/apps/klipper)
+set(ECRANS_DIR ${KLIPPER_DIR}/ecrans)
 # navigation.c rend esp_err_t (ESP_OK, ESP_ERR_NO_MEM, ...) pour rester le
 # même contrat des deux côtés (voir core/backend.h) ; hors ESP-IDF, ce type
 # vient du même shim que le harnais de test hôte, sous un répertoire de
@@ -66,7 +71,8 @@ add_executable(ktouch-sim
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
+    ${ECRANS_DIR}/ecran_accueil.c
 )
-target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)

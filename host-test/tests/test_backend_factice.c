@@ -40,11 +40,20 @@ void suite_backend_factice(void)
     VERIFIER(d->rafraichir(&etat) == ESP_OK);
     VERIFIER(etat.impression_en_pause);
 
-    /* Scenario extreme : sert a verifier que l'interface ne deborde pas. */
+    /* Scenario extreme : sert a verifier que l'interface ne deborde pas.
+     * Plausible (350C, dans [-5, 500]) : distinct du scenario 4 ci-dessous. */
     backend_factice_scenario(3);
     VERIFIER(d->rafraichir(&etat) == ESP_OK);
     VERIFIER(etat.buse_actuelle > 300.0f);
     VERIFIER(strlen(etat.fichier) == KLIPPER_FICHIER_MAX - 1);
+
+    /* Scenario aberrant : hors plage plausible, sert a verifier qu'un
+     * affichage rend "--" plutot qu'un nombre faux (voir
+     * ui_format_temperature() dans ui/widgets/tuile.h, plage [-5, 500]). */
+    backend_factice_scenario(4);
+    VERIFIER(d->rafraichir(&etat) == ESP_OK);
+    VERIFIER(etat.buse_actuelle > 500.0f);
+    VERIFIER(etat.plateau_actuel < -5.0f);
 
     /* Les actions connues sont acceptees, les inconnues refusees explicitement. */
     VERIFIER(d->commande(&etat, BACKEND_ACTION_PAUSE, NULL) == ESP_OK);
