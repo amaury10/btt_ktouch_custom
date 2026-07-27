@@ -7,7 +7,15 @@
  * explique pourquoi dans son coin. Sans cette règle, chaque écran inventerait
  * sa propre façon de dire « je n'ai pas de nouvelles ». Les trois fonctions
  * pures ci-dessous encodent cette politique une seule fois, pour qu'elle
- * reste testable sans jamais regarder un pixel. */
+ * reste testable sans jamais regarder un pixel.
+ *
+ * Contrairement au reste de ui/ (ecran.h, navigation.h : entièrement
+ * opaques sur `void *etat`), habillage.c est couplé à `etat_klipper_t` en
+ * UN seul site (l'appel à ui_etat_instantane() dans habillage_pomper(), qui
+ * doit connaître la taille exacte de l'état du backend pour en obtenir quoi
+ * que ce soit — voir le commentaire de source_etat.h). Un fork avec une
+ * autre application (une machine non-Klipper) adapte ce fichier-là, pas
+ * ecran.h/navigation.c qui restent réutilisables tels quels. */
 #pragma once
 
 #include <stdbool.h>

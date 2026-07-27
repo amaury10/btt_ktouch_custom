@@ -22,6 +22,7 @@
  * chaque écran doit re-caster vers son propre type. */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "lvgl.h"
@@ -50,8 +51,22 @@ typedef struct {
      * pointe vers une structure dont la forme dépend de l'application (voir
      * apps/klipper) ; un écran générique la traite comme opaque. Un écran
      * qui n'affiche rien de dynamique (un menu de boutons fixes, par
-     * exemple) peut laisser ce pointeur à NULL. */
-    void (*mettre_a_jour)(const void *etat, void *contexte);
+     * exemple) peut laisser ce pointeur à NULL.
+     *
+     * `donnees_perimees` est calculé par l'habillage à partir du seul état
+     * de la liaison (`habillage_donnees_perimees()`, voir ui/habillage.h) —
+     * jamais du contenu de `etat` lui-même. Vrai signifie « grise tes
+     * valeurs, ce que tu affiches ne reflète plus la machine en ce moment »,
+     * RIEN DE PLUS : ce n'est pas un signal d'erreur, et un écran ne doit
+     * jamais le traduire par sa propre boîte d'erreur réseau — la
+     * spécification §5.3 réserve cet affichage à l'habillage seul (pastille
+     * + texte de la barre d'état). Un écran qui ignore ce champ (le
+     * transmet à `false` en l'oubliant, par exemple) republierait des
+     * zéros en blanc franc comme s'il s'agissait d'une mesure réelle —
+     * exactement le défaut C3 du jalon 2a que ce champ existe pour empêcher
+     * structurellement, plutôt que de compter sur chaque écran pour relire
+     * la liaison lui-même via ui_etat_instantane(). */
+    void (*mettre_a_jour)(const void *etat, bool donnees_perimees, void *contexte);
 
     /* Appelé par navigation_depiler() avant que le socle ne détruise le
      * conteneur LVGL de cet écran et ne libère son contexte (voir

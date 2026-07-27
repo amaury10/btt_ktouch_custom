@@ -6,8 +6,11 @@
 #include "petit_test.h"
 
 /* Écrans jouets : ils comptent leurs appels pour que le test observe le cycle
- * de vie, et n'affichent rien. */
-typedef struct { int construits; int maj; int detruits; int dernier_etat; } trace_t;
+ * de vie, et n'affichent rien. `dernier_perimees` trace la dernière valeur
+ * de `donnees_perimees` reçue par CE rappel (fix round 1, revue tâche 4) :
+ * la seule façon d'observer, sans regarder un pixel, que le champ calculé
+ * par habillage_pomper() atteint réellement l'écran visible, et lui seul. */
+typedef struct { int construits; int maj; int detruits; int dernier_etat; bool dernier_perimees; } trace_t;
 static trace_t g_trace_a, g_trace_b;
 
 typedef struct { int marqueur; } ctx_a_t;
@@ -20,9 +23,12 @@ static void a_construire(lv_obj_t *parent, void *ctx)
     if (c->marqueur == 0) g_trace_a.construits++;
     c->marqueur = 0x5A;
 }
-static void a_maj(const void *etat, void *ctx)
+static void a_maj(const void *etat, bool donnees_perimees, void *ctx)
 {
-    (void)ctx; g_trace_a.maj++; g_trace_a.dernier_etat = *(const int *)etat;
+    (void)ctx;
+    g_trace_a.maj++;
+    g_trace_a.dernier_etat = *(const int *)etat;
+    g_trace_a.dernier_perimees = donnees_perimees;
 }
 static void a_detruire(void *ctx) { (void)ctx; g_trace_a.detruits++; }
 
@@ -34,9 +40,12 @@ static const ecran_desc_t ECRAN_A = {
 /* Identique à A, sur g_trace_b, avec .taille_contexte = 0 pour couvrir
  * l'écran sans état : ctx vaut alors toujours NULL, jamais déréférencé. */
 static void b_construire(lv_obj_t *parent, void *ctx) { (void)parent; (void)ctx; g_trace_b.construits++; }
-static void b_maj(const void *etat, void *ctx)
+static void b_maj(const void *etat, bool donnees_perimees, void *ctx)
 {
-    (void)ctx; g_trace_b.maj++; g_trace_b.dernier_etat = *(const int *)etat;
+    (void)ctx;
+    g_trace_b.maj++;
+    g_trace_b.dernier_etat = *(const int *)etat;
+    g_trace_b.dernier_perimees = donnees_perimees;
 }
 static void b_detruire(void *ctx) { (void)ctx; g_trace_b.detruits++; }
 
@@ -65,7 +74,7 @@ typedef struct { int construits; int detruits; } trace_simple_t;
  * rien, jamais réellement empilé avec succès. */
 static trace_simple_t g_trace_trop;
 static void trop_construire(lv_obj_t *parent, void *ctx) { (void)parent; (void)ctx; g_trace_trop.construits++; }
-static void trop_maj(const void *etat, void *ctx) { (void)etat; (void)ctx; }
+static void trop_maj(const void *etat, bool donnees_perimees, void *ctx) { (void)etat; (void)donnees_perimees; (void)ctx; }
 static void trop_detruire(void *ctx) { (void)ctx; g_trace_trop.detruits++; }
 
 static const ecran_desc_t ECRAN_TROP = {
@@ -137,32 +146,39 @@ void suite_navigation(void)
     /* titre courant */ VERIFIER(strcmp(navigation_titre_courant(), "A") == 0);
 
     int etat = 7;
-    navigation_mettre_a_jour(&etat);
+    navigation_mettre_a_jour(&etat, false);
     /* A recoit la mise a jour */ VERIFIER(g_trace_a.maj == 1);
     /* A recoit le bon etat */ VERIFIER(g_trace_a.dernier_etat == 7);
+    /* A recoit donnees_perimees=false */ VERIFIER(g_trace_a.dernier_perimees == false);
 
     /* empiler B */ VERIFIER(navigation_empiler(&ECRAN_B) == ESP_OK);
     /* A n'est PAS detruit sous B */ VERIFIER(g_trace_a.detruits == 0);
     etat = 9;
-    navigation_mettre_a_jour(&etat);
+    navigation_mettre_a_jour(&etat, true);
     /* Règle de la spécification 5.4 : seul l'écran visible est mis à jour. */
     /* A ne recoit plus rien sous B */ VERIFIER(g_trace_a.maj == 1);
+    /* A garde sa derniere valeur (false), pas mise a jour sous B */
+    VERIFIER(g_trace_a.dernier_perimees == false);
     /* B recoit la mise a jour */ VERIFIER(g_trace_b.maj == 1);
+    /* B (seul ecran visible) recoit donnees_perimees=true */
+    VERIFIER(g_trace_b.dernier_perimees == true);
 
     navigation_depiler();
     /* B detruit au depilement */ VERIFIER(g_trace_b.detruits == 1);
     /* profondeur revenue a 1 */ VERIFIER(navigation_profondeur() == 1);
     etat = 11;
-    navigation_mettre_a_jour(&etat);
+    navigation_mettre_a_jour(&etat, true);
     /* A recoit a nouveau */ VERIFIER(g_trace_a.maj == 2);
     /* A n'a PAS ete reconstruit */ VERIFIER(g_trace_a.construits == 1);
+    /* A redevenue visible recoit desormais donnees_perimees=true */
+    VERIFIER(g_trace_a.dernier_perimees == true);
 
     navigation_depiler();
     /* depiler le dernier ecran ne le detruit pas */ VERIFIER(g_trace_a.detruits == 0);
     /* profondeur reste 1 */ VERIFIER(navigation_profondeur() == 1);
 
     /* empiler NULL est refuse */ VERIFIER(navigation_empiler(NULL) == ESP_ERR_INVALID_ARG);
-    /* mise a jour sans etat ne plante pas */ VERIFIER((navigation_mettre_a_jour(NULL), true));
+    /* mise a jour sans etat ne plante pas */ VERIFIER((navigation_mettre_a_jour(NULL, true), true));
 
     /* Profondeur maximale : la pile contient encore A (profondeur 1) ; la
      * remplir jusqu'à NAVIGATION_PROFONDEUR_MAX puis tenter un empilement de
@@ -193,6 +209,17 @@ void suite_navigation(void)
     VERIFIER(navigation_empiler(&ECRAN_B) == ESP_OK);
     VERIFIER(navigation_empiler(&ECRAN_C) == ESP_OK);
     /* trois ecrans empiles */ VERIFIER(navigation_profondeur() == 3);
+
+    /* Garde mettre_a_jour==NULL de navigation.c (navigation_mettre_a_jour(),
+     * `if (sommet->desc->mettre_a_jour != NULL)`) : jamais réellement
+     * exercée jusqu'ici (revue tâche 3, Minor déféré) — aucun écran à
+     * mettre_a_jour NULL n'était au sommet au moment d'un appel. ECRAN_C
+     * (mettre_a_jour = NULL) est ici au sommet : cet appel ne doit pas
+     * planter, et ne doit toucher ni A ni B (couverts). */
+    int etat_sous_c = 42;
+    VERIFIER((navigation_mettre_a_jour(&etat_sous_c, false), true));
+    /* A (couvert par B puis C) ne recoit rien */ VERIFIER(g_trace_a.maj == 0);
+    /* B (couvert par C) ne recoit rien */ VERIFIER(g_trace_b.maj == 0);
 
     navigation_accueil();
 

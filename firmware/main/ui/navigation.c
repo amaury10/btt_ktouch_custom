@@ -159,7 +159,7 @@ void navigation_accueil(void)
     }
 }
 
-void navigation_mettre_a_jour(const void *etat)
+void navigation_mettre_a_jour(const void *etat, bool donnees_perimees)
 {
     if (etat == NULL || profondeur == 0) {
         return;
@@ -167,7 +167,7 @@ void navigation_mettre_a_jour(const void *etat)
 
     entree_pile_t *sommet = &pile[profondeur - 1];
     if (sommet->desc->mettre_a_jour != NULL) {
-        sommet->desc->mettre_a_jour(etat, sommet->contexte);
+        sommet->desc->mettre_a_jour(etat, donnees_perimees, sommet->contexte);
     }
 }
 

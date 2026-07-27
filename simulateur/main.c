@@ -65,11 +65,17 @@ static void demo_construire(lv_obj_t *parent, void *contexte)
     lv_bar_set_value(ctx->barre_progression, 0, LV_ANIM_OFF);
 }
 
-/* Le grisage des données périmées (habillage_donnees_perimees(), règle 5.3)
- * revient à un écran réel de la tâche 6 ; cet écran jouet se contente
- * d'afficher le contenu brut pour prouver que le triplet état/génération/
- * liaison lu par habillage_pomper() atteint bien navigation_mettre_a_jour(). */
-static void demo_mettre_a_jour(const void *etat, void *contexte)
+/* Grise ses deux labels et la couleur de la barre sur `donnees_perimees`
+ * (calculé par l'habillage depuis la seule liaison, voir habillage_pomper()
+ * dans firmware/main/ui/habillage.c) — c'est tout ce qu'un écran doit faire
+ * de ce champ : ni boîte d'erreur, ni texte différent, juste une couleur
+ * plus terne pour signaler que ces valeurs ne sont plus fraîches
+ * (spécification §5.3, voir le commentaire de ecran.h sur `mettre_a_jour`). */
+#define COULEUR_TEXTE_NORMAL_ETAT 0xFFFFFF
+#define COULEUR_TEXTE_NORMAL_BUSE 0xC9D1D9
+#define COULEUR_TEXTE_PERIME      0x6B7280
+
+static void demo_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
 {
     demo_ctx_t *ctx = contexte;
     const etat_klipper_t *e = etat;
@@ -86,6 +92,16 @@ static void demo_mettre_a_jour(const void *etat, void *contexte)
     lv_label_set_text(ctx->buse_label, tampon);
 
     lv_bar_set_value(ctx->barre_progression, (int32_t)(e->progression * 1000.0f), LV_ANIM_OFF);
+
+    lv_obj_set_style_text_color(
+        ctx->etat_label,
+        lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : COULEUR_TEXTE_NORMAL_ETAT), 0);
+    lv_obj_set_style_text_color(
+        ctx->buse_label,
+        lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : COULEUR_TEXTE_NORMAL_BUSE), 0);
+    lv_obj_set_style_bg_color(ctx->barre_progression,
+                               lv_color_hex(donnees_perimees ? COULEUR_TEXTE_PERIME : 0x2E86F5),
+                               LV_PART_INDICATOR);
 }
 
 static const ecran_desc_t ECRAN_DEMO = {

@@ -324,7 +324,16 @@ void habillage_pomper(void)
     }
 
     if (generation != g_derniere_generation || liaison != g_derniere_liaison) {
-        navigation_mettre_a_jour(&g_etat);
+        /* Calculé une seule fois ici, à partir de la SEULE liaison (jamais
+         * du contenu de g_etat) : c'est le seul appel réel de
+         * habillage_donnees_perimees() de tout le module, et le seul point
+         * de passage entre la règle 5.3 et un écran (voir ecran.h,
+         * mettre_a_jour). La condition de propagation ci-dessus couvre déjà
+         * ce cas sans rien ajouter : un changement de liaison a changer
+         * `liaison != g_derniere_liaison` la fait de toute façon entrer
+         * dans ce bloc. */
+        bool perimees = habillage_donnees_perimees(liaison);
+        navigation_mettre_a_jour(&g_etat, perimees);
         g_derniere_generation = generation;
         g_derniere_liaison = liaison;
     }

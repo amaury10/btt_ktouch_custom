@@ -12,6 +12,7 @@
  * pensée séparément. */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "esp_err.h"
@@ -57,13 +58,17 @@ void navigation_depiler(void);
  * navigation_profondeur() vaille 1 ou 0). */
 void navigation_accueil(void);
 
-/* Transmet `etat` au seul écran actuellement visible (le sommet de la pile),
- * via son rappel `mettre_a_jour` — jamais aux écrans couverts en dessous
- * (spécification 5.4). `etat` NULL n'est pas une erreur : c'est le cas de la
- * boucle applicative pas encore démarrée, où il n'y a simplement rien de
- * neuf à montrer ; cet appel ne fait alors rien. Ne fait rien non plus si la
- * pile est vide. */
-void navigation_mettre_a_jour(const void *etat);
+/* Transmet `etat` et `donnees_perimees` au seul écran actuellement visible
+ * (le sommet de la pile), via son rappel `mettre_a_jour` — jamais aux écrans
+ * couverts en dessous (spécification 5.4). `etat` NULL n'est pas une
+ * erreur : c'est le cas de la boucle applicative pas encore démarrée, où il
+ * n'y a simplement rien de neuf à montrer ; cet appel ne fait alors rien. Ne
+ * fait rien non plus si la pile est vide, ou si l'écran visible laisse
+ * `mettre_a_jour` à NULL (voir ecran.h). `donnees_perimees` est transmis tel
+ * quel, sans jugement : c'est à l'appelant (habillage_pomper(), voir
+ * ui/habillage.c) de le calculer depuis la liaison — cette fonction ne fait
+ * que le relayer au sommet de la pile. */
+void navigation_mettre_a_jour(const void *etat, bool donnees_perimees);
 
 /* Titre de l'écran au sommet de la pile, destiné à la barre d'état. Rend
  * NULL si la pile est vide. */
