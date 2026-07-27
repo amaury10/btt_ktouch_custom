@@ -70,6 +70,47 @@ suite : harnais
 3 verification(s), 0 echec(s)
 ```
 
+## Sanitizers (ASan + UBSan)
+
+La cible `tests` compile par défaut avec AddressSanitizer et
+UndefinedBehaviorSanitizer (`-fsanitize=address,undefined,float-cast-overflow
+-fno-omit-frame-pointer -fno-sanitize-recover=all`). cJSON (vendorisé) n'est
+**pas** instrumenté : ce n'est pas du code qu'on maintient, et coupler ses
+éventuels avertissements à notre build le ferait échouer pour un problème
+qu'on ne peut pas corriger.
+
+Ce que ça achète concrètement : trois défauts déjà trouvés dans ce jalon
+appartiennent à des classes que ces sanitizers détectent mécaniquement — une
+conversion `float → uint32_t` d'une valeur potentiellement infinie
+(`float-cast-overflow`), un `free()` sur un pointeur indéterminé laissé par
+une initialisation en échec (heap-use-after-free / invalid-free), et un NaN
+qui se glisse sans bruit dans une comparaison. Les repérer à la revue humaine
+est plus lent et moins fiable qu'un outil qui fait échouer le build.
+`-fno-sanitize-recover=all` est ce qui rend ça non contournable : sans cette
+option, UBSan se contente d'imprimer un avertissement et continue, et un
+avertissement qui défile dans la sortie ne sera pas vu.
+
+**Note gcc :** avec gcc (contrairement à clang), `float-cast-overflow` n'est
+*pas* inclus dans le groupe `-fsanitize=undefined` — c'est pourquoi il est
+listé explicitement ci-dessus. Vérifié empiriquement avec gcc 14.2 : un cast
+`(uint32_t)` d'un float infini passe inaperçu avec `-fsanitize=undefined`
+seul.
+
+Interrupteur : l'option CMake `KTOUCH_HOST_TEST_SANITIZERS` (défaut `ON`),
+pour une chaîne de compilation qui ne supporterait pas ces sanitizers. Pour
+la désactiver :
+
+```sh
+cmake -S host-test -B host-test/build -G Ninja -DKTOUCH_HOST_TEST_SANITIZERS=OFF
+cmake --build host-test/build
+./host-test/build/tests
+```
+
+Une fois la valeur `OFF` écrite dans le cache CMake de `host-test/build/`,
+elle survit aux reconfigurations ultérieures (y compris via `run.sh`, qui
+appelle `cmake` sans repréciser l'option) tant que ce dossier `build/` n'est
+pas supprimé.
+
 ## Le micro-cadre de test
 
 Pas de framework externe (pas d'Unity vendorisé, pas de CTest au-delà d'un
