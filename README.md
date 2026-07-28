@@ -9,12 +9,18 @@ Le projet poursuit deux buts sur une base technique commune : redonner un
 firmware vivant et compilable aux possesseurs de l'appareil, et détourner
 celui-ci pour piloter un tracker astrophotographique.
 
-## État — jalon 1 atteint
+## État — jalon 2b atteint
 
 Un firmware maison a tourné sur du matériel réel, depuis le slot OTA `app1`,
 sans jamais toucher au firmware d'origine, et l'appareil est revenu au stock sur
-commande. Rien n'est encore utilisable au quotidien : c'est une preuve de vie,
-pas une interface.
+commande (jalon 1). Depuis, le jalon 2b a construit une vraie interface tactile
+(écran d'accueil, configuration, clavier, confirmations, notifications) au-dessus
+d'un socle non visuel testé (analyseurs JSON, store d'état, machine à états de
+connexion) : **vérifiée sous [`simulateur/`](simulateur/)** (LVGL + SDL sur PC,
+captures PNG à l'appui) et sous [`host-test/`](host-test/) (suite C, voir son
+README pour le compte à jour), **mais jamais encore lancée sur l'appareil
+réel** — la validation matérielle de cette interface reste à faire, ne pas la
+présumer acquise à la lecture de ce dépôt.
 
 Le résultat qui a de la valeur au-delà de ce dépôt est
 **[`docs/hardware/pinout.md`](docs/hardware/pinout.md)** : la première
@@ -56,6 +62,9 @@ au stock tout seul, deux fois.
 |---|---|
 | [`firmware/`](firmware/) | Le firmware ESP-IDF et ses instructions de compilation — voir [`firmware/README.md`](firmware/README.md) |
 | [`host-test/`](host-test/) | Tests unitaires (C, sur PC) du code « non visuel » de `firmware/main/core/` et `firmware/main/apps/klipper/` — voir [`host-test/README.md`](host-test/README.md) |
+| [`simulateur/`](simulateur/) | Interface LVGL faisant tourner l'écran sur PC (fenêtre SDL ou capture PNG hors écran), sans matériel K-Touch — voir [`simulateur/README.md`](simulateur/README.md) |
+| [`exemples/backend_jouet/`](exemples/backend_jouet/) | Backend et écran jouets minimalistes : la preuve, et le modèle, qu'une application tierce s'accroche au même socle que Klipper sans le modifier — voir [`exemples/backend_jouet/README.md`](exemples/backend_jouet/README.md) |
+| [`shim/`](shim/) | En-têtes de substitution pour compiler `firmware/main/core/` côté PC (`host-test/`, `simulateur/`) sans ESP-IDF |
 | [`tools/ktouch/`](tools/ktouch/) | Bibliothèque Python (standard uniquement) : images ESP32, table de partitions, `otadata` |
 | `ktouch-cli.py` | Lanceur : `verify`, `otadata`, `make-otadata`, `image` |
 | [`docs/hardware/`](docs/hardware/) | Pinout vérifié, partitionnement, procédure d'installation et de retour |
@@ -86,3 +95,16 @@ référencé en sous-module et **jamais redistribué ici**. Cette précaution n'
 pas de forme : ce dépôt affiche un badge « License: MIT » pointant vers un
 fichier `LICENSE` qui n'existe pas, et l'API de licence de GitHub n'y détecte
 aucune licence. Du code publié sans licence reste sous droit d'auteur plein.
+
+Trois autres dépendances tierces, vendorisées pour compiler sans matériel :
+
+- **LVGL** — MIT. Sous-module Git (`simulateur/lvgl`, épinglé `v9.2.2`, voir
+  `.gitmodules`) pour `simulateur/` et `host-test/`, et composant du registre
+  ESP-IDF (`firmware/managed_components/lvgl__lvgl`) pour la cible — même
+  bibliothèque, deux mécanismes de récupération selon le contexte de
+  compilation.
+- `simulateur/vendor/stb_image_write.h` — MIT ou domaine public (double
+  licence au choix), Sean Barrett. Sert uniquement à écrire les captures PNG
+  du mode hors écran.
+- `host-test/vendor/cJSON.c` — MIT. Analyseur JSON utilisé par la suite de
+  tests hôte.
