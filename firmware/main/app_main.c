@@ -60,14 +60,15 @@ static void on_touch(lv_event_t *event)
 }
 
 /* Rappel du minuteur récurrent (tâche 10) : par construction, un lv_timer
- * s'exécute déjà sur le fil LVGL — PandaTouch_IDF n'expose aucun mécanisme
- * de verrouillage utilisable depuis une AUTRE tâche pour ce genre de rappel
- * périodique (pt_lvgl_lock()/pt_lvgl_unlock() protègent des appels ponctuels
- * depuis app_main ou la tâche d'interrogation, pas un minuteur qui vivrait
- * hors du fil LVGL), donc pas de PT_LVGL_SCOPE_LOCK() ici : le prendre
- * depuis le fil qui le détient déjà se bloquerait lui-même selon
- * l'implémentation du verrou (non réentrant a priori, jamais vérifié faute
- * de nécessité). habillage_pomper() est lui-même un no-op silencieux si
+ * s'exécute déjà sur le fil LVGL — pt_lvgl_task (pandatouch_display.c)
+ * est le seul appelant de lv_timer_handler(), qui dispatche tous les
+ * rappels de minuteurs, et il l'exécute DÉJÀ sous PT_LVGL_SCOPE_LOCK().
+ * C'est la vraie raison de ne pas reprendre le verrou ici : ce fil le
+ * détient déjà pendant tout le rappel. (Le reprendre serait d'ailleurs
+ * inoffensif, pas un interblocage : pt_lvgl_mutex est un
+ * xSemaphoreCreateRecursiveMutex, voir pandatouch_display.c:57 — précision
+ * de la revue tâche 10, la première version de ce commentaire supposait
+ * l'inverse sans avoir lu le .c.) habillage_pomper() est un no-op si
  * habillage_construire() n'a pas encore tourné (voir habillage.c), donc rien
  * à garder ici en plus de l'appel. Ni réseau ni NVS : uniquement le
  * rafraîchissement visuel (bandeau de notification qui expire, barre d'état)
