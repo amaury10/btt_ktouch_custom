@@ -124,7 +124,19 @@ L'écran d'impression du 2b gagne le pilotage en cours :
   chacune quand elle est décodée ;
 - métadonnées avant lancement (temps estimé, filament) ;
 - lancement avec confirmation (`printer.print.start`), et c'est CE chemin qui
-  active le bouton Imprimer de 3b.
+  active le bouton Imprimer de 3b ;
+- **clé USB comme seconde source** (ajout utilisateur — le port USB host du
+  K-Touch monte une clé sur le stock, la parité est attendue) : le composant
+  `usb_host_msc` est déjà dans les dépendances du build. Modèle retenu : la
+  clé apparaît comme un onglet/une racine du même navigateur ; imprimer un
+  fichier de la clé = **le téléverser vers Moonraker** (`server.files`
+  upload, avec progression) puis lancer — jamais un chemin d'impression
+  parallèle, Klipper ne lit que ce que Moonraker héberge. Réserve
+  d'honnêteté : c'est la seule partie du jalon **intestable sur simulateur**
+  (pas d'USB simulé) — la logique pure (FAT, liste, découpage d'upload) se
+  teste sur PC, l'intégration ne se valide que sur l'appareil ; elle est
+  livrée en dernier dans la tranche et consignée « différée matériel » tant
+  que la K-Touch n'a pas tourné.
 
 ### 3e — Panneaux machine
 
