@@ -229,18 +229,23 @@ static bool nombre_fini(const cJSON *parent, const char *cle, float *sortie)
     return valeur_finie(cJSON_GetObjectItemCaseSensitive(parent, cle), sortie);
 }
 
-/* Variante DOUBLE de valeur_finie() ci-dessus, pour babystep_z_um :
- * contrairement a la temperature/la position (des champs `float` dans
- * etat_klipper_t), babystep_z_um est un int32_t -- rien ne justifie de
- * retrecir en float au passage, une etape qui perd de la precision pour
- * rien et deplace le point d'arrondi. Fix round 1 (revue, C6) : avec le
- * retrecissement en float, homing_origin[2] = -0.0755 mm devenait
- * -0.0754999965 (le float le plus proche), donc -75.4999... µm apres mise a
- * l'echelle -- arrondi a -75 au lieu de -76 (le float le plus proche de
- * 0.0755 n'est PAS equidistant de 75 et 76 une fois mis a l'echelle). En
- * double, -0.0755 mm est bien plus proche de l'exact, -75.5 µm pile, qui
- * s'arrondit correctement en -76 (arrondi au plus proche en s'eloignant de
- * zero). */
+/* Variante DOUBLE de valeur_finie() ci-dessus, pour tout champ dont la
+ * DESTINATION est un entier (pas un `float` de etat_klipper_t) : rien ne
+ * justifie de retrecir en float au passage, une etape qui perd de la
+ * precision pour rien et deplace le point d'arrondi. Fix round 1 (revue,
+ * C6) : avec le retrecissement en float, homing_origin[2] = -0.0755 mm
+ * devenait -0.0754999965 (le float le plus proche), donc -75.4999... µm
+ * apres mise a l'echelle -- arrondi a -75 au lieu de -76 (le float le plus
+ * proche de 0.0755 n'est PAS equidistant de 75 et 76 une fois mis a
+ * l'echelle). En double, -0.0755 mm est bien plus proche de l'exact, -75.5
+ * µm pile, qui s'arrondit correctement en -76 (arrondi au plus proche en
+ * s'eloignant de zero). Fix round 2 (re-revue) : le meme defaut affectait
+ * encore speed_factor/extrude_factor (round 1 les clampait deja, mais les
+ * lisait toujours via nombre_fini()/float) ; les trois champs mis a
+ * l'echelle de fusionner_gcode_move() (vitesse_pct, flux_pct,
+ * babystep_z_um) passent maintenant tous par cette variante double, pas
+ * seulement babystep -- babystep n'avait rien de special, c'etait juste le
+ * premier des trois corrige. */
 static bool valeur_double_finie(const cJSON *v, double *sortie)
 {
     if (!cJSON_IsNumber(v)) {
@@ -377,22 +382,39 @@ static void fusionner_gcode_move(etat_klipper_t *e, const cJSON *gm)
         return;
     }
 
-    float v;
-    if (nombre_fini(gm, "speed_factor", &v)) {
-        /* Fix round 1 (revue, C2/C6) : speed_factor 1000.0 (M220 S100000,
-         * une commande Klipper reelle) donne 100000 %, hors plage d'un
-         * uint16_t -- clampe a UINT16_MAX plutot qu'UB. L'arrondi au plus
-         * proche (+0.5, valeurs toujours positives ici) est applique AVANT
-         * le clamp, cote appelant, comme documente sur les helpers
-         * double_vers_*_borne ci-dessus. */
+    /* Fix round 2 (re-revue) : speed_factor/extrude_factor sont lus en
+     * DOUBLE via valeur_double_finie() -- EXACTEMENT le meme motif que
+     * homing_origin[2] ci-dessous (fix round 1, C6). Round 1 avait clampe
+     * ces deux champs correctement mais les lisait encore via nombre_fini()
+     * (retrecissement en float AVANT la mise a l'echelle x100), le meme
+     * defaut de precision que C6 avait diagnostique pour babystep sans
+     * l'appliquer ici : speed_factor 1.045 devient le float le plus proche
+     * 1.0449999570846558, x100+0.5 = 104.999995... -> 104, alors que le
+     * calcul en double (1.045*100+0.5 = 105.0 pile) donne 105 -- une vraie
+     * commande Klipper (M220 S104.5) afficherait 104 au lieu de 105. Les
+     * valeurs de test qui coincidaient par hasard entre les deux chemins
+     * (1.03/1.07) ne pouvaient pas reveler ce bug ; 1.045/1.055/0.905 si
+     * (verifie en Python avant d'ecrire ce correctif, comme pour C6).
+     * vitesse_pct/flux_pct/babystep_z_um sont tous trois des champs ENTIERS
+     * de etat_klipper_t (pas des float) : aucun des trois n'a de raison de
+     * transiter par un float intermediaire, seul le clamp final vers le
+     * type entier cible importe. */
+    double d;
+    if (valeur_double_finie(cJSON_GetObjectItemCaseSensitive(gm, "speed_factor"), &d)) {
+        /* speed_factor 1000.0 (M220 S100000, une commande Klipper reelle)
+         * donne 100000 %, hors plage d'un uint16_t -- clampe a UINT16_MAX
+         * plutot qu'UB (fix round 1, C2). L'arrondi au plus proche (+0.5,
+         * valeurs toujours positives ici) est applique AVANT le clamp,
+         * cote appelant, comme documente sur les helpers double_vers_*_borne
+         * ci-dessus. */
         uint16_t pct;
-        if (double_vers_u16_borne((double)v * 100.0 + 0.5, &pct)) {
+        if (double_vers_u16_borne(d * 100.0 + 0.5, &pct)) {
             e->vitesse_pct = pct;
         }
     }
-    if (nombre_fini(gm, "extrude_factor", &v)) {
+    if (valeur_double_finie(cJSON_GetObjectItemCaseSensitive(gm, "extrude_factor"), &d)) {
         uint16_t pct;
-        if (double_vers_u16_borne((double)v * 100.0 + 0.5, &pct)) {
+        if (double_vers_u16_borne(d * 100.0 + 0.5, &pct)) {
             e->flux_pct = pct;
         }
     }
@@ -401,11 +423,10 @@ static void fusionner_gcode_move(etat_klipper_t *e, const cJSON *gm)
     if (cJSON_IsArray(origine) && cJSON_GetArraySize(origine) >= 3) {
         double z;
         if (valeur_double_finie(cJSON_GetArrayItem(origine, 2), &z)) {
-            /* mm -> µm en DOUBLE de bout en bout (voir valeur_double_finie
-             * ci-dessus), arrondi au plus proche EN S'ELOIGNANT DE ZERO
-             * (+0.5 si positif, -0.5 si negatif) avant clamp (z=1e7 mm est
-             * un homing_origin absurde mais FINI ; sans clamp, le cast vers
-             * int32_t serait UB). */
+            /* mm -> µm en DOUBLE de bout en bout, arrondi au plus proche EN
+             * S'ELOIGNANT DE ZERO (+0.5 si positif, -0.5 si negatif) avant
+             * clamp (z=1e7 mm est un homing_origin absurde mais FINI ; sans
+             * clamp, le cast vers int32_t serait UB, fix round 1 C2). */
             double um = z * 1000.0;
             double arrondi = (um >= 0.0) ? um + 0.5 : um - 0.5;
             int32_t bs;

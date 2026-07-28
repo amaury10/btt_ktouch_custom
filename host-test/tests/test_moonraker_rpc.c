@@ -279,6 +279,31 @@ static void section_fusionner_status(void)
         VERIFIER(e.babystep_z_um == 76);
     }
 
+    /* --- Fix round 2 (re-revue) : 1.03/1.07 ci-dessus ne DISCRIMINENT PAS
+     * entre lire speed_factor/extrude_factor en float (retreci AVANT la
+     * mise a l'echelle x100, le meme defaut que C6 avait diagnostique pour
+     * babystep sans l'appliquer ici) et les lire en double -- les deux
+     * chemins tombent par hasard sur le meme entier pour ces deux valeurs,
+     * donc la suite restait verte au-dessus d'un vrai bug (M220 S104.5
+     * affichait 104 au lieu de 105). Valeurs verifiees en Python AVANT
+     * d'ecrire ce test (meme discipline que pour C6) :
+     *   float32(1.045)*100+0.5 = 104.999995... -> 104   double : 105.0 -> 105
+     *   float32(1.055)*100+0.5 = 105.999994... -> 105   double : 106.0 -> 106
+     *   float32(0.905)*100+0.5 = 90.999997...  -> 90    double : 91.0  -> 91 --- */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"speed_factor\":1.045,\"extrude_factor\":1.055}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.vitesse_pct == 105);
+        VERIFIER(e.flux_pct == 106);
+
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"speed_factor\":0.905}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.vitesse_pct == 91);
+    }
+
     /* --- C2 : conversions flottant -> entier bornees -- probes de revue qui
      * faisaient echouer UBSan (float-cast-overflow) avant le fix. Toutes ces
      * entrees sont FINIES (pas le cas "valeurs non finies" ci-dessous) :
