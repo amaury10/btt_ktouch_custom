@@ -13,11 +13,20 @@
  * comme un appareil qui n'a jamais rien enregistré en NVS. */
 #include "source_reglages.h"
 
+#include "source_reglages_sim.h"
+
 static backend_hote_t g_hote = {
     .adresse = "",
     .port = 7125,
 };
 static bool g_configure = false;
+
+void source_reglages_sim_reinit(void)
+{
+    g_hote.adresse[0] = '\0';
+    g_hote.port = 7125;
+    g_configure = false;
+}
 
 bool ui_reglages_hote(backend_hote_t *sortie)
 {

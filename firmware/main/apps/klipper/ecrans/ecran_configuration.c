@@ -40,7 +40,20 @@
 
 #define BOUTON_ENREGISTRER_LARGEUR  220
 #define BOUTON_ENREGISTRER_HAUTEUR   70
-#define BOUTON_ENREGISTRER_Y (HAUTEUR_CONTENU - MARGE - BOUTON_ENREGISTRER_HAUTEUR)
+/* Position littérale, PAS dérivée de "HAUTEUR_CONTENU - MARGE - HAUTEUR"
+ * (revue tâche 8, round 1, Q9) : cette dérivation plaçait le bouton pile en
+ * bas du contenu, exactement là où le bandeau de notification de l'habillage
+ * (60 px, superposé en ABSOLU depuis le bas de l'ÉCRAN ENTIER, pas de la
+ * zone de contenu -- voir BANDEAU_HAUTEUR/construire_bandeau() dans
+ * habillage.c) vient recouvrir. Sur le chemin d'erreur -- exactement celui
+ * qu'un clic sur CE bouton peut déclencher -- le bandeau rouge masquait donc
+ * la moitié basse du bouton qui vient de produire l'erreur. Valeur choisie
+ * avec une marge confortable sous le sélecteur et largement au-dessus de la
+ * bande de recouvrement du bandeau (vérifié par les _Static_assert
+ * ci-dessous, qui encodent le calcul en coordonnées ABSOLUES d'écran -- la
+ * même erreur qu'une dérivation automatique aurait reproduite en silence si
+ * HAUTEUR_CONTENU changeait un jour). */
+#define BOUTON_ENREGISTRER_Y 280
 
 #define COULEUR_FOND             0x10161D
 #define COULEUR_TEXTE_PRINCIPAL  0xFFFFFF
@@ -48,6 +61,18 @@
 #define COULEUR_PLACEHOLDER      0x6B7280 /* meme gris de peremption que le reste de ui/ */
 #define COULEUR_BOUTON           0x2A3644
 #define COULEUR_TEXTE_BOUTON     0xFFFFFF
+
+/* Bande couverte par le bandeau de notification de l'habillage, en
+ * coordonnées ABSOLUES d'écran (voir habillage.c : BARRE_HAUTEUR = 44,
+ * BANDEAU_HAUTEUR = 60, sur un écran de HAUTEUR_ECRAN = 480 -- ces trois
+ * valeurs DOIVENT rester synchronisées avec habillage.c, aucune des deux
+ * n'incluant l'autre). Ce fichier vit dans la zone de CONTENU (sous la barre
+ * d'état, à l'intérieur de g_contenu) : une position ici en coordonnées
+ * locales `y` correspond donc à l'absolu `BARRE_HAUTEUR_ECRAN + y`. */
+#define BARRE_HAUTEUR_ECRAN   44
+#define HAUTEUR_ECRAN_TOTALE 480
+#define BANDEAU_HAUTEUR_ECRAN 60
+#define BANDEAU_Y_ECRAN (HAUTEUR_ECRAN_TOTALE - BANDEAU_HAUTEUR_ECRAN)
 
 /* Verifie une fois, a la compilation, que la rangee champ+bouton et le
  * selecteur ne debordent pas de la largeur du contenu, et que les rangees ne
@@ -61,6 +86,13 @@ _Static_assert(DROPDOWN_Y + DROPDOWN_HAUTEUR <= BOUTON_ENREGISTRER_Y,
                 "le selecteur de machine chevauche le bouton Save");
 _Static_assert(BOUTON_ENREGISTRER_Y + BOUTON_ENREGISTRER_HAUTEUR <= HAUTEUR_CONTENU,
                 "le bouton Save deborde de la hauteur du contenu");
+/* Le garde-fou qui manquait avant la revue de la tache 8, round 1, Q9 :
+ * le bas du bouton Save (en coordonnees ABSOLUES d'ecran) doit rester
+ * strictement au-dessus du haut du bandeau de notification -- sans quoi le
+ * bandeau d'ERREUR que ce bouton peut lui-meme declencher recouvrirait le
+ * bouton qui vient de le produire. */
+_Static_assert(BARRE_HAUTEUR_ECRAN + BOUTON_ENREGISTRER_Y + BOUTON_ENREGISTRER_HAUTEUR <= BANDEAU_Y_ECRAN,
+                "le bouton Save chevauche la bande du bandeau de notification de l'habillage");
 
 /* --- Validation pure -------------------------------------------------- */
 

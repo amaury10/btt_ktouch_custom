@@ -50,14 +50,20 @@ extern const ecran_desc_t ECRAN_CONFIGURATION;
  * seul, qui rejette l'absence totale de ':' -- voir son commentaire de tête ;
  * c'est le cas normal d'un utilisateur qui tape juste une IP). Sinon, délégué
  * intégralement à hote_parse() : accepté/refusé et adresse/port obtenus sont
- * exactement les siens (adresse vide malgré un ':', adresse trop longue pour
- * BACKEND_HOTE_LONGUEUR_MAX, port non numérique retombant sur le port par
- * défaut plutôt que de refuser, etc. -- voir host-test/tests/test_hote_parse.c
- * pour le détail exhaustif de ces cas).
+ * exactement les siens -- y COMPRIS ses règles de rejet les plus récentes
+ * (revue de la tâche 8, round 1) : espace de tête/fin, préfixe de schéma
+ * ("http://..."), et toute adresse IPv6 non encadrée de crochets, en plus
+ * des règles déjà en place (adresse vide malgré un ':', adresse trop longue
+ * pour BACKEND_HOTE_LONGUEUR_MAX, port non numérique retombant sur le port
+ * par défaut plutôt que de refuser, etc.) -- voir
+ * host-test/tests/test_hote_parse.c pour le détail exhaustif de ces cas.
  *
  * Rend vrai et écrit `*hote_sortie` (si non NULL) si la saisie décrit un hôte
- * exploitable. Rend faux et écrit un message dans `erreur` (si `erreur` non
- * NULL et `taille_erreur` non nulle, toujours NUL-terminé) sinon --
- * `hote_sortie` n'est alors jamais touché. */
+ * exploitable -- au sens plein du terme depuis le correctif ci-dessus : un
+ * hôte accepté ne peut plus produire une URL Moonraker elle-même ambiguë ou
+ * mal formée (voir backend_moonraker.c, moonraker_construire_url()). Rend
+ * faux et écrit un message dans `erreur` (si `erreur` non NULL et
+ * `taille_erreur` non nulle, toujours NUL-terminé) sinon -- `hote_sortie`
+ * n'est alors jamais touché. */
 bool ecran_configuration_valider(const char *saisie, backend_hote_t *hote_sortie,
                                   char *erreur, size_t taille_erreur);
