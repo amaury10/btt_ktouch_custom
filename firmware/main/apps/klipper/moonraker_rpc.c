@@ -43,7 +43,17 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
     /* Liste figee des objets dont l'etat v2 a besoin (voir etat_klipper.h) :
      * pas de construction dynamique via cJSON ici, la liste ne depend
      * d'aucune donnee d'entree -- un texte constant est plus simple et tout
-     * aussi verifiable qu'un arbre cJSON serialise puis libere. */
+     * aussi verifiable qu'un arbre cJSON serialise puis libere.
+     *
+     * Fix (revue tache 3, CRITIQUE) : la methode JSON-RPC Moonraker s'ecrit
+     * avec des POINTS ("printer.objects.subscribe"), jamais un '/'.
+     * Moonraker derive ses methodes par ".".join(...) et ne connait aucun
+     * alias de la forme HTTP -- le code d'origine encodait fidelement une
+     * erreur de la spec elle-meme (printer.objects/subscribe). Avec la
+     * forme a slash, un vrai Moonraker aurait repondu -32601 "Method not
+     * found", aucune notification ne serait jamais arrivee, et le client
+     * serait retombe SILENCIEUSEMENT en repli HTTP 1 Hz -- le pire symptome
+     * a diagnostiquer, puisque rien ne signale l'echec cote client. */
     static const char *PARAMS =
         "{\"objects\":{"
         "\"toolhead\":null,\"gcode_move\":null,"
@@ -52,7 +62,7 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
         "\"heater_bed\":null,\"fan\":null,"
         "\"print_stats\":null,\"virtual_sdcard\":null,\"webhooks\":null"
         "}}";
-    return rpc_construire_requete(sortie, taille, id, "printer.objects/subscribe", PARAMS);
+    return rpc_construire_requete(sortie, taille, id, "printer.objects.subscribe", PARAMS);
 }
 
 /* ------------------------------------------------------------------------

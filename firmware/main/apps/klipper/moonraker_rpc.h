@@ -39,11 +39,14 @@
 bool rpc_construire_requete(char *sortie, size_t taille, uint32_t id,
                             const char *methode, const char *params_json);
 
-/* Requête `printer.objects/subscribe` avec les objets dont l'état v2 a
- * besoin (toolhead, gcode_move, extruder..extruder7, heater_bed, fan,
- * print_stats, virtual_sdcard, webhooks). speed_factor/extrude_factor sont
- * portés par gcode_move, déjà dans la liste — pas d'entrée séparée. Même
- * contrat de tampon que rpc_construire_requete() ci-dessus. */
+/* Requête `printer.objects.subscribe` (nom de méthode JSON-RPC Moonraker :
+ * des POINTS, jamais de '/' — voir le commentaire de tête de
+ * rpc_construire_abonnement() dans moonraker_rpc.c pour l'histoire complète
+ * de cette correction) avec les objets dont l'état v2 a besoin (toolhead,
+ * gcode_move, extruder..extruder7, heater_bed, fan, print_stats,
+ * virtual_sdcard, webhooks). speed_factor/extrude_factor sont portés par
+ * gcode_move, déjà dans la liste — pas d'entrée séparée. Même contrat de
+ * tampon que rpc_construire_requete() ci-dessus. */
 bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id);
 
 typedef enum {
@@ -101,7 +104,7 @@ bool rpc_fusionner_status(etat_klipper_t *etat, const char *json, size_t longueu
 bool rpc_lire_reponse(const char *json, size_t longueur, bool *succes,
                       char *erreur_texte, size_t taille_erreur);
 
-/* Extrait la liste des macros depuis une réponse `printer.objects/list`
+/* Extrait la liste des macros depuis une réponse `printer.objects.list`
  * (`result.objects`, tableau de chaînes) ou `configfile` (`result.status.
  * configfile.config`, objet dont les clés sont les noms de section) —
  * les deux partagent la même convention de nommage Moonraker/Klipper,

@@ -36,7 +36,13 @@ static void section_construire_abonnement(void)
 {
     char tampon[512];
     VERIFIER(rpc_construire_abonnement(tampon, sizeof(tampon), 3));
-    VERIFIER(strstr(tampon, "\"method\":\"printer.objects/subscribe\"") != NULL);
+    /* Fix (revue tache 3, C1 CRITIQUE) : ce test PINAIT le bug avant le fix
+     * (il cherchait la forme a slash, "printer.objects/subscribe" -- la
+     * forme HTTP, pas JSON-RPC) ; il pin desormais la forme correcte, a
+     * points, seule que Moonraker reconnaisse (".".join(...) cote serveur,
+     * aucun alias). Voir moonraker_rpc.c pour l'histoire complete. */
+    VERIFIER(strstr(tampon, "\"method\":\"printer.objects.subscribe\"") != NULL);
+    VERIFIER(strstr(tampon, "\"method\":\"printer.objects/subscribe\"") == NULL);
     VERIFIER(strstr(tampon, "\"id\":3") != NULL);
     VERIFIER(strstr(tampon, "\"toolhead\":null") != NULL);
     VERIFIER(strstr(tampon, "\"gcode_move\":null") != NULL);
