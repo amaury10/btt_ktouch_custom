@@ -8,6 +8,7 @@
  * elles ne doit pas désaligner silencieusement le reste. */
 #include "ecran_configuration.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -104,6 +105,22 @@ static void ecrire_erreur(char *erreur, size_t taille_erreur, const char *messag
     snprintf(erreur, taille_erreur, "%s", message);
 }
 
+/* Vrai si `chaine` contient un caractere d'espacement N'IMPORTE OU (pas
+ * seulement en bordure -- voir isspace(), meme jeu de caracteres que le
+ * garde-fou de bordure de hote_parse()). Utilisee UNIQUEMENT sur la saisie
+ * BRUTE, avant toute synthese de port par defaut (revue tache 8, round 2,
+ * IMPORTANT) : voir le commentaire d'appel pour pourquoi une verification
+ * apres synthese arrive trop tard. */
+static bool contient_espace(const char *chaine)
+{
+    for (const char *p = chaine; *p != '\0'; p++) {
+        if (isspace((unsigned char)*p)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ecran_configuration_valider(const char *saisie, backend_hote_t *hote_sortie,
                                   char *erreur, size_t taille_erreur)
 {
@@ -126,6 +143,27 @@ bool ecran_configuration_valider(const char *saisie, backend_hote_t *hote_sortie
          * le DERNIER ':', voir hote_parse.h) : aucune synthese necessaire. */
         longueur = snprintf(chaine, sizeof(chaine), "%s", saisie);
     } else {
+        /* AVANT toute synthese : `saisie` ne doit contenir AUCUN espace, ni
+         * en bordure ni a l'interieur (revue tache 8, round 2, IMPORTANT).
+         * Sans ce controle, "192.168.1.50 " (espace de FIN, sans ':') se
+         * synthetise en "192.168.1.50 :7125" -- l'espace de fin de la
+         * saisie BRUTE devient alors INTERIEUR a la chaine synthetisee,
+         * hors de portee du garde-fou de bordure de hote_parse() (qui
+         * n'inspecte que le premier/dernier caractere de ce qu'ON LUI
+         * DONNE, jamais de la saisie d'origine) : ce cas etait accepte
+         * avec pour adresse " 192.168.1.50 ", persiste, en echec permanent.
+         * Verifier la saisie BRUTE, avant de deplacer le moindre octet,
+         * ferme le trou a la racine plutot que de dupliquer le garde-fou de
+         * hote_parse() sur la chaine synthetisee (ou il arriverait trop
+         * tard). Un espace INTERIEUR ("my printer") n'est pas davantage
+         * protege par aucune bordure, avant ou apres synthese : la meme
+         * regle -- aucun espace, nulle part dans une adresse censee etre
+         * nue -- couvre les deux d'un seul controle. */
+        if (contient_espace(saisie)) {
+            ecrire_erreur(erreur, taille_erreur, "Printer address is not valid");
+            return false;
+        }
+
         /* Pas de port saisi : le port par defaut s'applique -- CONTRAIREMENT
          * a hote_parse() seul, qui juge une chaine sans ':' entierement
          * inexploitable (voir son commentaire de tete). C'est le cas normal

@@ -130,6 +130,34 @@ static void section_validation(void)
     VERIFIER_TEXTE(h.adresse, "192.168.1.50");
     VERIFIER(h.port == HOTE_PARSE_PORT_DEFAUT);
 
+    /* Contournement de l'espace via la synthese du port par defaut (revue
+     * tache 8, round 2, IMPORTANT) : "192.168.1.50 " (espace de FIN, sans
+     * ':') est synthetise en "192.168.1.50 :7125" AVANT d'etre remis a
+     * hote_parse() -- l'espace de fin de la saisie BRUTE devient alors
+     * INTERIEUR a la chaine synthetisee, hors de portee du garde-fou de
+     * bordure de hote_parse() (qui n'inspecte que le premier/dernier
+     * caractere de ce qu'on lui donne). Sans le controle ci-dessous, ce cas
+     * est ACCEPTE avec une adresse " 192.168.1.50 " -- persistee en NVS,
+     * en echec permanent, "Settings saved" mentant sur ce qui vient d'etre
+     * enregistre (S5.3). Verifie qu'un espace de tete reste lui rejete (il
+     * reste en bordure, deja couvert par round 1) : la difference de
+     * traitement entre les deux est exactement le bug. */
+    erreur[0] = '\0';
+    VERIFIER(ecran_configuration_valider("192.168.1.50 ", &h, erreur, sizeof(erreur)) == false);
+    VERIFIER(erreur[0] != '\0');
+    erreur[0] = '\0';
+    VERIFIER(ecran_configuration_valider("192.168.1.50\t", &h, erreur, sizeof(erreur)) == false);
+    erreur[0] = '\0';
+    VERIFIER(ecran_configuration_valider(" 192.168.1.50", &h, erreur, sizeof(erreur)) == false);
+
+    /* Espace INTERIEUR, sans ':' ("my printer") : jamais protege par aucune
+     * bordure, avant ou apres synthese -- pas davantage un hote exploitable
+     * qu'un espace en bordure, meme regle unique appliquee a la saisie
+     * BRUTE avant toute synthese (revue tache 8, round 2). */
+    erreur[0] = '\0';
+    VERIFIER(ecran_configuration_valider("my printer", &h, erreur, sizeof(erreur)) == false);
+    VERIFIER(erreur[0] != '\0');
+
     /* adresse:port classique (brief : "accepte klipper.local:7125") */
     memset(&h, 0, sizeof(h));
     VERIFIER(ecran_configuration_valider("klipper.local:7125", &h, erreur, sizeof(erreur)) == true);
