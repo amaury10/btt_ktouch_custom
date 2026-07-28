@@ -26,7 +26,11 @@
 #include "backend_factice.h"
 #include "backend_moonraker.h"
 #include "boucle.h"
+#include "ecran_accueil.h"
+#include "ecran_configuration.h"
+#include "habillage.h"
 #include "journal.h"
+#include "navigation.h"
 #include "netlog.h"
 #include "reglages.h"
 #include "rescue.h"
@@ -401,6 +405,40 @@ void app_main(void)
                 ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
             }
             web_set_touch_available(touch_indev != NULL);
+
+            /* Tâche 8 (sous-jalon 2b) : choix de l'écran de départ, câblé ici
+             * plutôt que laissé à la tâche 10 parce que reglages_configures()
+             * est déjà connu à ce point (reglages_charger() a tourné plus
+             * haut) et que ce site est déjà sous PT_LVGL_SCOPE_LOCK() pour
+             * build_test_pattern() ci-dessus — le même verrou protège donc
+             * cette construction-ci sans rien inventer. ECRAN_CONFIGURATION
+             * tant qu'aucun hôte n'a jamais été saisi (Kconfig compris, voir
+             * reglages.h) ; ECRAN_ACCUEIL sinon.
+             *
+             * Ce que ce câblage NE fait PAS, et qui reste explicitement le
+             * travail de la tâche 10 : un rafraîchissement PÉRIODIQUE de la
+             * barre d'état (heure, wifi, notifications qui expirent). Un seul
+             * habillage_pomper() ci-dessous peuple la barre une fois, à la
+             * construction ; la faire vivre demande un lv_timer récurrent
+             * dont le brief de la tâche 10 exige d'abord de vérifier comment
+             * PandaTouch_IDF expose son verrou pour un appel hors app_main() —
+             * une question que ce site, purement synchrone, n'a pas besoin de
+             * trancher. Notée dans le rapport de tâche 8.
+             *
+             * La mire de build_test_pattern() ci-dessus n'est PAS retirée :
+             * l'habillage la couvre entièrement une fois construit (fond
+             * opaque plein cadre, voir habillage.c), mais rafraichir_etat_ecran()
+             * continue de tourner sans changement dans la boucle 5 s plus bas
+             * — rien du diagnostic WiFi du jalon 1 n'est supprimé, il devient
+             * seulement invisible tant que l'écran réel est affiché. */
+            const ecran_desc_t *ecran_depart = reglages_configures() ? &ECRAN_ACCUEIL : &ECRAN_CONFIGURATION;
+            habillage_construire(lv_screen_active());
+            esp_err_t erreur_ecran = navigation_empiler(ecran_depart);
+            if (erreur_ecran != ESP_OK) {
+                JOURNAL_ERREUR(TAG, "navigation_empiler(%s) a echoue (%s) : ecran de depart absent",
+                               ecran_depart->id, esp_err_to_name(erreur_ecran));
+            }
+            habillage_pomper();
         }
 
         ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
