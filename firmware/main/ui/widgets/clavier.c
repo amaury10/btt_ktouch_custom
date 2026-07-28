@@ -75,7 +75,7 @@ static void evenement_clavier(lv_event_t *e)
      * qui envoie deux fois le même événement au clavier AVANT tout pompage
      * (voir section_clavier() dans test_clavier.c) la heurte directement, et
      * confirmation.c porte une garde identique dont la désactivation fait
-     * planter net (SEGV, voir task-7-report.md — expérience 3) dès qu'un
+     * planter net (SEGV, constaté à la revue de la tâche 7, jalon 2b) dès qu'un
      * second clic est livré au même bouton avant que
      * lv_msgbox_close_async() n'ait réellement tourné. Sans elle, un second
      * passage relirait un `g_clavier` déjà remis à zéro et appellerait le

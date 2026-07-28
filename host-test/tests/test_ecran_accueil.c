@@ -110,13 +110,13 @@ void suite_ecran_accueil(void)
      * libelle Pause/Resume, et un octet 0x7F n'est pas une valeur valide de
      * `_Bool` : laisse tel quel, ce chargement s'arrete sous
      * -fsanitize=undefined ("load of value 127, which is not a valid value
-     * for type '_Bool'") -- RED genuinement observe en ecrivant ce fichier,
-     * voir task-9-report.md. Rouge du harnais de test, pas du code de
-     * production : mettre_a_jour() lit un champ que le brief lui demande
+     * for type '_Bool'") -- RED genuinement observe en ecrivant ce fichier
+     * (revue de la tache 9, jalon 2b). Rouge du harnais de test, pas du code
+     * de production : mettre_a_jour() lit un champ que le brief lui demande
      * desormais de lire, l'entree pathologique de CE test doit simplement
      * rester dans le domaine valide de _Bool sur ce champ precis.
      *
-     * IMPORTANT (verifie a la revue, voir task-6-report.md "Fix round 1") :
+     * IMPORTANT (verifie a la revue de la tache 6, jalon 2b, "Fix round 1") :
      * passer par mettre_a_jour() -> lv_label_set_text() ici n'aboutit PAS a
      * un arret ASan, meme avec l'implementation dangereuse -- LVGL calcule
      * la longueur via lv_strlen(), une boucle maison

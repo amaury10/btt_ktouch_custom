@@ -455,7 +455,7 @@ static void section_echec_asynchrone(void)
      * ECRAN_ACCUEIL empile par-dessus -- un ecran de PLUS, ajoute apres
      * g_bandeau, qui deviendrait donc a tort le "dernier enfant" trouve ici
      * (RED reellement observe en ecrivant ce test : lv_label_get_text() sur
-     * un objet qui n'est pas un label plante, voir task-9-report.md).
+     * un objet qui n'est pas un label plante -- revue de la tache 9, jalon 2b).
      * navigation_init(lv_screen_active()) ICI detruit cet ecran residuel
      * (navigation.c ne detruit que ce qu'IL a lui-meme empile, jamais
      * g_barre/g_contenu/g_bandeau, crees avant tout appel a navigation_init()
@@ -596,6 +596,21 @@ static void section_file_pleine(void)
 
 void suite_commandes(void)
 {
+    /* Garde d'ordonnancement (revue finale jalon 2b) : section_echec_asynchrone()
+     * ci-dessous reutilise l'habillage deja construit par
+     * suite_ecran_configuration() (singleton process-wide, voir le
+     * commentaire de tete de ce fichier) -- sans elle, une inversion
+     * accidentelle de l'ordre d'enregistrement dans tests/main.c plantait en
+     * SEGV brut, quelque part au fond de LVGL, sans le moindre compte de
+     * verifications affiche. habillage_est_construit() transforme ce SEGV
+     * muet en une erreur nommee des l'entree de cette suite. */
+    if (!habillage_est_construit()) {
+        printf("ERREUR: suite_commandes() exige que suite_ecran_configuration() ait deja construit "
+               "l'habillage (singleton process-wide) -- verifier l'ordre d'enregistrement dans "
+               "tests/main.c.\n");
+        exit(1);
+    }
+
     section_moonraker_chemin_commande();
     section_backend_factice_commande();
     section_ecran_accueil_boutons();

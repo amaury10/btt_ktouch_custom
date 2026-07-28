@@ -81,7 +81,7 @@ static void suite_tuile(void)
      * LV_COLOR_DEPTH 16 (voir simulateur/lv_conf.h), lv_color_hex() quantifie
      * en RGB565 dès la création et lv_color_to_u32() ne fait que reconstruire
      * une approximation par réplication de bits (même piège que la mire de
-     * la tâche 1, task-1-report.md) — comparer deux couleurs déjà quantifiées
+     * la tâche 1, revue jalon 2b) — comparer deux couleurs déjà quantifiées
      * de la même façon est le test correct. */
     tuile_griser(&t, true);
     lv_color_t couleur_grise = lv_obj_get_style_text_color(t.valeur, 0);

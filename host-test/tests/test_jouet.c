@@ -27,8 +27,8 @@
  *      ui_commander() ne connait que la profondeur de la file, jamais le
  *      type du backend qui la draine : verifier qu'un clic l'incremente de 1
  *      suffit a prouver le cablage bouton -> ui_commander("reset", ...),
- *      sans avoir besoin d'executer la commande jusqu'au bout ici. Voir
- *      task-11-report.md pour le detail de cette limite du harnais. */
+ *      sans avoir besoin d'executer la commande jusqu'au bout ici. Detail
+ *      complet de cette limite du harnais : revue de la tache 11, jalon 2b. */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -263,6 +263,22 @@ static void section_bouton_reset_ui_commander(void)
 
 void suite_jouet(void)
 {
+    /* Garde d'ordonnancement (revue finale jalon 2b) : section_bouton_reset_ui_commander()
+     * ci-dessous reutilise la boucle simulee deja demarree par
+     * suite_commandes() (singleton process-wide, voir le commentaire de tete
+     * de ce fichier) -- sans elle, une inversion accidentelle de l'ordre
+     * d'enregistrement dans tests/main.c plantait en SEGV brut, sans le
+     * moindre compte de verifications affiche. source_etat_sim_est_demarre()
+     * transforme ce SEGV muet en une erreur nommee des l'entree de cette
+     * suite. Meme technique que habillage_est_construit() dans
+     * suite_commandes() (test_commandes.c). */
+    if (!source_etat_sim_est_demarre()) {
+        printf("ERREUR: suite_jouet() exige que suite_commandes() ait deja demarre la boucle "
+               "simulee (singleton process-wide) -- verifier l'ordre d'enregistrement dans "
+               "tests/main.c.\n");
+        exit(1);
+    }
+
     section_boucle_cycle();
     section_ecran();
     section_bouton_reset_ui_commander();

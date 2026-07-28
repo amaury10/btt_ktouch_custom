@@ -67,7 +67,8 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 # #if LV_FONT_MONTSERRAT_xx et la compilation cible echoue (identifiant non
 # declare, -Werror) — piege deja rencontre : sdkconfig.defaults ne remplace
 # jamais un symbole deja present dans un sdkconfig genere, donc tout ajout ici
-# exige de supprimer firmware/sdkconfig et de regenerer (voir task-10-report.md).
+# exige de supprimer firmware/sdkconfig et de regenerer (constate a la revue
+# de la tache 10, jalon 2b).
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_48=y

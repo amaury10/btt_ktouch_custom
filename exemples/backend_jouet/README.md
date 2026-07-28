@@ -103,9 +103,8 @@ Deux façons de composer avec ça, selon votre situation :
    échoue sa propre vérification de taille (tampon `etat_klipper_t`, jamais
    le vôtre) et ne remplit donc jamais sa variable locale de liaison. Le
    reste de la barre (titre, heure, wifi, batterie) reste correct : rien
-   d'autre n'y dépend de la taille de l'état applicatif. Voir
-   `task-11-report.md` pour le détail complet et les captures qui le
-   montrent.
+   d'autre n'y dépend de la taille de l'état applicatif. Détail complet et
+   captures à l'appui : revue de la tâche 11, jalon 2b.
 
 Un fork ordinaire n'a aucune raison de vivre avec ce défaut : l'option 1 le
 corrige en trois lignes. L'option 2 n'existe que parce que la tâche 11

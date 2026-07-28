@@ -52,3 +52,11 @@ void source_etat_sim_cycle(void);
  * taille de la file ne bouge pas), ce qu'aucune fonction publique de
  * source_etat.h ne permet d'observer directement. 0 avant tout démarrage. */
 size_t source_etat_sim_file_taille(void);
+
+/* EXPOSÉ POUR LES TESTS UNIQUEMENT, même raison que ci-dessus : vrai si
+ * source_etat_sim_demarrer() a déjà réussi (singleton process-wide déjà en
+ * place). Ajoutée à la revue finale du jalon 2b -- voir le commentaire de
+ * habillage_est_construit() (firmware/main/ui/habillage.h) pour le SEGV muet
+ * que cette paire de fonctions transforme en erreur nommée dans
+ * host-test/tests/main.c. */
+bool source_etat_sim_est_demarre(void);

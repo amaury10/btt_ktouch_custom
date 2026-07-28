@@ -13,15 +13,16 @@
  * transmet réellement etat/generation/liaison à un écran empilé ; la tâche 6
  * le remplace par l'écran réel plutôt que de garder les deux, exactement
  * comme ce fichier avait lui-même remplacé la mire de vérification de la
- * tâche 1 (voir task-1-report.md) — un écran jouet qui a rempli son rôle une
+ * tâche 1 (revue jalon 2b) — un écran jouet qui a rempli son rôle une
  * fois ne mérite pas un second indicateur de ligne de commande pour choisir
  * entre lui et l'écran réel.
  *
  * Tâche 11 : `--app jouet` bascule ce même point d'entrée sur
  * exemples/backend_jouet/ (backend_jouet.c + ecran_jouet.c) au lieu de
  * l'application Klipper -- l'assemblage, ici, est le SEUL endroit que la
- * tâche 11 autorise à toucher ; ni core/ ni ui/ n'ont changé une ligne (voir
- * task-11-report.md pour la vérification littérale). Un détail EST resté
+ * tâche 11 autorise à toucher ; ni core/ ni ui/ n'ont changé une ligne
+ * (vérification littérale faite à la revue de la tâche 11, jalon 2b). Un
+ * détail EST resté
  * hors de portée de ce fichier : habillage_pomper() (ui/habillage.c) porte
  * un tampon `etat_klipper_t` concret pour relayer etat/génération/liaison à
  * navigation_mettre_a_jour() -- lire son commentaire de tête, qui documente
@@ -42,7 +43,7 @@
  * publics que habillage_pomper() fait déjà lui-même en interne, simplement
  * réassemblés ici pour un état de taille différente. Reste néanmoins un vrai
  * défaut du socle pour un fork non-Klipper : une pastille de connexion
- * fausse est un vrai regret, documenté dans task-11-report.md. */
+ * fausse est un vrai regret, documenté à la revue de la tâche 11, jalon 2b. */
 
 #include <stdio.h>
 #include <stdlib.h>

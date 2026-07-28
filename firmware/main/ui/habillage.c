@@ -179,7 +179,7 @@ static void construire_barre(lv_obj_t *parent)
      * CENTER) avec un conteneur LV_SIZE_CONTENT sur l'axe principal : la
      * taille de contenu se cale sur le dernier enfant seul, et les
      * précédents se retrouvent positionnés à des abscisses négatives, hors
-     * cadre — constaté directement (voir task-4-report.md, la barre
+     * cadre — constaté directement (revue de la tâche 4, jalon 2b : la barre
      * n'affichait que l'heure, tout le reste à x < 0). START élimine le
      * problème puisqu'il n'y a alors aucun espace superflu à répartir. */
     lv_obj_set_flex_align(droite, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -242,6 +242,11 @@ static void construire_bandeau(lv_obj_t *parent)
     lv_obj_set_style_text_color(g_bandeau_texte, lv_color_hex(COULEUR_TEXTE_PRINCIPAL), 0);
     lv_label_set_text(g_bandeau_texte, "");
     lv_obj_center(g_bandeau_texte);
+}
+
+bool habillage_est_construit(void)
+{
+    return g_barre != NULL;
 }
 
 void habillage_construire(lv_obj_t *ecran_racine)

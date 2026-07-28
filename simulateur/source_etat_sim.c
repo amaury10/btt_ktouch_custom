@@ -252,3 +252,8 @@ size_t source_etat_sim_file_taille(void)
 {
     return g_file_taille;
 }
+
+bool source_etat_sim_est_demarre(void)
+{
+    return g_demarre;
+}

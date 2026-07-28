@@ -79,12 +79,19 @@ int main(void)
     /* Doit rester APRES suite_ecran_configuration() : sa derniere section
      * (echec asynchrone -> notification) reutilise l'habillage deja construit
      * par section_enregistrer() (singleton process-wide, voir le commentaire
-     * de tete de test_commandes.c). */
+     * de tete de test_commandes.c). Revue finale jalon 2b : cette dependance
+     * d'ordre n'etait jusque-la garantie que par CE commentaire -- une
+     * inversion accidentelle plantait en SEGV brut, sans le moindre compte de
+     * verifications affiche. suite_commandes() verifie desormais elle-meme
+     * habillage_est_construit() a son entree et arrete tout avec un message
+     * clair si ce n'est pas le cas (voir habillage.h). */
     suite_commandes();
     /* Tache 11 : doit rester APRES suite_commandes() -- sa derniere section
      * reutilise la boucle simulee deja demarree par celle-ci (autre
      * singleton process-wide, voir le commentaire de tete de
-     * test_jouet.c). */
+     * test_jouet.c). Meme garde d'ordre que ci-dessus : suite_jouet()
+     * verifie source_etat_sim_est_demarre() a son entree (voir
+     * source_etat_sim.h). */
     suite_jouet();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);

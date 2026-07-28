@@ -417,7 +417,8 @@ static void section_confirmation(void)
     /* Le dialogue est encore VIVANT ici : sa destruction (via
      * lv_msgbox_close_async(), voir confirmation.c) n'est que programmee.
      * Avec lv_msgbox_close() synchrone, ce compteur vaudrait deja 0 — meme
-     * methode discriminante que celle du clavier, voir task-7-report.md. */
+     * methode discriminante que celle du clavier (revue de la tache 7,
+     * jalon 2b). */
     VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
     lv_timer_handler();
 

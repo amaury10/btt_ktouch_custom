@@ -60,7 +60,7 @@ bool afficheur_capturer(const char *chemin_png);
  * supprime l'affichage LVGL, ferme SDL (SDL_Quit, en mode FENETRE
  * uniquement) et appelle lv_deinit(). Un cycle démarrer/arrêter/démarrer
  * est donc censé être propre — vérifié sous ASan+UBSan avec un harnais
- * temporaire (voir task-1-report.md, section réentrance). Si l'afficheur
+ * temporaire (revue de la tâche 1, jalon 2b, section réentrance). Si l'afficheur
  * n'a jamais démarré, ou a déjà été arrêté, ne fait rien : sûr à appeler
  * plusieurs fois de suite. */
 void afficheur_arreter(void);

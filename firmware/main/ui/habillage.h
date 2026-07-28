@@ -42,6 +42,18 @@
  * reconstruire par-dessus l'existant laisserait les anciens widgets fuir. */
 void habillage_construire(lv_obj_t *ecran_racine);
 
+/* Vrai si habillage_construire() a déjà réussi (singleton déjà en place),
+ * faux sinon. Ajoutée à la revue finale du jalon 2b : `habillage_construire`/
+ * `source_etat_sim_demarrer` sont deux singletons process-wide dont
+ * host-test/tests/main.c impose l'ordre d'enregistrement des suites (voir son
+ * commentaire de tête) — une inversion accidentelle de cet ordre plantait
+ * jusqu'ici en SEGV brut, sans le moindre compte de vérifications affiché,
+ * quelque part au fond de LVGL (arbre d'objets attendu par une suite
+ * postérieure mais jamais construit). Cette fonction permet à une suite
+ * dépendante de transformer ce SEGV muet en une erreur nommée dès son entrée
+ * (voir suite_commandes() dans host-test/tests/test_commandes.c). */
+bool habillage_est_construit(void);
+
 /* Rafraîchit la barre d'état (titre, bouton retour, liaison, wifi, batterie,
  * heure) à chaque appel, puis lit ui_etat_instantane() (voir source_etat.h)
  * et ne transmet le résultat à navigation_mettre_a_jour() QUE si la
