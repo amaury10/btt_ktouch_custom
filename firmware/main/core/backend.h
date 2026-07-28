@@ -51,3 +51,11 @@ typedef struct {
 #define BACKEND_ACTION_REPRENDRE  "reprendre"
 #define BACKEND_ACTION_ANNULER    "annuler"
 #define BACKEND_ACTION_URGENCE    "arret_urgence"
+
+/* Lance une macro nommée. `arguments_json` vaut `{"nom":"<macro>"}` — jamais
+ * NULL pour cette action-ci, contrairement aux quatre ci-dessus qui n'en
+ * prennent pas (voir le commentaire de `commande` plus haut) : un backend
+ * qui reçoit NULL ici n'a pas de nom à lancer et rend ESP_ERR_NOT_SUPPORTED.
+ * Introduite tâche 2, jalon 3a (backend_factice.c, scénario 11 « U1 ») ; le
+ * backend Moonraker (tâche 6) partage ce même symbole. */
+#define BACKEND_ACTION_MACRO      "macro"

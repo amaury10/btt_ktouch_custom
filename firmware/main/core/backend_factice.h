@@ -15,7 +15,15 @@ const backend_desc_t *backend_factice_desc(void);
 /* 0 repos · 1 impression qui progresse · 2 pause · 3 valeurs extrêmes
  * (plausibles) · 4 valeurs aberrantes (hors plage -- vérifie qu'un
  * affichage rend "--" plutôt qu'un nombre faux, voir ui_format_temperature()
- * dans firmware/main/ui/widgets/tuile.h) */
+ * dans firmware/main/ui/widgets/tuile.h) · 5-9 réservés au simulateur (voir
+ * simulateur/README.md, ne correspondent à aucun scénario ici -- repli sur
+ * le comportement du scénario 3) · 10 « CR-10 » (mono-extrudeur, plateau
+ * chauffant, 4 macros simples) · 11 « U1 » (4 extrudeurs, outil_actif qui
+ * tourne d'un cycle à l'autre, 8 macros dont une cachée/une à paramètres/une
+ * qui échoue toujours à la commande) · 12 « 8 têtes » (8 extrudeurs, 48
+ * macros -- KLIPPER_MACROS_MAX -- et macros_tronquées levé). Tout autre
+ * numéro retombe sur le comportement du scénario 3 (voir backend_factice.c,
+ * seule source de vérité pour cette numérotation). */
 void backend_factice_scenario(int numero);
 
 /* Tâche 9 : force (ou lève) l'échec de TOUTE commande par ailleurs valide

@@ -42,6 +42,131 @@ static float g_progression_scenario1 = 0.0f;
  * progresser sur plusieurs secondes. */
 #define FACTICE_PAS_PROGRESSION 0.01f
 
+/* Outil actif du scénario 11 (« U1 »), porté ICI entre deux appels pour la
+ * même raison que g_progression_scenario1 ci-dessus : le socle remet `etat`
+ * à zéro avant chaque rafraîchissement, donc `outil_actif` y vaut toujours 0
+ * en entrée. Un changeur d'outils réel fait tourner son outil actif d'un
+ * cycle à l'autre ; ce compteur statique modélise exactement ça, sans jamais
+ * tirer de nombre aléatoire (même politique que g_progression_scenario1). */
+static uint8_t g_outil_actif_u1 = 0;
+
+/* Nombre d'extrudeurs modélisés par le scénario 11 (« U1 ») : un changeur
+ * d'outils à quatre têtes. Nommé plutôt que répété en dur, pour que la
+ * boucle qui remplit `extrudeurs[]` et le modulo qui fait tourner
+ * `outil_actif` restent visiblement le même nombre. */
+#define FACTICE_U1_NB_EXTRUDEURS 4u
+
+/* Macros du scénario 10 (« CR-10 ») : une imprimante mono-extrudeur
+ * d'entrée de gamme, quatre macros simples, aucune particularité. */
+static const char *const g_macros_cr10[] = {
+    "BED_MESH_CALIBRATE",
+    "LOAD_FILAMENT",
+    "UNLOAD_FILAMENT",
+    "LIGHTS_TOGGLE",
+};
+
+/* Macros du scénario 11 (« U1 ») : huit macros dont une préfixée "_"
+ * (convention Klipper pour une macro "cachée" — présente dans l'état, c'est
+ * à l'interface de la filtrer plus tard, pas à ce backend), une qui
+ * démontrera des paramètres (PURGE_PARAM, tâche 6) et une sentinelle de
+ * démonstration d'échec (MACRO_ECHEC, voir backend_factice_commande()
+ * ci-dessous — échoue TOUJOURS, quel que soit le scénario actif). */
+static const char *const g_macros_u1[] = {
+    "HOME_ALL",
+    "_CACHEE",
+    "PURGE_PARAM",
+    "MACRO_ECHEC",
+    "CHANGE_TOOL",
+    "LOAD_FILAMENT",
+    "UNLOAD_FILAMENT",
+    "CALIBRATE_OFFSETS",
+};
+
+/* Écrit le nom de la `indice_un`-ième macro (1-indexé, lisible humainement :
+ * la première s'appelle "MACRO_01", pas "MACRO_00") du scénario 12
+ * (« 8 têtes »). Factorisée pour que backend_factice_rafraichir() (qui les
+ * range dans `etat.macros[]`) et macro_connue() ci-dessous (qui valide un
+ * nom reçu par commande()) ne puissent jamais diverger sur le format. */
+static void factice_nom_macro_8tetes(uint8_t indice_un, char *sortie, size_t taille)
+{
+    snprintf(sortie, taille, "MACRO_%02u", (unsigned)indice_un);
+}
+
+/* Rend vrai si `nom` est une macro que CE backend connaît, tous scénarios
+ * confondus (10, 11, 12 : les scénarios 0-9 n'annoncent aucune macro). Ne
+ * dépend PAS du scénario actuellement sélectionné par
+ * backend_factice_scenario() : une commande peut arriver longtemps après le
+ * dernier rafraîchissement qui a produit la liste, et backend_desc_t::commande
+ * ne garantit pas de relire un `etat` fiable (voir son commentaire dans
+ * backend.h) -- interroger la connaissance STATIQUE du backend plutôt qu'un
+ * état de passage est le choix le plus robuste. MACRO_ECHEC est un nom connu
+ * (présente dans g_macros_u1) mais traitée à part par l'appelant AVANT ce
+ * test, pour rendre ESP_FAIL plutôt que ESP_OK. */
+static bool macro_connue(const char *nom)
+{
+    for (size_t i = 0; i < sizeof(g_macros_cr10) / sizeof(g_macros_cr10[0]); i++) {
+        if (strcmp(nom, g_macros_cr10[i]) == 0) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < sizeof(g_macros_u1) / sizeof(g_macros_u1[0]); i++) {
+        if (strcmp(nom, g_macros_u1[i]) == 0) {
+            return true;
+        }
+    }
+    for (uint8_t i = 1; i <= KLIPPER_MACROS_MAX; i++) {
+        char candidat[KLIPPER_MACRO_NOM_MAX];
+        factice_nom_macro_8tetes(i, candidat, sizeof(candidat));
+        if (strcmp(nom, candidat) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Extraction JSON délibérément bornée (strstr/strchr), PAS cJSON : ce
+ * backend est un jouet SYNTHÉTIQUE dont l'entrée `arguments_json` vient
+ * toujours du firmware lui-même (core/boucle.c, jamais d'un tiers non
+ * fiable) -- l'analyse d'un JSON quelconque (imbrication, échappement,
+ * unicode) est le travail du vrai backend Moonraker
+ * (apps/klipper/backend_moonraker.c, tâche 3/6), seul consommateur de
+ * réponses HTTP externes. Ajouter cJSON ici pour un unique champ plat
+ * `{"nom":"<macro>"}` alourdirait core/ (qui n'en dépend nulle part
+ * ailleurs -- voir le commentaire de web_macros.h sur le soin apporté à
+ * garder core/ testable au harnais hôte sans dépendance lourde) pour un
+ * bénéfice nul ici. Rend faux si `arguments_json` est NULL, mal formé, ou si
+ * le nom extrait ne tient pas dans `taille_sortie`. */
+static bool factice_extraire_nom_macro(const char *arguments_json, char *sortie, size_t taille_sortie)
+{
+    if (arguments_json == NULL || sortie == NULL || taille_sortie == 0) {
+        return false;
+    }
+    const char *cle = strstr(arguments_json, "\"nom\"");
+    if (cle == NULL) {
+        return false;
+    }
+    const char *deux_points = strchr(cle, ':');
+    if (deux_points == NULL) {
+        return false;
+    }
+    const char *guillemet_ouvrant = strchr(deux_points, '"');
+    if (guillemet_ouvrant == NULL) {
+        return false;
+    }
+    guillemet_ouvrant++;
+    const char *guillemet_fermant = strchr(guillemet_ouvrant, '"');
+    if (guillemet_fermant == NULL) {
+        return false;
+    }
+    size_t longueur = (size_t)(guillemet_fermant - guillemet_ouvrant);
+    if (longueur == 0 || longueur >= taille_sortie) {
+        return false;
+    }
+    memcpy(sortie, guillemet_ouvrant, longueur);
+    sortie[longueur] = '\0';
+    return true;
+}
+
 void backend_factice_scenario(int numero)
 {
     g_scenario = numero;
@@ -74,12 +199,15 @@ static esp_err_t backend_factice_rafraichir(void *etat)
     etat_klipper_t nouveau;
     memset(&nouveau, 0, sizeof(nouveau));
 
-    /* Ce backend factice modelise une machine mono-extrudeur avec plateau
-     * chauffant, quel que soit le scenario (y compris au repos, ou rien ne
-     * chauffe mais le materiel existe toujours). Migration v2 (tache 1,
-     * jalon 3a) : valait implicitement avant que le seul extrudeur/plateau
-     * de la structure ne PUISSE etre que celui-la ; desormais explicite
-     * puisque etat_klipper_t peut representer 0 a 8 extrudeurs. */
+    /* Valeur par défaut : une machine mono-extrudeur avec plateau chauffant,
+     * pour les scenarios 0-4 ci-dessous (y compris au repos, ou rien ne
+     * chauffe mais le materiel existe toujours) -- ceux du 2b, inchanges par
+     * la tache 2 du jalon 3a. Migration v2 (tache 1, jalon 3a) : valait
+     * implicitement avant que le seul extrudeur/plateau de la structure ne
+     * PUISSE etre que celui-la ; desormais explicite puisque etat_klipper_t
+     * peut representer 0 a 8 extrudeurs. Les scenarios paliers 10/11/12
+     * (tache 2) modelisent des machines differentes et ECRASENT ces valeurs
+     * par defaut dans leur propre `case` ci-dessous. */
     nouveau.nb_extrudeurs = 1;
     nouveau.extrudeurs[0].presente = true;
     nouveau.plateau.presente = true;
@@ -156,6 +284,89 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         nouveau.impression_en_pause = false;
         break;
 
+    case 10:
+        /* Palier « CR-10 » (tache 2, jalon 3a) : mono-extrudeur + plateau
+         * chauffant deja etablis par le preambule ci-dessus, rien a changer
+         * la-dessus. Au repos, quatre macros simples -- aucune particularite,
+         * c'est le scenario le plus proche des scenarios 0-4 du 2b, juste
+         * avec des macros non vides. */
+        snprintf(nouveau.etat, sizeof(nouveau.etat), "standby");
+        nouveau.nb_macros = sizeof(g_macros_cr10) / sizeof(g_macros_cr10[0]);
+        for (uint8_t i = 0; i < nouveau.nb_macros; i++) {
+            snprintf(nouveau.macros[i], KLIPPER_MACRO_NOM_MAX, "%s", g_macros_cr10[i]);
+        }
+        nouveau.macros_tronquees = false;
+        break;
+
+    case 11: {
+        /* Palier « U1 » (tache 2, jalon 3a) : changeur d'outils a quatre
+         * extrudeurs. Trois tetes a temperature ambiante (froides, comme un
+         * outil qui n'a pas ete utilise depuis un moment) et une chaude
+         * (l'outil qui vient de deposer du filament) -- "temperatures idle
+         * realistes, une chaude" du brief. */
+        nouveau.nb_extrudeurs = FACTICE_U1_NB_EXTRUDEURS;
+        for (uint8_t i = 0; i < FACTICE_U1_NB_EXTRUDEURS; i++) {
+            nouveau.extrudeurs[i].presente = true;
+            nouveau.extrudeurs[i].actuelle = 24.0f;
+            nouveau.extrudeurs[i].consigne = 0.0f;
+        }
+        nouveau.extrudeurs[2].actuelle = 205.0f;
+        nouveau.extrudeurs[2].consigne = 210.0f;
+
+        /* outil_actif tourne d'un cycle a l'autre (voir g_outil_actif_u1
+         * ci-dessus) : c'est CE cycle-ci qui publie la valeur PRECEDENTE
+         * avant d'avancer le compteur pour le prochain rafraichissement. */
+        nouveau.outil_actif = g_outil_actif_u1;
+        g_outil_actif_u1 = (uint8_t)((g_outil_actif_u1 + 1u) % FACTICE_U1_NB_EXTRUDEURS);
+
+        nouveau.plateau.presente = true;
+        nouveau.plateau.actuelle = 60.0f;
+        nouveau.plateau.consigne = 60.0f;
+
+        snprintf(nouveau.etat, sizeof(nouveau.etat), "standby");
+        nouveau.nb_macros = sizeof(g_macros_u1) / sizeof(g_macros_u1[0]);
+        for (uint8_t i = 0; i < nouveau.nb_macros; i++) {
+            snprintf(nouveau.macros[i], KLIPPER_MACRO_NOM_MAX, "%s", g_macros_u1[i]);
+        }
+        nouveau.macros_tronquees = false;
+        break;
+    }
+
+    case 12:
+        /* Palier « 8 tetes » (tache 2, jalon 3a) : huit extrudeurs
+         * synthetiques, tous presents, temperatures ambiantes -- ce
+         * scenario sert a exercer l'echelle (affichage, boucles), pas une
+         * combinaison de temperatures particuliere. */
+        nouveau.nb_extrudeurs = KLIPPER_EXTRUDEURS_MAX;
+        for (uint8_t i = 0; i < KLIPPER_EXTRUDEURS_MAX; i++) {
+            nouveau.extrudeurs[i].presente = true;
+            nouveau.extrudeurs[i].actuelle = 24.0f;
+            nouveau.extrudeurs[i].consigne = 0.0f;
+        }
+        nouveau.outil_actif = 0;
+        nouveau.plateau.presente = true;
+        nouveau.plateau.actuelle = 60.0f;
+        nouveau.plateau.consigne = 60.0f;
+
+        snprintf(nouveau.etat, sizeof(nouveau.etat), "standby");
+
+        /* 48 macros exactement -- KLIPPER_MACROS_MAX, la borne reelle de la
+         * structure (jamais un nombre en dur different de la constante :
+         * exactement le piege que web_nb_macros_serialisables() existe pour
+         * absorber cote consommateur, voir firmware/main/web_macros.h, mais
+         * qui n'excuse pas ce producteur-ci d'ecrire hors tableau). */
+        nouveau.nb_macros = KLIPPER_MACROS_MAX;
+        for (uint8_t i = 0; i < KLIPPER_MACROS_MAX; i++) {
+            factice_nom_macro_8tetes((uint8_t)(i + 1u), nouveau.macros[i], KLIPPER_MACRO_NOM_MAX);
+        }
+        /* Le producteur reel (synthetique ici, mais c'est le meme champ que
+         * remplirait un analyseur Moonraker face a une config qui declare
+         * plus de macros que KLIPPER_MACROS_MAX) en connait davantage que ce
+         * qu'il vient d'annoncer : le signaler honnetement plutot que de
+         * pretendre qu'il n'y en a que 48. Vrai UNIQUEMENT sur ce scenario. */
+        nouveau.macros_tronquees = true;
+        break;
+
     case 3:
     default:
         /* Valeurs extrêmes mais PLAUSIBLES : nom de fichier au maximum de sa
@@ -192,7 +403,6 @@ static esp_err_t backend_factice_commande(void *etat, const char *action,
                                            const char *arguments_json)
 {
     (void)etat;
-    (void)arguments_json;
 
     if (strcmp(action, BACKEND_ACTION_PAUSE) == 0 ||
         strcmp(action, BACKEND_ACTION_REPRENDRE) == 0 ||
@@ -210,6 +420,29 @@ static esp_err_t backend_factice_commande(void *etat, const char *action,
         }
         JOURNAL_INFO(TAG, "commande %s", action);
         return ESP_OK;
+    }
+
+    if (strcmp(action, BACKEND_ACTION_MACRO) == 0) {
+        /* Tache 2, jalon 3a. `nom` extrait de arguments_json (voir
+         * factice_extraire_nom_macro() : bornee, sans cJSON, justifie plus
+         * haut). MACRO_ECHEC est une sentinelle de demonstration -- elle
+         * echoue TOUJOURS, quel que soit le scenario actif, pour exercer le
+         * chemin d'echec d'une commande de macro cote interface (tache 6). */
+        char nom[KLIPPER_MACRO_NOM_MAX];
+        if (!factice_extraire_nom_macro(arguments_json, nom, sizeof(nom))) {
+            JOURNAL_ALERTE(TAG, "commande macro sans nom exploitable dans arguments_json");
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+        if (strcmp(nom, "MACRO_ECHEC") == 0) {
+            JOURNAL_ALERTE(TAG, "commande macro %s en echec (sentinelle de demonstration)", nom);
+            return ESP_FAIL;
+        }
+        if (macro_connue(nom)) {
+            JOURNAL_INFO(TAG, "commande macro %s", nom);
+            return ESP_OK;
+        }
+        JOURNAL_ALERTE(TAG, "commande macro inconnue %s", nom);
+        return ESP_ERR_NOT_SUPPORTED;
     }
 
     /* Une action inconnue doit échouer fort et explicitement, pour que

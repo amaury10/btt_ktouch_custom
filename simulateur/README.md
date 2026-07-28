@@ -123,6 +123,29 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
     à eux, laisse aussi le bandeau "host connected" de côté (voir plus bas)
     pour que le bandeau d'échec ("Command failed: pause") reste visible sur
     la capture au lieu d'être remplacé.
+  - `10` (tâche 2, jalon 3a, palier « CR-10 ») : imprimante mono-extrudeur
+    d'entrée de gamme, au repos, plateau chauffant, quatre macros simples
+    (`BED_MESH_CALIBRATE`, `LOAD_FILAMENT`, `UNLOAD_FILAMENT`,
+    `LIGHTS_TOGGLE`).
+  - `11` (tâche 2, jalon 3a, palier « U1 ») : changeur d'outils à quatre
+    extrudeurs (un chaud parmi les quatre, les trois autres à température
+    ambiante), `outil_actif` qui change de tête à chaque cycle simulé, comme
+    le ferait un vrai changeur d'outils ; plateau chauffant ; huit macros
+    dont `_CACHEE` (préfixe caché — présente dans l'état, c'est à
+    l'interface de la filtrer plus tard, pas au backend), `PURGE_PARAM`
+    (démontrera des paramètres, tâche 6) et `MACRO_ECHEC`, une sentinelle
+    qui échoue TOUJOURS à la commande, quel que soit le scénario actif.
+  - `12` (tâche 2, jalon 3a, palier « 8 têtes ») : huit extrudeurs
+    synthétiques, tous présents, et 48 macros — exactement
+    `KLIPPER_MACROS_MAX`, la borne réelle de `etat_klipper_t::macros` — avec
+    `macros_tronquees = true` : seul scénario de ce fichier où ce champ est
+    levé, pour signaler qu'un producteur en connaît davantage que ce que la
+    structure peut porter (voir le CRITICAL corrigé à la revue de la
+    tâche 1 sur cet OOB précis, `firmware/main/web_macros.h`).
+  - `10`/`11`/`12` répondent aussi à l'action `BACKEND_ACTION_MACRO`
+    (`commande()`, `arguments_json = {"nom":"<macro>"}`) : nom connu →
+    `ESP_OK`, `MACRO_ECHEC` → `ESP_FAIL`, nom inconnu ou `arguments_json`
+    absent/illisible → `ESP_ERR_NOT_SUPPORTED`.
   - tout autre numéro retombe sur le comportement du scénario 3 (voir
     `backend_factice_rafraichir()`).
 - `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`
