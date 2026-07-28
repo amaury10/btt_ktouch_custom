@@ -438,12 +438,23 @@ void app_main(void)
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
                                esp_err_to_name(erreur_accueil));
             }
-            if (!reglages_configures()) {
+            /* Second empilement CONDITIONNÉ à la réussite du premier (revue
+             * tâche 8, round 2, minor) : les deux appels ne sont pas
+             * indépendants. Sans cette garde, un ECRAN_ACCUEIL refusé (à
+             * cause d'un NO_MEM au tout premier démarrage, par exemple —
+             * son contexte est le plus gros des deux écrans) suivi d'un
+             * ECRAN_CONFIGURATION plus petit qui, lui, réussirait, recrée
+             * EXACTEMENT le cul-de-sac Q1 corrigé plus haut : configuration
+             * seule à profondeur 1, sous un profil de panne différent (échec
+             * d'allocation partiel plutôt qu'un oubli de code). */
+            if (erreur_accueil == ESP_OK && !reglages_configures()) {
                 esp_err_t erreur_config = navigation_empiler(&ECRAN_CONFIGURATION);
                 if (erreur_config != ESP_OK) {
                     JOURNAL_ERREUR(TAG, "navigation_empiler(configuration) a echoue (%s)",
                                    esp_err_to_name(erreur_config));
                 }
+            } else if (erreur_accueil != ESP_OK) {
+                JOURNAL_ALERTE(TAG, "ecran de configuration non empile : l'accueil a deja echoue");
             }
 
             /* Ce que ce câblage NE fait PAS, et qui reste explicitement le
