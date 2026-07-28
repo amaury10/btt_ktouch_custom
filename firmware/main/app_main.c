@@ -59,6 +59,25 @@ static void on_touch(lv_event_t *event)
     ESP_LOGI(TAG, "appui a x=%d y=%d", (int)point.x, (int)point.y);
 }
 
+/* Rappel du minuteur récurrent (tâche 10) : par construction, un lv_timer
+ * s'exécute déjà sur le fil LVGL — PandaTouch_IDF n'expose aucun mécanisme
+ * de verrouillage utilisable depuis une AUTRE tâche pour ce genre de rappel
+ * périodique (pt_lvgl_lock()/pt_lvgl_unlock() protègent des appels ponctuels
+ * depuis app_main ou la tâche d'interrogation, pas un minuteur qui vivrait
+ * hors du fil LVGL), donc pas de PT_LVGL_SCOPE_LOCK() ici : le prendre
+ * depuis le fil qui le détient déjà se bloquerait lui-même selon
+ * l'implémentation du verrou (non réentrant a priori, jamais vérifié faute
+ * de nécessité). habillage_pomper() est lui-même un no-op silencieux si
+ * habillage_construire() n'a pas encore tourné (voir habillage.c), donc rien
+ * à garder ici en plus de l'appel. Ni réseau ni NVS : uniquement le
+ * rafraîchissement visuel (bandeau de notification qui expire, barre d'état)
+ * que la boucle de sondage à 1 Hz ne couvre pas assez vite. */
+static void interface_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    habillage_pomper();
+}
+
 /* Reconstruit le texte (deux lignes) de la ligne d'état à partir de l'état
  * WiFi courant. Appelée sous PT_LVGL_SCOPE_LOCK() par l'appelant —
  * lv_label_set_text() n'est pas thread-safe vis-à-vis de la tâche LVGL.
@@ -457,15 +476,25 @@ void app_main(void)
                 JOURNAL_ALERTE(TAG, "ecran de configuration non empile : l'accueil a deja echoue");
             }
 
-            /* Ce que ce câblage NE fait PAS, et qui reste explicitement le
-             * travail de la tâche 10 : un rafraîchissement PÉRIODIQUE de la
-             * barre d'état (heure, wifi, notifications qui expirent). Un seul
-             * habillage_pomper() ci-dessous peuple la barre une fois, à la
-             * construction ; la faire vivre demande un lv_timer récurrent
-             * dont le brief de la tâche 10 exige d'abord de vérifier comment
-             * PandaTouch_IDF expose son verrou pour un appel hors app_main() —
-             * une question que ce site, purement synchrone, n'a pas besoin de
-             * trancher. Notée dans le rapport de tâche 8.
+            /* Tâche 10 : un premier habillage_pomper(), synchrone, peuple la
+             * barre d'état une fois à la construction (juste en dessous) ;
+             * un lv_timer récurrent (interface_timer_cb() plus haut) prend
+             * ensuite le relais pour la faire vivre (bandeau qui expire,
+             * heure, wifi). Créé ICI, sous le même PT_LVGL_SCOPE_LOCK() que
+             * le reste de cette construction, parce que lv_timer_create()
+             * n'est lui-même pas thread-safe vis-à-vis du fil LVGL — le
+             * créer hors du verrou risquerait de le faire courir pendant que
+             * build_test_pattern()/habillage_construire() ci-dessus modifient
+             * encore l'arbre d'objets. Une fois créé, son rappel s'exécute
+             * par construction sur le fil LVGL (voir interface_timer_cb()) :
+             * aucun verrou n'y est repris. Période de 200 ms : largement
+             * assez pour une réactivité sous la seconde sur le bandeau de
+             * notification, sans rivaliser avec la boucle de sondage à 1 Hz
+             * de boucle.c. Échec de création journalisé, jamais fatal (pas
+             * d'ESP_ERROR_CHECK) : lv_timer_create() rendant NULL sur un
+             * épuisement mémoire LVGL, l'interface reste alors figée sur son
+             * premier habillage_pomper() plutôt que de faire tomber le
+             * firmware pour un bandeau qui ne s'auto-masquera pas.
              *
              * La mire de build_test_pattern() ci-dessus n'est PAS retirée :
              * comportement inchangé au niveau code (corrigé revue tâche 8,
@@ -490,6 +519,12 @@ void app_main(void)
              * supprimé, il devient seulement invisible tant qu'un écran
              * réel couvre effectivement l'affichage. */
             habillage_pomper();
+
+            lv_timer_t *minuteur_interface = lv_timer_create(interface_timer_cb, 200, NULL);
+            if (minuteur_interface == NULL) {
+                JOURNAL_ALERTE(TAG, "lv_timer_create(interface) a echoue : rafraichissement "
+                               "periodique indisponible, l'interface reste figee sur son premier etat");
+            }
         }
 
         ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");

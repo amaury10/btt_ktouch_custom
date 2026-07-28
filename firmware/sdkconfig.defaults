@@ -60,3 +60,14 @@ CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_COLOR_MIX_ROUND_OFS=0
 CONFIG_LV_BUILD_EXAMPLES=n
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# --- Polices LVGL : habillage.c, tuile.c, progression.c, clavier.c et
+# ecran_accueil.c utilisent Montserrat 20/28/48, absentes de la config LVGL
+# par defaut du BSP. Sans elles, la declaration des polices est masquee par
+# #if LV_FONT_MONTSERRAT_xx et la compilation cible echoue (identifiant non
+# declare, -Werror) — piege deja rencontre : sdkconfig.defaults ne remplace
+# jamais un symbole deja present dans un sdkconfig genere, donc tout ajout ici
+# exige de supprimer firmware/sdkconfig et de regenerer (voir task-10-report.md).
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y

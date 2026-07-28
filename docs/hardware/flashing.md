@@ -70,21 +70,45 @@ le redémarrage.
 
 ### 4. Constater
 
-Laisser une minute, puis lire l'écran. La ligne d'état en bas indique le slot,
-le compteur de démarrages, la source des identifiants WiFi et l'adresse IP une
-fois connectée :
+Laisser une minute, puis lire l'écran. Depuis la tâche 10 du sous-jalon 2b,
+l'écran affiche l'interface Klipper réelle par-dessus la mire de diagnostic du
+jalon 1, pas la mire elle-même :
 
-```
-app1 | boot 1 | cfg:MonReseau
-wifi: 192.168.1.42
-```
+- **Appareil jamais configuré (aucun hôte Moonraker enregistré)** : écran
+  « Settings » (`ecran_configuration.c`) empilé par-dessus l'écran d'accueil —
+  champs « Printer address » et « Machine type », valeur « Not configured »
+  tant que rien n'a été saisi, bouton « Save ». C'est l'état normal d'un
+  premier démarrage, pas une panne.
+- **Appareil déjà configuré** : écran d'accueil Klipper directement (tuiles de
+  température, progression d'impression, etc.), sans l'écran de configuration
+  par-dessus.
+- **Écran ou tactile en panne** (`pt_display_init()` en échec, ou GT911
+  muet) : l'appareil reste diagnosticable à distance (WiFi, `/log`, `/state`,
+  `/revert`) même sans rien afficher — voir le commentaire en tête
+  d'`app_main()`.
+
+La ligne d'état de la mire du jalon 1 (slot, compteur de démarrages, source
+des identifiants WiFi, adresse IP) n'est plus visible dans le cas normal :
+l'habillage (bande d'état 44 px) et le fond opaque de chaque écran empilé la
+recouvrent entièrement. Elle ne refait surface que si l'empilement de l'écran
+de départ a lui-même échoué (voir les `JOURNAL_ERREUR` correspondants dans
+`app_main.c`) — un repli dégradé mais lisible, pas un défaut à corriger.
 
 Puis, à distance :
 
 ```powershell
 curl.exe -s http://<ip-de-la-k-touch>/status
+curl.exe -s http://<ip-de-la-k-touch>/state
 curl.exe -s http://<ip-de-la-k-touch>/log
 ```
+
+`/state` (voir le tableau de routes plus bas) reste disponible exactement
+comme avant, EN PARALLÈLE de l'interface graphique : l'écran est une
+présentation visuelle du même état que celui exposé en JSON, pas un canal
+séparé — les deux peuvent être consultés indépendamment, y compris quand
+l'écran est en panne. `/revert` n'est pas affecté par l'arrivée de
+l'interface : il continue de basculer immédiatement sur le firmware d'origine
+quel que soit l'écran affiché au moment de l'appel.
 
 > Si rien ne répond au bout de deux minutes, **ne rien faire** : le sauvetage
 > automatique décrit plus bas ramène l'appareil au firmware d'origine tout seul.
