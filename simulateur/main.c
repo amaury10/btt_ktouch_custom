@@ -1,5 +1,6 @@
 /* Point d'entrée du simulateur : construit l'habillage (tâche 4 — barre
- * d'état, bandeau de notifications) et l'écran d'accueil Klipper (tâche 6),
+ * d'état, bandeau de notifications) et l'écran de départ -- ECRAN_ACCUEIL
+ * (tâche 6) ou ECRAN_CONFIGURATION (tâche 8, --scenario 7/8, voir plus bas) --
  * fait tourner la boucle simulée (source_etat_sim.c) contre backend_factice
  * (ou un backend qui échoue toujours, pour démontrer l'état dégradé/hors
  * ligne), puis soit capture le tout en PNG, soit l'affiche dans une fenêtre
@@ -29,6 +30,7 @@
 #include "clavier.h"
 #include "confirmation.h"
 #include "ecran_accueil.h"
+#include "ecran_configuration.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
@@ -125,7 +127,14 @@ int main(int argc, char **argv)
 
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
-    navigation_empiler(&ECRAN_ACCUEIL);
+    /* --scenario 7/8 (tâche 8) : démarre sur ECRAN_CONFIGURATION plutôt que
+     * ECRAN_ACCUEIL, comme app_main.c le ferait sur un appareil jamais
+     * configuré (reglages_configures() faux) -- voir README §Options pour la
+     * numérotation complète. Ces deux numéros ne correspondent à aucun
+     * scénario du backend factice (voir backend_factice_scenario() plus bas,
+     * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
+    bool ecran_config = (scenario == 7 || scenario == 8);
+    navigation_empiler(ecran_config ? &ECRAN_CONFIGURATION : &ECRAN_ACCUEIL);
 
     const backend_desc_t *backend = echec ? &BACKEND_ECHEC_DESC : backend_factice_desc();
     if (!echec) {
@@ -169,6 +178,14 @@ int main(int argc, char **argv)
             confirmation_ouvrir("Cancel print?",
                                  "This will stop the current print. This cannot be undone.",
                                  "Cancel print", true, demo_confirmation_rappel, NULL);
+        } else if (scenario == 8) {
+            /* Tâche 8 : clavier ouvert par-dessus ECRAN_CONFIGURATION (déjà
+             * empilé plus haut, voir `ecran_config`), avec une adresse
+             * pré-remplie comme si elle venait d'être saisie -- même
+             * technique que le scénario 5 sur l'écran d'accueil : la valeur
+             * initiale de clavier_ouvrir() apparaît dans la textarea
+             * exactement comme une saisie tactile l'aurait laissée. */
+            clavier_ouvrir("Printer address", "192.168.1.42", CLAVIER_TEXTE, demo_clavier_rappel, NULL);
         }
 
         /* Un cycle de pompe LVGL suffit à laisser rendre l'écran une

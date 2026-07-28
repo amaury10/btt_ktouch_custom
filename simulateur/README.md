@@ -101,6 +101,17 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
     `firmware/main/ui/widgets/clavier.h`/`confirmation.h`. Sert uniquement à
     produire `clavier.png`/`confirmation.png` pour la revue ; sans effet en
     mode fenêtre.
+  - `7`/`8` (tâche 8) : démarrent sur `ECRAN_CONFIGURATION` (voir
+    `firmware/main/apps/klipper/ecrans/ecran_configuration.h`) à la place de
+    `ECRAN_ACCUEIL` — exactement ce que ferait `app_main.c` sur un appareil
+    dont `reglages_configures()` rend faux. `7` capture l'écran seul (« au
+    repos ») ; `8` ouvre en plus le clavier modal par-dessus, préverni avec
+    une adresse comme si elle venait d'être tapée — même technique que le
+    scénario 5, un capture-only. Comme `5`/`6`, ces deux numéros ne
+    correspondent à aucun scénario du backend factice (repli sur le
+    comportement du scénario 3). Utiliser `--cycles 0` avec `7` pour une
+    capture "au repos" sans le bandeau "host connected" que `--cycles`
+    positif déclenche par ailleurs (voir plus bas).
   - tout autre numéro retombe sur le comportement du scénario 3 (voir
     `backend_factice_rafraichir()`).
 - `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`
