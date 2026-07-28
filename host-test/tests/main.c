@@ -8,6 +8,7 @@ int tests_lances = 0;
 void suite_harnais(void);
 void suite_contrat(void);
 void suite_moonraker_parse(void);
+void suite_moonraker_rpc(void);
 void suite_etat_store(void);
 void suite_liaison(void);
 void suite_backend_factice(void);
@@ -65,6 +66,7 @@ int main(void)
     suite_harnais();
     suite_contrat();
     suite_moonraker_parse();
+    suite_moonraker_rpc();
     suite_etat_store();
     suite_liaison();
     suite_backend_factice();
