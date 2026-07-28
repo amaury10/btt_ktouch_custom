@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "moonraker_parse.h"
 
 /* ------------------------------------------------------------------------
  * Construction de requêtes
@@ -45,15 +46,11 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
      * d'aucune donnee d'entree -- un texte constant est plus simple et tout
      * aussi verifiable qu'un arbre cJSON serialise puis libere.
      *
-     * Fix (revue tache 3, CRITIQUE) : la methode JSON-RPC Moonraker s'ecrit
-     * avec des POINTS ("printer.objects.subscribe"), jamais un '/'.
-     * Moonraker derive ses methodes par ".".join(...) et ne connait aucun
-     * alias de la forme HTTP -- le code d'origine encodait fidelement une
-     * erreur de la spec elle-meme (printer.objects/subscribe). Avec la
-     * forme a slash, un vrai Moonraker aurait repondu -32601 "Method not
-     * found", aucune notification ne serait jamais arrivee, et le client
-     * serait retombe SILENCIEUSEMENT en repli HTTP 1 Hz -- le pire symptome
-     * a diagnostiquer, puisque rien ne signale l'echec cote client. */
+     * Fix round 1 (revue tache 3, CRITIQUE) : la methode JSON-RPC Moonraker
+     * s'ecrit avec des POINTS ("printer.objects.subscribe"), jamais un '/'.
+     * Le code d'origine encodait fidelement une erreur de la spec elle-meme
+     * (printer.objects/subscribe, forme HTTP) -- voir RPC_ABONNEMENT_TAILLE_MIN
+     * dans moonraker_rpc.h pour le recit complet du symptome. */
     static const char *PARAMS =
         "{\"objects\":{"
         "\"toolhead\":null,\"gcode_move\":null,"
@@ -63,6 +60,73 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
         "\"print_stats\":null,\"virtual_sdcard\":null,\"webhooks\":null"
         "}}";
     return rpc_construire_requete(sortie, taille, id, "printer.objects.subscribe", PARAMS);
+}
+
+/* ------------------------------------------------------------------------
+ * Conversions flottant -> entier bornées (fix round 1, C2)
+ * ---------------------------------------------------------------------- */
+
+/* Ces trois fonctions partagent un seul principe : convertir un flottant
+ * hors de la plage représentable du type entier cible -- ou non fini -- est
+ * un comportement indéfini (C11 6.3.1.4). Les comparaisons de bornes se
+ * font en DOUBLE (mantisse 53 bits, qui représente EXACTEMENT
+ * UINT16_MAX/UINT32_MAX/INT32_MIN/INT32_MAX) pour ne jamais laisser passer
+ * une valeur tout juste hors plage à cause d'un arrondi de la borne
+ * elle-même en float.
+ *
+ * Rendent false (et ne touchent PAS `*sortie`) uniquement si `d` n'est pas
+ * fini : dans ce cas la règle habituelle de poison par champ de ce fichier
+ * s'applique (champ laissé inchangé, voir moonraker_rpc.h). Une valeur
+ * FINIE mais hors plage n'est PAS un poison -- exactement comme
+ * moonraker_estimer_temps_restant_s() (moonraker_parse.h) plafonne une
+ * estimation réelle mais démesurée plutôt que de la rejeter -- donc rendent
+ * true avec `*sortie` clampé à la borne dépassée. L'appelant doit avoir
+ * déjà appliqué l'arrondi au plus proche (+/-0.5) à `d` : ces fonctions ne
+ * font que clamper puis tronquer. */
+
+static bool double_vers_u32_borne(double d, uint32_t *sortie)
+{
+    if (!isfinite(d)) {
+        return false;
+    }
+    if (d <= 0.0) {
+        *sortie = 0;
+    } else if (d >= (double)UINT32_MAX) {
+        *sortie = UINT32_MAX;
+    } else {
+        *sortie = (uint32_t)d;
+    }
+    return true;
+}
+
+static bool double_vers_u16_borne(double d, uint16_t *sortie)
+{
+    if (!isfinite(d)) {
+        return false;
+    }
+    if (d <= 0.0) {
+        *sortie = 0;
+    } else if (d >= (double)UINT16_MAX) {
+        *sortie = UINT16_MAX;
+    } else {
+        *sortie = (uint16_t)d;
+    }
+    return true;
+}
+
+static bool double_vers_i32_borne(double d, int32_t *sortie)
+{
+    if (!isfinite(d)) {
+        return false;
+    }
+    if (d >= (double)INT32_MAX) {
+        *sortie = INT32_MAX;
+    } else if (d <= (double)INT32_MIN) {
+        *sortie = INT32_MIN;
+    } else {
+        *sortie = (int32_t)d;
+    }
+    return true;
 }
 
 /* ------------------------------------------------------------------------
@@ -91,7 +155,13 @@ rpc_message_type_t rpc_classifier(const char *json, size_t longueur, uint32_t *i
             type = RPC_MSG_STATUS_UPDATE;
         } else if (strcmp(methode->valuestring, "notify_klippy_ready") == 0) {
             type = RPC_MSG_KLIPPY_READY;
-        } else if (strcmp(methode->valuestring, "notify_klippy_disconnected") == 0) {
+        } else if (strcmp(methode->valuestring, "notify_klippy_disconnected") == 0 ||
+                   strcmp(methode->valuestring, "notify_klippy_shutdown") == 0) {
+            /* Fix round 1 (revue, C4) : un arret Klippy (MCU shutdown,
+             * thermal runaway...) est le cas le plus critique en pratique --
+             * les notify_status_update cessent d'arriver, l'ecran ne doit
+             * plus faire confiance a l'etat pousse, exactement comme une
+             * deconnexion. */
             type = RPC_MSG_KLIPPY_DECONNECTE;
         } else {
             type = RPC_MSG_AUTRE;
@@ -101,18 +171,26 @@ rpc_message_type_t rpc_classifier(const char *json, size_t longueur, uint32_t *i
     }
 
     /* Pas de "method" valide : ne peut etre qu'une reponse corrélée, et une
-     * reponse SANS id numerique n'est pas exploitable (rien a quoi la
-     * relier) -- classee invalide plutot que "reponse sans id", pour que
-     * l'appelant n'ait qu'un seul type a rejeter. */
+     * reponse SANS id numerique exploitable n'est pas exploitable (rien a
+     * quoi la relier) -- classee invalide plutot que "reponse sans id",
+     * pour que l'appelant n'ait qu'un seul type a rejeter. */
     const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
     const cJSON *erreur = cJSON_GetObjectItemCaseSensitive(racine, "error");
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(racine, "id");
     if ((resultat != NULL || erreur != NULL) && cJSON_IsNumber(id)) {
-        if (id_sortie != NULL) {
-            *id_sortie = (uint32_t)id->valuedouble;
+        uint32_t id_borne;
+        /* Fix round 1 (revue, C2) : id->valuedouble peut etre hostile
+         * (-1, 1e300, 2^32, voire +infini pour "id":1e400) -- clampe avant
+         * conversion plutot que UB. Un id non fini (cas degenere,
+         * pratiquement jamais emis par un vrai Moonraker) est traite comme
+         * un id absent : rien a quoi le correler. */
+        if (double_vers_u32_borne(id->valuedouble, &id_borne)) {
+            if (id_sortie != NULL) {
+                *id_sortie = id_borne;
+            }
+            cJSON_Delete(racine);
+            return RPC_MSG_REPONSE;
         }
-        cJSON_Delete(racine);
-        return RPC_MSG_REPONSE;
     }
 
     cJSON_Delete(racine);
@@ -120,7 +198,7 @@ rpc_message_type_t rpc_classifier(const char *json, size_t longueur, uint32_t *i
 }
 
 /* ------------------------------------------------------------------------
- * Fusion partielle d'un notify_status_update dans l'etat
+ * Fusion (partielle ou instantané complet) dans l'état
  * ---------------------------------------------------------------------- */
 
 /* Lit un champ numerique d'un objet JSON, le convertit en float, et rend
@@ -149,6 +227,31 @@ static bool valeur_finie(const cJSON *v, float *sortie)
 static bool nombre_fini(const cJSON *parent, const char *cle, float *sortie)
 {
     return valeur_finie(cJSON_GetObjectItemCaseSensitive(parent, cle), sortie);
+}
+
+/* Variante DOUBLE de valeur_finie() ci-dessus, pour babystep_z_um :
+ * contrairement a la temperature/la position (des champs `float` dans
+ * etat_klipper_t), babystep_z_um est un int32_t -- rien ne justifie de
+ * retrecir en float au passage, une etape qui perd de la precision pour
+ * rien et deplace le point d'arrondi. Fix round 1 (revue, C6) : avec le
+ * retrecissement en float, homing_origin[2] = -0.0755 mm devenait
+ * -0.0754999965 (le float le plus proche), donc -75.4999... µm apres mise a
+ * l'echelle -- arrondi a -75 au lieu de -76 (le float le plus proche de
+ * 0.0755 n'est PAS equidistant de 75 et 76 une fois mis a l'echelle). En
+ * double, -0.0755 mm est bien plus proche de l'exact, -75.5 µm pile, qui
+ * s'arrondit correctement en -76 (arrondi au plus proche en s'eloignant de
+ * zero). */
+static bool valeur_double_finie(const cJSON *v, double *sortie)
+{
+    if (!cJSON_IsNumber(v)) {
+        return false;
+    }
+    double d = v->valuedouble;
+    if (!isfinite(d)) {
+        return false;
+    }
+    *sortie = d;
+    return true;
 }
 
 /* Decode l'index d'un chauffeur extrudeur a partir du NOM d'objet Klipper
@@ -203,16 +306,25 @@ static void fusionner_chauffeur(klipper_chauffeur_t *c, const cJSON *obj)
     if (!cJSON_IsObject(obj)) {
         return;
     }
-    /* `presente` suit l'existence de l'objet JSON, jamais une valeur a
-     * l'interieur (meme convention que moonraker_parse.c) : un chauffeur
-     * present mais dont la temperature est hostile reste present. */
-    c->presente = true;
     float v;
+    bool touche = false;
     if (nombre_fini(obj, "temperature", &v)) {
         c->actuelle = v;
+        touche = true;
     }
     if (nombre_fini(obj, "target", &v)) {
         c->consigne = v;
+        touche = true;
+    }
+    /* Fix round 1 (revue, C5/probe 11) : `presente` ne s'active QUE si
+     * l'objet porte au moins un champ reconnu -- PAS sur la simple
+     * existence de la clé JSON. Klipper répond `{}` pour un objet
+     * interrogé mais absent de la machine (voir rpc_fusionner_instantane,
+     * qui interroge extruder..extruder7 sans savoir à l'avance combien
+     * existent réellement) : sans cette garde, une machine mono-extrudeur
+     * verrait `nb_extrudeurs` gonfler à 8 dès le premier instantané. */
+    if (touche) {
+        c->presente = true;
     }
 }
 
@@ -221,10 +333,11 @@ static void fusionner_ventilateur(klipper_ventilateur_t *v, const cJSON *obj)
     if (!cJSON_IsObject(obj)) {
         return;
     }
-    v->present = true;
     float vitesse;
+    /* Meme garde que fusionner_chauffeur() ci-dessus, meme raison. */
     if (nombre_fini(obj, "speed", &vitesse)) {
         v->vitesse = vitesse;
+        v->present = true;
     }
 }
 
@@ -266,18 +379,39 @@ static void fusionner_gcode_move(etat_klipper_t *e, const cJSON *gm)
 
     float v;
     if (nombre_fini(gm, "speed_factor", &v)) {
-        e->vitesse_pct = (uint16_t)(v * 100.0f + 0.5f);
+        /* Fix round 1 (revue, C2/C6) : speed_factor 1000.0 (M220 S100000,
+         * une commande Klipper reelle) donne 100000 %, hors plage d'un
+         * uint16_t -- clampe a UINT16_MAX plutot qu'UB. L'arrondi au plus
+         * proche (+0.5, valeurs toujours positives ici) est applique AVANT
+         * le clamp, cote appelant, comme documente sur les helpers
+         * double_vers_*_borne ci-dessus. */
+        uint16_t pct;
+        if (double_vers_u16_borne((double)v * 100.0 + 0.5, &pct)) {
+            e->vitesse_pct = pct;
+        }
     }
     if (nombre_fini(gm, "extrude_factor", &v)) {
-        e->flux_pct = (uint16_t)(v * 100.0f + 0.5f);
+        uint16_t pct;
+        if (double_vers_u16_borne((double)v * 100.0 + 0.5, &pct)) {
+            e->flux_pct = pct;
+        }
     }
 
     const cJSON *origine = cJSON_GetObjectItemCaseSensitive(gm, "homing_origin");
     if (cJSON_IsArray(origine) && cJSON_GetArraySize(origine) >= 3) {
-        float z;
-        if (valeur_finie(cJSON_GetArrayItem(origine, 2), &z)) {
-            float um = z * 1000.0f;
-            e->babystep_z_um = (int32_t)(um >= 0.0f ? um + 0.5f : um - 0.5f);
+        double z;
+        if (valeur_double_finie(cJSON_GetArrayItem(origine, 2), &z)) {
+            /* mm -> µm en DOUBLE de bout en bout (voir valeur_double_finie
+             * ci-dessus), arrondi au plus proche EN S'ELOIGNANT DE ZERO
+             * (+0.5 si positif, -0.5 si negatif) avant clamp (z=1e7 mm est
+             * un homing_origin absurde mais FINI ; sans clamp, le cast vers
+             * int32_t serait UB). */
+            double um = z * 1000.0;
+            double arrondi = (um >= 0.0) ? um + 0.5 : um - 0.5;
+            int32_t bs;
+            if (double_vers_i32_borne(arrondi, &bs)) {
+                e->babystep_z_um = bs;
+            }
         }
     }
 
@@ -287,7 +421,13 @@ static void fusionner_gcode_move(etat_klipper_t *e, const cJSON *gm)
     }
 }
 
-static void fusionner_print_stats(etat_klipper_t *e, const cJSON *obj)
+/* `duree_vue`/`duree` : sortie annexe pour rpc_fusionner_status()/
+ * rpc_fusionner_instantane(), qui recalculent temps_restant_s APRES la
+ * boucle de fusion (voir fusionner_objet_statut ci-dessous) avec la
+ * progression la plus a jour, quel que soit l'ordre d'arrivee de
+ * print_stats/virtual_sdcard dans le meme message JSON. */
+static void fusionner_print_stats(etat_klipper_t *e, const cJSON *obj,
+                                   bool *duree_vue, float *duree)
 {
     if (!cJSON_IsObject(obj)) {
         return;
@@ -302,12 +442,11 @@ static void fusionner_print_stats(etat_klipper_t *e, const cJSON *obj)
     if (cJSON_IsString(fichier) && fichier->valuestring != NULL) {
         snprintf(e->fichier, sizeof(e->fichier), "%s", fichier->valuestring);
     }
-    /* print_duration : aucun champ dedie dans etat_klipper_t pour la duree
-     * ecoulee brute. temps_restant_s (estimation) reste du seul ressort de
-     * moonraker_parse.c (sondage HTTP) : le recalculer ici depuis une
-     * fusion partielle demanderait de stocker un `print_duration` cumule
-     * que la structure ne porte pas, pour un champ que le brief ne teste
-     * pas -- decision de portee documentee dans le rapport de tache. */
+    float v;
+    if (nombre_fini(obj, "print_duration", &v)) {
+        *duree_vue = true;
+        *duree = v;
+    }
 }
 
 static void fusionner_virtual_sdcard(etat_klipper_t *e, const cJSON *obj)
@@ -318,6 +457,77 @@ static void fusionner_virtual_sdcard(etat_klipper_t *e, const cJSON *obj)
     float progression;
     if (nombre_fini(obj, "progress", &progression)) {
         e->progression = progression;
+    }
+}
+
+/* Coeur commun a rpc_fusionner_status() (params[0]) et
+ * rpc_fusionner_instantane() (result.status) : `statut` est deja
+ * verifie comme un objet JSON par l'appelant, qui n'a plus qu'a extraire
+ * son enveloppe propre (notification vs reponse) avant d'appeler ceci.
+ * Fix round 1 (revue, C5) : cette extraction est CE QUI PERMET a
+ * rpc_fusionner_instantane() de reutiliser exactement le meme moteur, sans
+ * dupliquer la moindre regle de fusion. */
+static void fusionner_objet_statut(etat_klipper_t *local, const cJSON *statut)
+{
+    bool duree_vue = false;
+    float duree = 0.0f;
+
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, statut) {
+        const char *nom = item->string;
+        if (nom == NULL) {
+            continue;
+        }
+        int idx_extrudeur = index_extrudeur_depuis_nom(nom);
+        if (idx_extrudeur >= 0) {
+            fusionner_chauffeur(&local->extrudeurs[idx_extrudeur], item);
+            continue;
+        }
+        if (strcmp(nom, "heater_bed") == 0) {
+            fusionner_chauffeur(&local->plateau, item);
+        } else if (strcmp(nom, "toolhead") == 0) {
+            fusionner_toolhead(local, item);
+        } else if (strcmp(nom, "gcode_move") == 0) {
+            fusionner_gcode_move(local, item);
+        } else if (strcmp(nom, "fan") == 0) {
+            fusionner_ventilateur(&local->ventilateurs[0], item);
+        } else if (strcmp(nom, "print_stats") == 0) {
+            fusionner_print_stats(local, item, &duree_vue, &duree);
+        } else if (strcmp(nom, "virtual_sdcard") == 0) {
+            fusionner_virtual_sdcard(local, item);
+        }
+        /* Tout autre nom (webhooks, mcu, configfile, un objet inconnu ou un
+         * "extruderN" hors bornes deja ecarte ci-dessus par idx_extrudeur ==
+         * -1) est ignore : message par ailleurs valide, cet objet-ci n'a
+         * simplement pas de correspondant dans etat_klipper_t v2. */
+    }
+
+    /* `nb_extrudeurs` est recalcule sur l'etat COMPLET (les 8 emplacements),
+     * pas seulement ceux touches par CE message : `presente` ne redescend
+     * jamais a false ici (aucun mecanisme de ce module ne "retire" un
+     * extrudeur), donc un extrudeur vu une fois reste compte. */
+    uint8_t compte = 0;
+    for (int i = 0; i < KLIPPER_EXTRUDEURS_MAX; i++) {
+        if (local->extrudeurs[i].presente) {
+            compte++;
+        }
+    }
+    local->nb_extrudeurs = compte;
+
+    /* Fix round 1 (revue, C3) : temps_restant_s n'etait recalcule que par
+     * le sondage HTTP (moonraker_parse_status), jamais par la fusion
+     * WebSocket -- une fois le WS en ligne (le chemin NOMINAL du jalon,
+     * voir spec §4), le temps restant restait bloque a 0 pour toujours,
+     * regression visible sur l'ecran d'impression. Recalcule ici avec la
+     * MEME formule que le sondage HTTP (moonraker_estimer_temps_restant_s,
+     * moonraker_parse.h) des que ce message a apporte un print_duration
+     * exploitable, combine a la progression la plus a jour de `local`
+     * (qu'elle vienne de CE message ou d'un message anterieur — la fusion
+     * est partielle, `local->progression` porte deja la meilleure valeur
+     * connue). Un print_duration absent ou poison (non fini) laisse
+     * temps_restant_s a sa valeur courante, comme tout autre champ. */
+    if (duree_vue) {
+        local->temps_restant_s = moonraker_estimer_temps_restant_s(local->progression, duree);
     }
 }
 
@@ -358,50 +568,39 @@ bool rpc_fusionner_status(etat_klipper_t *etat, const char *json, size_t longueu
      * l'ecrit dans `*etat` qu'une fois la fusion terminee, en un seul bloc
      * -- meme discipline que moonraker_parse_status(). */
     etat_klipper_t local = *etat;
-
-    const cJSON *item = NULL;
-    cJSON_ArrayForEach(item, statut) {
-        const char *nom = item->string;
-        if (nom == NULL) {
-            continue;
-        }
-        int idx_extrudeur = index_extrudeur_depuis_nom(nom);
-        if (idx_extrudeur >= 0) {
-            fusionner_chauffeur(&local.extrudeurs[idx_extrudeur], item);
-            continue;
-        }
-        if (strcmp(nom, "heater_bed") == 0) {
-            fusionner_chauffeur(&local.plateau, item);
-        } else if (strcmp(nom, "toolhead") == 0) {
-            fusionner_toolhead(&local, item);
-        } else if (strcmp(nom, "gcode_move") == 0) {
-            fusionner_gcode_move(&local, item);
-        } else if (strcmp(nom, "fan") == 0) {
-            fusionner_ventilateur(&local.ventilateurs[0], item);
-        } else if (strcmp(nom, "print_stats") == 0) {
-            fusionner_print_stats(&local, item);
-        } else if (strcmp(nom, "virtual_sdcard") == 0) {
-            fusionner_virtual_sdcard(&local, item);
-        }
-        /* Tout autre nom (webhooks, mcu, configfile, un objet inconnu ou un
-         * "extruderN" hors bornes deja ecarte ci-dessus par idx_extrudeur ==
-         * -1) est ignore : message par ailleurs valide, cet objet-ci n'a
-         * simplement pas de correspondant dans etat_klipper_t v2. */
-    }
-
-    /* `nb_extrudeurs` est recalcule sur l'etat COMPLET (les 8 emplacements),
-     * pas seulement ceux touches par CE message : `presente` ne redescend
-     * jamais a false ici (aucun mecanisme de ce module ne "retire" un
-     * extrudeur), donc un extrudeur vu une fois reste compte. */
-    uint8_t compte = 0;
-    for (int i = 0; i < KLIPPER_EXTRUDEURS_MAX; i++) {
-        if (local.extrudeurs[i].presente) {
-            compte++;
-        }
-    }
-    local.nb_extrudeurs = compte;
-
+    fusionner_objet_statut(&local, statut);
     *etat = local;
+
+    cJSON_Delete(racine);
+    return true;
+}
+
+bool rpc_fusionner_instantane(etat_klipper_t *etat, const char *json, size_t longueur)
+{
+    if (etat == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL || !cJSON_IsObject(racine)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Reponse a printer.objects.subscribe : result.status, PAS params[0]
+     * (ce n'est pas une notification poussee, c'est LA reponse corrélée a
+     * la requete d'abonnement elle-meme). */
+    const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    const cJSON *statut = cJSON_GetObjectItemCaseSensitive(resultat, "status");
+    if (!cJSON_IsObject(statut)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    etat_klipper_t local = *etat;
+    fusionner_objet_statut(&local, statut);
+    *etat = local;
+
     cJSON_Delete(racine);
     return true;
 }
@@ -448,12 +647,17 @@ bool rpc_lire_reponse(const char *json, size_t longueur, bool *succes,
 
     const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
     const cJSON *erreur = cJSON_GetObjectItemCaseSensitive(racine, "error");
-    if (resultat == NULL && erreur == NULL) {
+    /* Fix round 1 (revue, C7) : "error" doit etre un OBJET JSON reel pour
+     * compter comme un echec -- un "error":null a cote d'un "result"
+     * valide (defensif chez un client, ou produit par un bug ailleurs) ne
+     * doit jamais se lire comme un echec juste parce que la CLE existe. */
+    bool erreur_valide = cJSON_IsObject(erreur);
+    if (resultat == NULL && !erreur_valide) {
         cJSON_Delete(racine);
         return false;
     }
 
-    if (erreur != NULL) {
+    if (erreur_valide) {
         *succes = false;
         const cJSON *message = cJSON_GetObjectItemCaseSensitive(erreur, "message");
         const char *texte = (cJSON_IsString(message) && message->valuestring != NULL)
@@ -476,10 +680,11 @@ bool rpc_lire_reponse(const char *json, size_t longueur, bool *succes,
  * Liste des macros
  * ---------------------------------------------------------------------- */
 
-/* Traite un candidat "gcode_macro NOM" (element de tableau printer.objects/
- * list, ou nom de cle d'un objet configfile.config -- les deux partagent la
- * meme convention, voir moonraker_rpc.h) : l'ajoute a `e->macros` si c'est
- * bien un objet macro Klipper et que le nom tient dans le tampon fixe. */
+/* Traite un candidat "gcode_macro NOM" (element de tableau
+ * printer.objects.list, ou nom de cle d'un objet configfile.config -- les
+ * deux partagent la meme convention, voir moonraker_rpc.h) : l'ajoute a
+ * `e->macros` si c'est bien un objet macro Klipper et que le nom tient dans
+ * le tampon fixe. */
 static void traiter_candidat_macro(etat_klipper_t *e, const char *nom_complet)
 {
     static const char PREFIXE[] = "gcode_macro ";
@@ -528,7 +733,7 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur)
         const cJSON *configfile = cJSON_GetObjectItemCaseSensitive(statut, "configfile");
         configfile_config = cJSON_GetObjectItemCaseSensitive(configfile, "config");
         if (!cJSON_IsObject(configfile_config)) {
-            /* Ni printer.objects/list ni configfile : forme non reconnue. */
+            /* Ni printer.objects.list ni configfile : forme non reconnue. */
             cJSON_Delete(racine);
             return false;
         }

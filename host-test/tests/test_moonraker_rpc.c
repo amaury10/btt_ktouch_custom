@@ -36,11 +36,11 @@ static void section_construire_abonnement(void)
 {
     char tampon[512];
     VERIFIER(rpc_construire_abonnement(tampon, sizeof(tampon), 3));
-    /* Fix (revue tache 3, C1 CRITIQUE) : ce test PINAIT le bug avant le fix
-     * (il cherchait la forme a slash, "printer.objects/subscribe" -- la
-     * forme HTTP, pas JSON-RPC) ; il pin desormais la forme correcte, a
-     * points, seule que Moonraker reconnaisse (".".join(...) cote serveur,
-     * aucun alias). Voir moonraker_rpc.c pour l'histoire complete. */
+    /* Fix round 1 (revue, C1 CRITIQUE) : la methode JSON-RPC Moonraker
+     * s'ecrit avec des POINTS, jamais un '/' -- Moonraker derive ses
+     * methodes par ".".join(...) et ne connait aucun alias HTTP-like.
+     * Ce test PINAIT le bug avant le fix (il cherchait ".../subscribe") ;
+     * il pin desormais la forme correcte. */
     VERIFIER(strstr(tampon, "\"method\":\"printer.objects.subscribe\"") != NULL);
     VERIFIER(strstr(tampon, "\"method\":\"printer.objects/subscribe\"") == NULL);
     VERIFIER(strstr(tampon, "\"id\":3") != NULL);
@@ -57,6 +57,13 @@ static void section_construire_abonnement(void)
     /* tampon trop court => false */
     char petit[10];
     VERIFIER(!rpc_construire_abonnement(petit, sizeof(petit), 3));
+
+    /* C8 : RPC_ABONNEMENT_TAILLE_MIN doit reellement suffire, id le plus
+     * long possible (10 chiffres, UINT32_MAX) compris -- garde-fou reel
+     * contre la taille de build publiee, pas une supposition. */
+    char tampon_min[RPC_ABONNEMENT_TAILLE_MIN];
+    VERIFIER(rpc_construire_abonnement(tampon_min, sizeof(tampon_min), UINT32_MAX));
+    VERIFIER(strstr(tampon_min, "\"id\":4294967295") != NULL);
 }
 
 /* --- rpc_classifier ------------------------------------------------------ */
@@ -86,6 +93,14 @@ static void section_classifier(void)
         "{\"jsonrpc\":\"2.0\",\"method\":\"notify_klippy_disconnected\",\"params\":[]}";
     VERIFIER(rpc_classifier(DECONNECTE, strlen(DECONNECTE), NULL) == RPC_MSG_KLIPPY_DECONNECTE);
 
+    /* C4 : notify_klippy_shutdown (MCU shutdown, thermal runaway...) est le
+     * cas #1 en pratique -- meme classement que la deconnexion, puisque
+     * dans les deux cas Klippy n'est plus utilisable et les
+     * notify_status_update cessent d'arriver. */
+    static const char *SHUTDOWN =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notify_klippy_shutdown\",\"params\":[]}";
+    VERIFIER(rpc_classifier(SHUTDOWN, strlen(SHUTDOWN), NULL) == RPC_MSG_KLIPPY_DECONNECTE);
+
     static const char *INCONNUE =
         "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\",\"params\":[\"ok\"]}";
     VERIFIER(rpc_classifier(INCONNUE, strlen(INCONNUE), NULL) == RPC_MSG_AUTRE);
@@ -98,6 +113,32 @@ static void section_classifier(void)
     /* id non numerique sur une reponse => INVALIDE */
     VERIFIER(rpc_classifier("{\"result\":{},\"id\":\"5\"}", strlen("{\"result\":{},\"id\":\"5\"}"), NULL)
              == RPC_MSG_INVALIDE);
+
+    /* C2 : id numerique mais hostile (probes de revue) -- CLAMPE a
+     * [0, UINT32_MAX] plutot qu'UB sur la conversion double -> uint32_t.
+     * Le message reste classe REPONSE : l'id existe et est un nombre, la
+     * conversion se contente d'etre sure. */
+    id = 999;
+    static const char *ID_NEGATIF = "{\"result\":{},\"id\":-1}";
+    VERIFIER(rpc_classifier(ID_NEGATIF, strlen(ID_NEGATIF), &id) == RPC_MSG_REPONSE);
+    VERIFIER(id == 0);
+
+    id = 999;
+    static const char *ID_ENORME = "{\"result\":{},\"id\":1e300}";
+    VERIFIER(rpc_classifier(ID_ENORME, strlen(ID_ENORME), &id) == RPC_MSG_REPONSE);
+    VERIFIER(id == UINT32_MAX);
+
+    id = 999;
+    static const char *ID_DEUX_PUISSANCE_32 = "{\"result\":{},\"id\":4294967296}";
+    VERIFIER(rpc_classifier(ID_DEUX_PUISSANCE_32, strlen(ID_DEUX_PUISSANCE_32), &id) == RPC_MSG_REPONSE);
+    VERIFIER(id == UINT32_MAX);
+
+    /* id non fini (1e400 devient +infini meme en double, cJSON accepte le
+     * token JSON) : pas plus exploitable qu'un id absent => INVALIDE */
+    id = 999;
+    static const char *ID_INFINI = "{\"result\":{},\"id\":1e400}";
+    VERIFIER(rpc_classifier(ID_INFINI, strlen(ID_INFINI), &id) == RPC_MSG_INVALIDE);
+    VERIFIER(id == 0);
 
     /* JSON illisible => INVALIDE */
     VERIFIER(rpc_classifier("pas du json", 11, NULL) == RPC_MSG_INVALIDE);
@@ -218,6 +259,141 @@ static void section_fusionner_status(void)
         VERIFIER(e.deplacement_absolu == true);
     }
 
+    /* --- C6 : arrondi pin -- 2 mutations avaient survecu sans ces cas --- */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"speed_factor\":1.03,\"extrude_factor\":1.07}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.vitesse_pct == 103);
+        VERIFIER(e.flux_pct == 107);
+
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"homing_origin\":[0,0,-0.0755,0]}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.babystep_z_um == -76);
+
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"homing_origin\":[0,0,0.0755,0]}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.babystep_z_um == 76);
+    }
+
+    /* --- C2 : conversions flottant -> entier bornees -- probes de revue qui
+     * faisaient echouer UBSan (float-cast-overflow) avant le fix. Toutes ces
+     * entrees sont FINIES (pas le cas "valeurs non finies" ci-dessous) :
+     * elles doivent etre CLAMPEES a la borne du type cible, pas rejetees. --- */
+    {
+        etat_klipper_t e;
+
+        /* speed_factor 1e30 : bien au-dela d'un uint16_t une fois x100 */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"speed_factor\":1e30}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.vitesse_pct == 65535);
+
+        /* M220 S100000 : commande Klipper REELLE (pas une entree hostile),
+         * speed_factor devient 1000.0 => 100000 % > UINT16_MAX */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"speed_factor\":1000.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.vitesse_pct == 65535);
+
+        /* babystep : homing_origin[2] de 1e30 mm et 1e7 mm, tous deux finis
+         * mais hors de la plage d'un int32_t une fois convertis en µm */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"homing_origin\":[0,0,1e30,0]}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.babystep_z_um == INT32_MAX);
+
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"homing_origin\":[0,0,1e7,0]}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.babystep_z_um == INT32_MAX);
+
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"gcode_move\":{\"homing_origin\":[0,0,-1e7,0]}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.babystep_z_um == INT32_MIN);
+    }
+
+    /* --- C5/probe 11 : un objet SANS AUCUN champ reconnu (Klipper repond
+     * `{}` pour un objet interroge mais absent de la machine) ne doit PAS
+     * flipper `presente` -- sinon une machine mono-extrudeur verrait
+     * nb_extrudeurs gonfler des le premier instantane (extruder..extruder7
+     * sont tous demandes par l'abonnement, qu'ils existent ou non). --- */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        e.extrudeurs[0].presente = true;
+        e.nb_extrudeurs = 1;
+        enveloppe(msg, sizeof(msg), "{\"extruder3\":{}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.extrudeurs[3].presente == false);
+        VERIFIER(e.nb_extrudeurs == 1);
+
+        /* meme garde pour le ventilateur */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"fan\":{}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.ventilateurs[0].present == false);
+    }
+
+    /* --- C3 : temps_restant_s doit etre recalcule par la fusion WebSocket,
+     * pas seulement par le sondage HTTP -- meme formule que
+     * moonraker_parse.c (moonraker_estimer_temps_restant_s), memes cas
+     * limites (nominal, progression trop faible, non fini, deja plafonne
+     * cote moonraker_parse -- ici juste le nominal + les gardes cote fusion,
+     * la formule elle-meme est deja exhaustivement testee par
+     * test_moonraker_parse.c puisque c'est desormais la MEME fonction). --- */
+    {
+        etat_klipper_t e;
+
+        /* nominal : print_duration et progression dans le MEME message,
+         * 600 s ecoulees a 50 % => 600 s restantes (meme calcul que
+         * test_moonraker_parse.c) */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg),
+            "{\"print_stats\":{\"print_duration\":600.0},\"virtual_sdcard\":{\"progress\":0.5}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.temps_restant_s == 600);
+
+        /* print_duration arrive seul ; progression DEJA connue d'un message
+         * anterieur (fusion partielle : la meilleure valeur connue de
+         * `progression` est reutilisee, pas seulement celle du message
+         * courant) */
+        memset(&e, 0, sizeof(e));
+        e.progression = 0.5f;
+        enveloppe(msg, sizeof(msg), "{\"print_stats\":{\"print_duration\":600.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.temps_restant_s == 600);
+
+        /* progression trop faible : estimation neutralisee (0), comme
+         * moonraker_parse.c */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg),
+            "{\"print_stats\":{\"print_duration\":5.0},\"virtual_sdcard\":{\"progress\":0.001}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.temps_restant_s == 0);
+
+        /* print_duration non fini (1e40) : champ poison, temps_restant_s
+         * reste a sa valeur COURANTE (pas remis a 0 ni recalcule) */
+        memset(&e, 0, sizeof(e));
+        e.temps_restant_s = 42;
+        enveloppe(msg, sizeof(msg),
+            "{\"print_stats\":{\"print_duration\":1e40},\"virtual_sdcard\":{\"progress\":0.5}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.temps_restant_s == 42);
+
+        /* print_duration absent de CE message : temps_restant_s inchange,
+         * meme si virtual_sdcard/progress est present (fusion partielle) */
+        memset(&e, 0, sizeof(e));
+        e.temps_restant_s = 123;
+        enveloppe(msg, sizeof(msg), "{\"virtual_sdcard\":{\"progress\":0.5}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.temps_restant_s == 123);
+    }
+
     /* --- valeurs non finies : le champ concerne reste inchange, le reste du
      * MEME objet continue d'etre applique (poison par champ, pas par
      * message). 1e40 devient +infini une fois retreci en float -- meme
@@ -302,6 +478,99 @@ static void section_fusionner_status(void)
     }
 }
 
+/* --- rpc_fusionner_instantane ---------------------------------------------
+ * C5 : l'instantane initial arrive dans la REPONSE de printer.objects.
+ * subscribe (result.status), pas dans params[0] -- rpc_fusionner_instantane
+ * reutilise le meme moteur de fusion que rpc_fusionner_status (voir
+ * fusionner_objet_statut dans moonraker_rpc.c), donc les memes regles
+ * (partiel, poison par champ, presente-si-champ-reconnu, temps_restant_s)
+ * s'appliquent -- ce test verifie surtout l'ENVELOPPE result.status et la
+ * garde `{}` -> presente=false qui motive cette fonction. --- */
+
+static void section_fusionner_instantane(void)
+{
+    /* nominal : plusieurs objets d'un coup, comme un vrai premier instantane */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        static const char *REPONSE =
+            "{\"result\":{\"status\":{"
+            "\"toolhead\":{\"homed_axes\":\"xyz\",\"extruder\":\"extruder1\"},"
+            "\"extruder\":{\"temperature\":25.0,\"target\":0.0},"
+            "\"extruder1\":{\"temperature\":26.0,\"target\":210.0},"
+            "\"extruder3\":{},"
+            "\"heater_bed\":{\"temperature\":24.0,\"target\":60.0},"
+            "\"print_stats\":{\"state\":\"printing\",\"filename\":\"x.gcode\",\"print_duration\":600.0},"
+            "\"virtual_sdcard\":{\"progress\":0.5}"
+            "}},\"id\":1}";
+        VERIFIER(rpc_fusionner_instantane(&e, REPONSE, strlen(REPONSE)));
+        VERIFIER(e.axes_references == 7);
+        VERIFIER(e.outil_actif == 1);
+        VERIFIER(e.extrudeurs[0].presente == true);
+        VERIFIER(e.extrudeurs[1].presente == true);
+        /* extruder3 : {} sans champ reconnu => n'existe pas sur cette machine */
+        VERIFIER(e.extrudeurs[3].presente == false);
+        VERIFIER(e.nb_extrudeurs == 2);
+        VERIFIER(e.plateau.presente == true);
+        VERIFIER_TEXTE(e.fichier, "x.gcode");
+        VERIFIER(e.impression_en_cours == true);
+        VERIFIER(e.temps_restant_s == 600);
+    }
+
+    /* fusion PARTIELLE, pas un ecrasement total : un champ non couvert par
+     * l'instantane reste intact (meme contrat que rpc_fusionner_status) */
+    {
+        etat_klipper_t avant;
+        memset(&avant, 0, sizeof(avant));
+        avant.babystep_z_um = 500;
+        avant.vitesse_pct = 120;
+
+        etat_klipper_t e = avant;
+        static const char *REPONSE = "{\"result\":{\"status\":{\"heater_bed\":{\"temperature\":61.0}}},\"id\":1}";
+        VERIFIER(rpc_fusionner_instantane(&e, REPONSE, strlen(REPONSE)));
+        VERIFIER(e.babystep_z_um == 500);
+        VERIFIER(e.vitesse_pct == 120);
+        VERIFIER_FLOAT(e.plateau.actuelle, 61.0f, 0.01f);
+    }
+
+    /* enveloppe hostile : result absent, result.status absent, result.status
+     * pas un objet, JSON illisible => false, etat INTACT */
+    {
+        etat_klipper_t temoin;
+        memset(&temoin, 0x5A, sizeof(temoin));
+        etat_klipper_t e;
+
+        e = temoin;
+        static const char *SANS_RESULT = "{\"id\":1}";
+        VERIFIER(!rpc_fusionner_instantane(&e, SANS_RESULT, strlen(SANS_RESULT)));
+        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+
+        e = temoin;
+        static const char *SANS_STATUS = "{\"result\":{\"eventtime\":1.0},\"id\":1}";
+        VERIFIER(!rpc_fusionner_instantane(&e, SANS_STATUS, strlen(SANS_STATUS)));
+        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+
+        e = temoin;
+        static const char *STATUS_PAS_OBJET = "{\"result\":{\"status\":42},\"id\":1}";
+        VERIFIER(!rpc_fusionner_instantane(&e, STATUS_PAS_OBJET, strlen(STATUS_PAS_OBJET)));
+        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+
+        e = temoin;
+        VERIFIER(!rpc_fusionner_instantane(&e, "pas du json", 11));
+        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+
+        e = temoin;
+        VERIFIER(!rpc_fusionner_instantane(&e, "", 0));
+        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+
+        e = temoin;
+        VERIFIER(!rpc_fusionner_instantane(&e, NULL, 0));
+        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+
+        VERIFIER(!rpc_fusionner_instantane(NULL, "{}", 2));
+    }
+}
+
 /* --- rpc_lire_reponse ----------------------------------------------------- */
 
 static void section_lire_reponse(void)
@@ -330,6 +599,16 @@ static void section_lire_reponse(void)
     static const char *ERR_SANS_MSG = "{\"error\":{\"code\":-1},\"id\":3}";
     VERIFIER(rpc_lire_reponse(ERR_SANS_MSG, strlen(ERR_SANS_MSG), &succes, erreur, sizeof(erreur)));
     VERIFIER(succes == false);
+    VERIFIER_TEXTE(erreur, "");
+
+    /* C7 : "error":null a cote d'un "result" valide ne doit JAMAIS se lire
+     * comme un echec -- seul un "error" qui est un OBJET JSON compte. */
+    succes = false;
+    strcpy(erreur, "bruit");
+    static const char *RESULT_ET_ERREUR_NULLE = "{\"result\":{\"foo\":1},\"error\":null,\"id\":6}";
+    VERIFIER(rpc_lire_reponse(RESULT_ET_ERREUR_NULLE, strlen(RESULT_ET_ERREUR_NULLE),
+                               &succes, erreur, sizeof(erreur)));
+    VERIFIER(succes == true);
     VERIFIER_TEXTE(erreur, "");
 
     /* erreur_texte/taille_erreur optionnels */
@@ -503,6 +782,7 @@ void suite_moonraker_rpc(void)
     section_construire_abonnement();
     section_classifier();
     section_fusionner_status();
+    section_fusionner_instantane();
     section_lire_reponse();
     section_lire_macros();
 }
