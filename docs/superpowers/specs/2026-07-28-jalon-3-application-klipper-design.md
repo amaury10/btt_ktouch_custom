@@ -211,6 +211,25 @@ d'extraction inchangé) : pad de jog, sélecteur de pas, molette/±  pour les
 pourcentages, liste paginée à chargement paresseux, vignette d'image (PNG
 PSRAM), grille de mesh (si retenue).
 
+**Trois paliers de mise en page pour les outils** (décision utilisateur) : le
+choix se fait sur `nb_extrudeurs`, pour qu'un mono-extrudeur ne soit jamais
+cantonné à une petite cellule quand il a huit fois la place :
+
+- **1 tête** : les grandes tuiles du 2b, inchangées — valeur en Montserrat 48,
+  consigne dessous, la place sert à la lisibilité ;
+- **2 à 4 têtes** : grille moyenne (2×2 max), valeur en 28, l'outil actif
+  marqué ; c'est le palier de la Snapmaker U1 ;
+- **5 à 8 têtes** : grille compacte (2×4), valeur en 20, tap ⇒ vue détaillée
+  du chauffeur (consigne, préréglages) puisque la cellule n'a plus la place
+  d'un réglage direct ; c'est le palier Prusa XL et au-delà.
+
+Le palier s'applique partout où les outils s'affichent (accueil Idle, écran
+d'impression, panneau filament), choisi par un même helper partagé — jamais
+recalculé à la main écran par écran. Le plateau garde sa tuile propre à tous
+les paliers. Les scénarios du backend factice couvrent les trois paliers
+(CR-10 = 1, U1 = 4, synthétique = 8) et une capture par palier fait partie
+des livrables de revue.
+
 Les écrans restent des `ecran_desc_t` ; l'accueil du 2b évolue en « accueil
 impression » et un « accueil idle » distinct apparaît — le socle choisit
 lequel afficher selon `etat_impression`, par la même mécanique de navigation
