@@ -26,6 +26,14 @@
  * saisir) :
  * - un espace de tête ou de fin (jamais tronqué silencieusement : une
  *   saisie qui contient un défaut visible doit être visiblement refusée) ;
+ *   CETTE fonction ne rejette QUE ces espaces de BORDURE. Un espace À
+ *   L'INTÉRIEUR de la partie adresse (ex. "my printer:7125") est accepté
+ *   tel quel par hote_parse() : c'est à l'APPELANT de le refuser avant
+ *   l'appel, comme le fait ecran_configuration_valider() (voir
+ *   ecran_configuration.c, contient_espace(), qui balaie la chaîne entière
+ *   AVANT tout découpage, précisément parce que hote_parse() ne le fait
+ *   pas). Un fork qui écrit son propre écran de configuration doit faire de
+ *   même ;
  * - un préfixe de schéma, détecté par la seule présence de "://" n'importe
  *   où dans la chaîne (ex. "http://192.168.1.50:7125", qui produirait sinon
  *   une adresse "http" et une URL Moonraker doublement préfixée).
