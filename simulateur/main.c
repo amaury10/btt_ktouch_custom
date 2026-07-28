@@ -26,6 +26,8 @@
 
 #include "backend.h"
 #include "backend_factice.h"
+#include "clavier.h"
+#include "confirmation.h"
 #include "ecran_accueil.h"
 #include "etat_klipper.h"
 #include "habillage.h"
@@ -75,6 +77,25 @@ static const backend_desc_t BACKEND_ECHEC_DESC = {
     .arreter = echec_arreter,
     .commande = echec_commande,
 };
+
+/* --- Démonstration du clavier modal et du dialogue de confirmation --------
+ * (tâche 7) : --scenario 5/6 ci-dessous, en mode capture uniquement. Ces
+ * rappels ne sont jamais invoqués par une capture hors écran (rien n'y
+ * simule un appui tactile, voir --scenario ci-dessous et host-test/tests/
+ * test_clavier.c pour la façon dont les événements sont simulés côté tests) ;
+ * ils n'existent que pour satisfaire la signature de clavier_ouvrir()/
+ * confirmation_ouvrir(), qui refusent un rappel NULL (voir clavier.h). */
+static void demo_clavier_rappel(const char *valeur, void *contexte)
+{
+    (void)valeur;
+    (void)contexte;
+}
+
+static void demo_confirmation_rappel(bool confirme, void *contexte)
+{
+    (void)confirme;
+    (void)contexte;
+}
 
 int main(int argc, char **argv)
 {
@@ -129,6 +150,25 @@ int main(int argc, char **argv)
         }
         if (cycles > 0) {
             habillage_notifier(echec ? "connection lost" : "host connected", echec);
+        }
+
+        /* Démonstration tâche 7 : --scenario 5/6 ouvre respectivement le
+         * clavier modal et le dialogue de confirmation par-dessus l'écran
+         * d'accueil déjà construit ci-dessus, pour que la capture qui suit
+         * les montre réellement à l'écran (spec §6 : le plus gros morceau
+         * partagé du jalon, jusqu'ici invisible dans le simulateur). Ces
+         * numéros ne correspondent à aucun scénario du backend factice (voir
+         * backend_factice_scenario() plus haut, qui les a déjà reçus et
+         * traités comme "tout autre numéro", README §Options) : le fond
+         * derrière les modales est donc celui du scénario 3 (valeurs
+         * extrêmes mais plausibles), un arrière-plan quelconque puisque
+         * seule la modale elle-même importe pour cette capture. */
+        if (scenario == 5) {
+            clavier_ouvrir("Host address", "192.168.1.42", CLAVIER_TEXTE, demo_clavier_rappel, NULL);
+        } else if (scenario == 6) {
+            confirmation_ouvrir("Cancel print?",
+                                 "This will stop the current print. This cannot be undone.",
+                                 "Cancel print", true, demo_confirmation_rappel, NULL);
         }
 
         /* Un cycle de pompe LVGL suffit à laisser rendre l'écran une

@@ -93,6 +93,14 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
   - `4` — valeurs **aberrantes**, hors plage (999 °C / -999 °C) — sert à
     vérifier qu'un affichage rend `"--"` plutôt qu'un nombre faux
     (`ui_format_temperature()`, voir `firmware/main/ui/widgets/tuile.h`).
+  - `5`/`6` (tâche 7, mode capture uniquement) : ne changent rien au backend
+    factice lui-même (transmis tel quel à `backend_factice_scenario()`, qui
+    les traite comme "tout autre numéro" — voir juste au-dessus) mais font
+    en plus ouvrir, par-dessus l'écran d'accueil déjà construit, le clavier
+    modal (`5`) ou le dialogue de confirmation destructif (`6`) — voir
+    `firmware/main/ui/widgets/clavier.h`/`confirmation.h`. Sert uniquement à
+    produire `clavier.png`/`confirmation.png` pour la revue ; sans effet en
+    mode fenêtre.
   - tout autre numéro retombe sur le comportement du scénario 3 (voir
     `backend_factice_rafraichir()`).
 - `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`
