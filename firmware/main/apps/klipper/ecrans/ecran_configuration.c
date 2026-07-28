@@ -136,6 +136,21 @@ bool ecran_configuration_valider(const char *saisie, backend_hote_t *hote_sortie
      * longue que CLAVIER_VALEUR_MAX (rien ne la lie au clavier), d'ou le
      * controle de troncature qui suit -- il ne depend pas de la provenance de
      * `saisie`. */
+    /* AUCUN espace, nulle part, quelle que soit la branche prise ensuite
+     * (revue tache 8, round 2 puis 2 bis). Le garde-fou de hote_parse() ne
+     * couvre que les BORDURES de la chaine qu'ON LUI DONNE, jamais la saisie
+     * d'origine ; les deux branches ci-dessous savent chacune deplacer un
+     * espace hors de sa portee : la synthese du port ("192.168.1.50 " devient
+     * "192.168.1.50 :7125", l'espace de fin passe a l'interieur), et le
+     * decoupage sur le dernier ':' ("my printer:7125" donne l'adresse
+     * "my printer", espace interieur invisible d'une garde de bordure). Une
+     * seule regle sur la saisie BRUTE, avant de deplacer le moindre octet,
+     * couvre les deux chemins sans dupliquer la logique de hote_parse(). */
+    if (contient_espace(saisie)) {
+        ecrire_erreur(erreur, taille_erreur, "Printer address is not valid");
+        return false;
+    }
+
     char chaine[CLAVIER_VALEUR_MAX + 8];
     int longueur;
     if (strchr(saisie, ':') != NULL) {
@@ -143,27 +158,6 @@ bool ecran_configuration_valider(const char *saisie, backend_hote_t *hote_sortie
          * le DERNIER ':', voir hote_parse.h) : aucune synthese necessaire. */
         longueur = snprintf(chaine, sizeof(chaine), "%s", saisie);
     } else {
-        /* AVANT toute synthese : `saisie` ne doit contenir AUCUN espace, ni
-         * en bordure ni a l'interieur (revue tache 8, round 2, IMPORTANT).
-         * Sans ce controle, "192.168.1.50 " (espace de FIN, sans ':') se
-         * synthetise en "192.168.1.50 :7125" -- l'espace de fin de la
-         * saisie BRUTE devient alors INTERIEUR a la chaine synthetisee,
-         * hors de portee du garde-fou de bordure de hote_parse() (qui
-         * n'inspecte que le premier/dernier caractere de ce qu'ON LUI
-         * DONNE, jamais de la saisie d'origine) : ce cas etait accepte
-         * avec pour adresse " 192.168.1.50 ", persiste, en echec permanent.
-         * Verifier la saisie BRUTE, avant de deplacer le moindre octet,
-         * ferme le trou a la racine plutot que de dupliquer le garde-fou de
-         * hote_parse() sur la chaine synthetisee (ou il arriverait trop
-         * tard). Un espace INTERIEUR ("my printer") n'est pas davantage
-         * protege par aucune bordure, avant ou apres synthese : la meme
-         * regle -- aucun espace, nulle part dans une adresse censee etre
-         * nue -- couvre les deux d'un seul controle. */
-        if (contient_espace(saisie)) {
-            ecrire_erreur(erreur, taille_erreur, "Printer address is not valid");
-            return false;
-        }
-
         /* Pas de port saisi : le port par defaut s'applique -- CONTRAIREMENT
          * a hote_parse() seul, qui juge une chaine sans ':' entierement
          * inexploitable (voir son commentaire de tete). C'est le cas normal

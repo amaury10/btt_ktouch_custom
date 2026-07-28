@@ -158,6 +158,17 @@ static void section_validation(void)
     VERIFIER(ecran_configuration_valider("my printer", &h, erreur, sizeof(erreur)) == false);
     VERIFIER(erreur[0] != '\0');
 
+    /* Espace interieur AVEC ':' ("my printer:7125") : cette saisie evite la
+     * branche de synthese (elle contient deja un ':'), donc la garde
+     * d'espaces posee au round 2 dans la branche sans ':' ne la voyait pas ;
+     * et une fois chez hote_parse(), l'espace est interieur a l'adresse
+     * decoupee ("my printer"), hors de portee de son garde-fou de bordure.
+     * Meme classe de trou que le contournement par synthese, par l'autre
+     * branche (revue tache 8, round 2 bis, trouve par le coordinateur). */
+    erreur[0] = '\0';
+    VERIFIER(ecran_configuration_valider("my printer:7125", &h, erreur, sizeof(erreur)) == false);
+    VERIFIER(erreur[0] != '\0');
+
     /* adresse:port classique (brief : "accepte klipper.local:7125") */
     memset(&h, 0, sizeof(h));
     VERIFIER(ecran_configuration_valider("klipper.local:7125", &h, erreur, sizeof(erreur)) == true);
