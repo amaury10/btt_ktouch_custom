@@ -31,7 +31,7 @@ Prusa XL (5 têtes) et les toolchangers à 8 outils.
 - **Transport : WebSocket Moonraker**, comme KlipperScreen. Connexion
   persistante (`espressif/esp_websocket_client`, composant géré officiel du
   registre — comme LVGL, il s'ajoute via `idf_component.yml`), JSON-RPC 2.0,
-  abonnement `printer.objects/subscribe` — l'état arrive **poussé**
+  abonnement `printer.objects.subscribe` — l'état arrive **poussé**
   (`notify_status_update`), les commandes partent en RPC
   (`printer.gcode.script`, etc.). **La boucle HTTP à 1 Hz du jalon 2a reste
   intégralement en place comme repli** : WS en panne ⇒ retour au sondage, sans
@@ -210,7 +210,7 @@ Toujours un POD à taille fixe, sans pointeur. Ajouts :
 
 Taille estimée ~2,5 Ko : memcmp et double tampon restent négligeables. La
 liste des macros ne change qu'à un redémarrage Klipper : elle est remplie à la
-connexion (`printer.objects/list` + configfile) et sur `notify_klippy_ready`,
+connexion (`printer.objects.list` + configfile) et sur `notify_klippy_ready`,
 pas à chaque cycle.
 
 Actions de commande ajoutées (chaînes du registre existant, arguments via
