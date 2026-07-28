@@ -132,12 +132,17 @@ esp_err_t reglages_charger(void)
      * depuis l'écran ne doit jamais le voir écrasé par une valeur de
      * compilation figée. Jamais réécrit en NVS (voir CONFIG_KTOUCH_KLIPPER_HOST
      * dans Kconfig.projbuild) : un réglage jamais saisi par l'utilisateur ne
-     * doit pas devenir un état persistant. Sans ce secours, un appareil de
-     * développement sans écran de configuration (le sous-jalon 2b n'existe
-     * pas encore) et sans port série ne peut JAMAIS faire démarrer la boucle
-     * d'interrogation, quelle que soit la machine Klipper réellement
-     * joignable sur le réseau — voir app_main.c, qui refuse de démarrer la
-     * boucle tant que reglages_configures() rend faux. */
+     * doit pas devenir un état persistant. Sans ce secours, un appareil dont
+     * l'écran de configuration n'a jamais eu l'occasion de servir (écran
+     * indisponible, ou tout simplement personne devant l'appareil -- voir
+     * ecran_configuration.h, sous-jalon 2b, tâche 8) et sans port série ne
+     * peut JAMAIS faire démarrer la boucle d'interrogation, quelle que soit
+     * la machine Klipper réellement joignable sur le réseau — voir
+     * app_main.c, qui refuse de démarrer la boucle tant que
+     * reglages_configures() rend faux. Texte corrigé (revue tâche 8, round 1,
+     * Q6) : la version précédente disait "le sous-jalon 2b n'existe pas
+     * encore", ce qui n'est plus vrai depuis que cette tâche a écrit l'écran
+     * en question. */
     if (g_hote.adresse[0] == '\0' && CONFIG_KTOUCH_KLIPPER_HOST[0] != '\0') {
         strlcpy(g_hote.adresse, CONFIG_KTOUCH_KLIPPER_HOST, sizeof(g_hote.adresse));
         g_hote.port = (CONFIG_KTOUCH_KLIPPER_PORT > 0 && CONFIG_KTOUCH_KLIPPER_PORT <= 65535)
@@ -147,7 +152,8 @@ esp_err_t reglages_charger(void)
                      g_hote.adresse, (unsigned)g_hote.port);
     } else if (g_hote.adresse[0] == '\0') {
         JOURNAL_ALERTE(TAG, "aucun hote configure (ni NVS, ni Kconfig) ; "
-                       "la boucle d'interrogation ne demarrera pas");
+                       "la boucle d'interrogation ne demarrera pas tant que "
+                       "l'ecran de configuration n'aura pas ete utilise");
     }
 
     size_t taille_backend = sizeof(g_backend);

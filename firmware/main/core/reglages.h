@@ -28,8 +28,14 @@ bool        reglages_configures(void);   /* faux au tout premier démarrage */
  * compte par reglages_configures() ci-dessous (il rend vrai dès qu'une
  * adresse est disponible, quelle qu'en soit la source) : c'est ce qui permet
  * à app_main.c de démarrer la boucle d'interrogation même sur un appareil où
- * personne n'a jamais pu saisir d'hôte (pas de port série, pas encore d'écran
- * de configuration). Il n'est en revanche JAMAIS réécrit en NVS : un réglage
+ * l'écran de première configuration (ECRAN_CONFIGURATION, sous-jalon 2b) n'a
+ * jamais eu l'occasion de servir — écran indisponible (pt_display_init() en
+ * échec), appareil de développement flashé la toute première fois sans
+ * jamais y toucher, ou tout simplement personne devant l'appareil. Texte
+ * corrigé (revue tâche 8, round 1, Q6) : la version précédente de ce
+ * commentaire disait "pas encore d'écran de configuration" -- l'écran existe
+ * depuis la tâche 8, ce secours reste utile pour les cas ci-dessus, pas pour
+ * son absence. Il n'est en revanche JAMAIS réécrit en NVS : un réglage
  * jamais saisi par l'utilisateur ne doit pas devenir un état persistant. */
 bool        reglages_hote(backend_hote_t *sortie);
 esp_err_t   reglages_definir_hote(const backend_hote_t *hote);
