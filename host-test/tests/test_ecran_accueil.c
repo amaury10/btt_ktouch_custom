@@ -59,8 +59,8 @@ void suite_ecran_accueil(void)
 
     /* --- temperatures aberrantes : "--", jamais un nombre faux (meme regle
      * que ui_format_temperature(), voir tuile.h). */
-    etat.buse_actuelle = 999.0f;
-    etat.plateau_actuel = -999.0f;
+    etat.extrudeurs[0].actuelle = 999.0f;
+    etat.plateau.actuelle = -999.0f;
     VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx), true));
     VERIFIER_TEXTE(lv_label_get_text(ctx->buse.valeur), "--");
     VERIFIER_TEXTE(lv_label_get_text(ctx->plateau.valeur), "--");
@@ -70,14 +70,18 @@ void suite_ecran_accueil(void)
      *
      * Une variable `etat_klipper_t` sur la PILE ne suffit pas a prouver quoi
      * que ce soit ici (revue tache 6, fix round 1, IMPORTANT 1) : `fichier`
-     * vit a l'octet 40 d'une structure de 116 octets, et `progression` juste
-     * apres a l'octet 104 -- une lecture non bornee de `fichier` deborde
-     * DANS `progression`, un octet du MEME objet, pas au-dela de lui. ASan
-     * n'instrumente pas les depassements intra-objet (seulement les bornes
-     * de l'ALLOCATION entiere), donc `strlen(e->fichier)` peut lire jusqu'a
-     * 76 octets de trop sans qu'ASan ne dise rien, tant qu'un octet nul
-     * trouve par hasard plus loin dans le meme objet arrete la lecture avant
-     * la fin de l'allocation. C'est exactement ce qui se produisait ici
+     * vit vers la fin d'une structure de plusieurs centaines d'octets (voir
+     * `sizeof(etat_klipper_t)` imprime par suite_contrat() dans
+     * test_contrat.c -- ce nombre bouge a chaque champ ajoute au fil du
+     * jalon 3a, delibirement pas recopie ici en dur), et `progression` juste
+     * apres (a un eventuel bourrage d'alignement pres) -- une lecture non
+     * bornee de `fichier` deborde DANS `progression`, un octet du MEME
+     * objet, pas au-dela de lui. ASan n'instrumente pas les depassements
+     * intra-objet (seulement les bornes de l'ALLOCATION entiere), donc
+     * `strlen(e->fichier)` peut lire bien au-dela de KLIPPER_FICHIER_MAX
+     * sans qu'ASan ne dise rien, tant qu'un octet nul trouve par hasard plus
+     * loin dans le meme objet arrete la lecture avant la fin de
+     * l'allocation. C'est exactement ce qui se produisait ici
      * avec `etat.progression = 1.0f` (deja ecrit plus haut dans cette
      * fonction) : en petit-boutiste, le premier octet de 1.0f est 0x00 --
      * strlen() s'arretait pile a la frontiere du champ (longueur 64) sans
@@ -88,10 +92,10 @@ void suite_ecran_accueil(void)
      * Pour forcer une VRAIE preuve, cet etat est alloue sur le TAS (pour que
      * ses limites correspondent aux redzones qu'ASan surveille) et rempli
      * d'un octet non nul partout AVANT d'ecrire `fichier` : aucun octet nul
-     * ne subsiste nulle part dans les 116 octets de l'objet, donc une
-     * lecture non bornee de `fichier` est GARANTIE de lire au moins 76
-     * octets (64 + les 12 restants jusqu'a la fin de l'objet) avant de
-     * pouvoir s'arreter -- largement au-dela de KLIPPER_FICHIER_MAX (64), ce
+     * ne subsiste nulle part dans les octets de l'objet, donc une lecture
+     * non bornee de `fichier` est GARANTIE de lire au moins KLIPPER_FICHIER_MAX
+     * (64) octets, plus les octets restants jusqu'a la fin de l'objet, avant
+     * de pouvoir s'arreter -- largement au-dela de KLIPPER_FICHIER_MAX, ce
      * que l'assertion plus bas verifie. Aucun autre champ n'est retouche
      * apres ce point, deliberement : toute valeur "ronde" (0.5f, 1800u, ...)
      * a de bonnes chances de reintroduire un octet nul quelque part apres
@@ -125,13 +129,15 @@ void suite_ecran_accueil(void)
      * la strlen() de la libc interceptee par ASan, et la cible CMake `lvgl`
      * est deliberement compilee SANS -fsanitize=address (voir
      * host-test/CMakeLists.txt). Un strlen() direct sur ce meme `e->fichier`
-     * juste apres le remplissage ci-dessus PRODUIT bien
-     * "AddressSanitizer: heap-buffer-overflow ... READ of size 77 ... 0
-     * bytes after 116-byte region" (verifie manuellement, voir le rapport) :
-     * la technique est saine, seule la route via LVGL echappe a ASan sur ce
-     * projet precis -- raison pour laquelle l'assertion de longueur
-     * ci-dessous, pas un arret ASan, est ce qui distingue reellement les
-     * deux implementations ici. */
+     * juste apres le remplissage ci-dessus PRODUISAIT bien un arret ASan
+     * heap-buffer-overflow sur la structure du 2b (verifie manuellement a
+     * l'epoque, voir le rapport de la revue tache 6) : la technique est
+     * saine, seule la route via LVGL echappe a ASan sur ce projet precis --
+     * raison pour laquelle l'assertion de longueur ci-dessous, pas un arret
+     * ASan, est ce qui distingue reellement les deux implementations ici.
+     * Non re-verifiee octet pres apres la migration v2 (tache 1, jalon 3a) :
+     * le principe (structure agrandie, toujours pas d'octet nul avant la
+     * fin) reste vrai independamment de sizeof(etat_klipper_t). */
     etat_klipper_t *e = malloc(sizeof(*e));
     VERIFIER(e != NULL);
     memset(e, 0x7F, sizeof(*e));

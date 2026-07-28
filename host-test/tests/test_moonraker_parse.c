@@ -30,10 +30,13 @@ void suite_moonraker_parse(void)
     /* --- cas nominal, impression en cours --- */
     memset(&e, 0xAA, sizeof(e));   /* rempli de bruit : l'analyseur doit tout écrire */
     VERIFIER(moonraker_parse_status(REPONSE_IMPRESSION, strlen(REPONSE_IMPRESSION), &e));
-    VERIFIER_FLOAT(e.buse_actuelle, 210.4f, 0.01f);
-    VERIFIER_FLOAT(e.buse_consigne, 210.0f, 0.01f);
-    VERIFIER_FLOAT(e.plateau_actuel, 60.1f, 0.01f);
-    VERIFIER_FLOAT(e.plateau_consigne, 60.0f, 0.01f);
+    VERIFIER_FLOAT(e.extrudeurs[0].actuelle, 210.4f, 0.01f);
+    VERIFIER_FLOAT(e.extrudeurs[0].consigne, 210.0f, 0.01f);
+    VERIFIER(e.extrudeurs[0].presente == true);
+    VERIFIER(e.nb_extrudeurs == 1);
+    VERIFIER_FLOAT(e.plateau.actuelle, 60.1f, 0.01f);
+    VERIFIER_FLOAT(e.plateau.consigne, 60.0f, 0.01f);
+    VERIFIER(e.plateau.presente == true);
     VERIFIER_TEXTE(e.fichier, "piece.gcode");
     VERIFIER_TEXTE(e.etat, "printing");
     VERIFIER_FLOAT(e.progression, 0.5f, 0.001f);
@@ -49,7 +52,7 @@ void suite_moonraker_parse(void)
     VERIFIER_TEXTE(e.fichier, "");
     VERIFIER(!e.impression_en_cours);
     VERIFIER(e.temps_restant_s == 0);
-    VERIFIER_FLOAT(e.buse_consigne, 0.0f, 0.01f);
+    VERIFIER_FLOAT(e.extrudeurs[0].consigne, 0.0f, 0.01f);
 
     /* --- progression trop faible : l'estimation doit etre neutralisee --- */
     static const char *DEBUT =
@@ -65,7 +68,10 @@ void suite_moonraker_parse(void)
     static const char *PARTIEL = "{\"result\":{\"status\":{\"webhooks\":{\"state\":\"ready\"}}}}";
     memset(&e, 0, sizeof(e));
     VERIFIER(moonraker_parse_status(PARTIEL, strlen(PARTIEL), &e));
-    VERIFIER_FLOAT(e.buse_actuelle, 0.0f, 0.01f);
+    VERIFIER_FLOAT(e.extrudeurs[0].actuelle, 0.0f, 0.01f);
+    VERIFIER(e.extrudeurs[0].presente == false);
+    VERIFIER(e.nb_extrudeurs == 0);
+    VERIFIER(e.plateau.presente == false);
     VERIFIER_TEXTE(e.fichier, "");
 
     /* --- pause --- */

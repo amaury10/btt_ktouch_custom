@@ -195,27 +195,79 @@ static esp_err_t gestion_state(httpd_req_t *req)
         if (etat_json != NULL) {
             cJSON_AddStringToObject(etat_json, "etat", etat.etat);
 
-            cJSON *buse = cJSON_AddObjectToObject(etat_json, "buse");
-            if (buse != NULL) {
-                /* Les températures sont des `float` (etat_klipper_t),
-                 * promues en `double` pour cJSON_AddNumberToObject().
-                 * cJSON les imprime avec "%1.15g"/"%1.17g" (cJSON_Print,
-                 * print_number()) : ce format dépend de la libc fournir une
-                 * implémentation complète de %g pour les doubles.
-                 * CONFIG_LIBC_NEWLIB_NANO_FORMAT DOIT rester désactivé
-                 * (c'est le cas par défaut de ce projet) — la newlib "nano"
-                 * n'implémente pas %g/%e sur les doubles et rendrait ces
-                 * nombres silencieusement faux si jamais quelqu'un
-                 * l'activait pour gagner de la place en flash. */
-                cJSON_AddNumberToObject(buse, "actuelle", (double)etat.buse_actuelle);
-                cJSON_AddNumberToObject(buse, "consigne", (double)etat.buse_consigne);
+            /* v2 (tache 1, jalon 3a) : `extrudeurs` est un tableau des SEULS
+             * chauffeurs presents -- un client ne doit jamais avoir a
+             * deviner qu'un index absent du tableau signifie "n'existe pas"
+             * plutot que "zero". `index` porte la position dans
+             * etat_klipper_t::extrudeurs, puisque le tableau JSON, lui,
+             * saute les absents. Les températures sont des `float`, promues
+             * en `double` pour cJSON_AddNumberToObject() ; cJSON les imprime
+             * avec "%1.15g"/"%1.17g" (cJSON_Print, print_number()), ce qui
+             * dépend de la libc pour une implémentation complète de %g sur
+             * les doubles -- CONFIG_LIBC_NEWLIB_NANO_FORMAT DOIT rester
+             * désactivé (défaut de ce projet), la newlib "nano" ne
+             * l'implémente pas et rendrait ces nombres silencieusement faux. */
+            cJSON *extrudeurs = cJSON_AddArrayToObject(etat_json, "extrudeurs");
+            if (extrudeurs != NULL) {
+                for (uint8_t i = 0; i < KLIPPER_EXTRUDEURS_MAX; i++) {
+                    if (!etat.extrudeurs[i].presente) {
+                        continue;
+                    }
+                    cJSON *item = cJSON_CreateObject();
+                    if (item == NULL) {
+                        continue;
+                    }
+                    cJSON_AddNumberToObject(item, "index", i);
+                    cJSON_AddNumberToObject(item, "actuelle", (double)etat.extrudeurs[i].actuelle);
+                    cJSON_AddNumberToObject(item, "consigne", (double)etat.extrudeurs[i].consigne);
+                    cJSON_AddItemToArray(extrudeurs, item);
+                }
             }
+            cJSON_AddNumberToObject(etat_json, "nb_extrudeurs", etat.nb_extrudeurs);
+            cJSON_AddNumberToObject(etat_json, "outil_actif", etat.outil_actif);
 
             cJSON *plateau = cJSON_AddObjectToObject(etat_json, "plateau");
             if (plateau != NULL) {
-                cJSON_AddNumberToObject(plateau, "actuel", (double)etat.plateau_actuel);
-                cJSON_AddNumberToObject(plateau, "consigne", (double)etat.plateau_consigne);
+                cJSON_AddBoolToObject(plateau, "presente", etat.plateau.presente);
+                cJSON_AddNumberToObject(plateau, "actuelle", (double)etat.plateau.actuelle);
+                cJSON_AddNumberToObject(plateau, "consigne", (double)etat.plateau.consigne);
             }
+
+            cJSON *ventilateurs = cJSON_AddArrayToObject(etat_json, "ventilateurs");
+            if (ventilateurs != NULL) {
+                for (uint8_t i = 0; i < KLIPPER_VENTILATEURS_MAX; i++) {
+                    if (!etat.ventilateurs[i].present) {
+                        continue;
+                    }
+                    cJSON *item = cJSON_CreateObject();
+                    if (item == NULL) {
+                        continue;
+                    }
+                    cJSON_AddNumberToObject(item, "index", i);
+                    cJSON_AddNumberToObject(item, "vitesse", (double)etat.ventilateurs[i].vitesse);
+                    cJSON_AddItemToArray(ventilateurs, item);
+                }
+            }
+
+            cJSON_AddItemToObject(etat_json, "position", cJSON_CreateFloatArray(etat.position, 3));
+            cJSON_AddNumberToObject(etat_json, "axes_references", etat.axes_references);
+            cJSON_AddBoolToObject(etat_json, "deplacement_absolu", etat.deplacement_absolu);
+
+            cJSON_AddNumberToObject(etat_json, "vitesse_pct", etat.vitesse_pct);
+            cJSON_AddNumberToObject(etat_json, "flux_pct", etat.flux_pct);
+            cJSON_AddNumberToObject(etat_json, "babystep_z_um", etat.babystep_z_um);
+
+            /* `macros` en tableau de chaines : le nom de macro Klipper est
+             * la seule information utile a un client, l'index dans le
+             * tampon fixe etat_klipper_t::macros n'a pas de sens hors du
+             * firmware. */
+            const char *noms_macros[KLIPPER_MACROS_MAX];
+            for (uint8_t i = 0; i < etat.nb_macros && i < KLIPPER_MACROS_MAX; i++) {
+                noms_macros[i] = etat.macros[i];
+            }
+            cJSON_AddItemToObject(etat_json, "macros",
+                                   cJSON_CreateStringArray(noms_macros, etat.nb_macros));
+            cJSON_AddBoolToObject(etat_json, "macros_tronquees", etat.macros_tronquees);
 
             cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
             cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);

@@ -329,13 +329,16 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
     char consigne[16];
     char temps[16];
 
-    ui_format_temperature(valeur, sizeof(valeur), e->buse_actuelle);
-    ui_format_temperature(consigne, sizeof(consigne), e->buse_consigne);
+    /* Palier 1 tete (voir spec jalon 3 §6) : l'accueil affiche l'extrudeur 0
+     * quel que soit nb_extrudeurs -- les grilles multi-tetes arrivent avec
+     * les taches qui les consomment reellement, pas ici. */
+    ui_format_temperature(valeur, sizeof(valeur), e->extrudeurs[0].actuelle);
+    ui_format_temperature(consigne, sizeof(consigne), e->extrudeurs[0].consigne);
     tuile_definir_valeur(&ctx->buse, valeur);
     tuile_definir_consigne(&ctx->buse, consigne);
 
-    ui_format_temperature(valeur, sizeof(valeur), e->plateau_actuel);
-    ui_format_temperature(consigne, sizeof(consigne), e->plateau_consigne);
+    ui_format_temperature(valeur, sizeof(valeur), e->plateau.actuelle);
+    ui_format_temperature(consigne, sizeof(consigne), e->plateau.consigne);
     tuile_definir_valeur(&ctx->plateau, valeur);
     tuile_definir_consigne(&ctx->plateau, consigne);
 

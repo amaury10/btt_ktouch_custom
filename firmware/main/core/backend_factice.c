@@ -74,6 +74,17 @@ static esp_err_t backend_factice_rafraichir(void *etat)
     etat_klipper_t nouveau;
     memset(&nouveau, 0, sizeof(nouveau));
 
+    /* Ce backend factice modelise une machine mono-extrudeur avec plateau
+     * chauffant, quel que soit le scenario (y compris au repos, ou rien ne
+     * chauffe mais le materiel existe toujours). Migration v2 (tache 1,
+     * jalon 3a) : valait implicitement avant que le seul extrudeur/plateau
+     * de la structure ne PUISSE etre que celui-la ; desormais explicite
+     * puisque etat_klipper_t peut representer 0 a 8 extrudeurs. */
+    nouveau.nb_extrudeurs = 1;
+    nouveau.extrudeurs[0].presente = true;
+    nouveau.plateau.presente = true;
+    nouveau.outil_actif = 0;
+
     switch (g_scenario) {
     case 0:
         /* Repos : rien n'imprime, rien ne chauffe. */
@@ -95,10 +106,10 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         float progression = g_progression_scenario1;
 
         snprintf(nouveau.etat, sizeof(nouveau.etat), "printing");
-        nouveau.buse_actuelle = 210.0f;
-        nouveau.buse_consigne = 210.0f;
-        nouveau.plateau_actuel = 60.0f;
-        nouveau.plateau_consigne = 60.0f;
+        nouveau.extrudeurs[0].actuelle = 210.0f;
+        nouveau.extrudeurs[0].consigne = 210.0f;
+        nouveau.plateau.actuelle = 60.0f;
+        nouveau.plateau.consigne = 60.0f;
         snprintf(nouveau.fichier, sizeof(nouveau.fichier), "piece_test.gcode");
         nouveau.progression = progression;
         nouveau.temps_restant_s =
@@ -111,10 +122,10 @@ static esp_err_t backend_factice_rafraichir(void *etat)
     case 2:
         /* Pause : l'impression existe toujours mais n'avance plus. */
         snprintf(nouveau.etat, sizeof(nouveau.etat), "paused");
-        nouveau.buse_actuelle = 210.0f;
-        nouveau.buse_consigne = 210.0f;
-        nouveau.plateau_actuel = 60.0f;
-        nouveau.plateau_consigne = 60.0f;
+        nouveau.extrudeurs[0].actuelle = 210.0f;
+        nouveau.extrudeurs[0].consigne = 210.0f;
+        nouveau.plateau.actuelle = 60.0f;
+        nouveau.plateau.consigne = 60.0f;
         snprintf(nouveau.fichier, sizeof(nouveau.fichier), "piece_test.gcode");
         nouveau.progression = 0.5f;
         nouveau.temps_restant_s = FACTICE_DUREE_IMPRESSION_S / 2u;
@@ -135,10 +146,10 @@ static esp_err_t backend_factice_rafraichir(void *etat)
          * politique que le grisage sur donnees_perimees, voir ecran.h). */
         snprintf(nouveau.etat, sizeof(nouveau.etat), "printing");
         snprintf(nouveau.fichier, sizeof(nouveau.fichier), "piece_test.gcode");
-        nouveau.buse_actuelle = 999.0f;
-        nouveau.buse_consigne = 210.0f;
-        nouveau.plateau_actuel = -999.0f;
-        nouveau.plateau_consigne = 60.0f;
+        nouveau.extrudeurs[0].actuelle = 999.0f;
+        nouveau.extrudeurs[0].consigne = 210.0f;
+        nouveau.plateau.actuelle = -999.0f;
+        nouveau.plateau.consigne = 60.0f;
         nouveau.progression = 0.42f;
         nouveau.temps_restant_s = 1800u;
         nouveau.impression_en_cours = true;
@@ -156,10 +167,10 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         snprintf(nouveau.etat, sizeof(nouveau.etat), "printing");
         memset(nouveau.fichier, 'x', KLIPPER_FICHIER_MAX - 1);
         nouveau.fichier[KLIPPER_FICHIER_MAX - 1] = '\0';
-        nouveau.buse_actuelle = 350.0f;
-        nouveau.buse_consigne = 350.0f;
-        nouveau.plateau_actuel = 150.0f;
-        nouveau.plateau_consigne = 150.0f;
+        nouveau.extrudeurs[0].actuelle = 350.0f;
+        nouveau.extrudeurs[0].consigne = 350.0f;
+        nouveau.plateau.actuelle = 150.0f;
+        nouveau.plateau.consigne = 150.0f;
         nouveau.progression = 0.99f;
         nouveau.temps_restant_s = KLIPPER_TEMPS_RESTANT_MAX_S;
         nouveau.impression_en_cours = true;

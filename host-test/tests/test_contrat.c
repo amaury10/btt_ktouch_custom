@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "backend.h"
@@ -45,7 +46,7 @@ void suite_contrat(void)
     memset(&b, 0, sizeof(b));
     VERIFIER(memcmp(&a, &b, sizeof(a)) == 0);
 
-    a.buse_actuelle = 210.0f;
+    a.extrudeurs[0].actuelle = 210.0f;
     VERIFIER(memcmp(&a, &b, sizeof(a)) != 0);
 
     /* Deux structures remplies identiquement champ par champ doivent être
@@ -80,4 +81,14 @@ void suite_contrat(void)
     /* Vérifier les tailles pour détecter les changements de structure. */
     VERIFIER(sizeof(backend_hote_t) > 0);
     VERIFIER(sizeof(backend_desc_t) > 0);
+
+    /* v2 : toujours un POD memcmp-able. Pas de pointeur (verification par
+     * inspection — un _Static_assert ne sait pas le dire en C11), taille bornee
+     * et STABLE : si sizeof bouge, la personne qui l'a fait doit venir ici
+     * l'assumer en connaissance de cause (double tampon + copie sous mutex
+     * a chaque cycle). */
+    printf("  sizeof(etat_klipper_t) = %zu\n", sizeof(etat_klipper_t));
 }
+
+_Static_assert(sizeof(etat_klipper_t) < 3072, "etat v2 : budget ~2,5 Ko depasse");
+_Static_assert(KLIPPER_EXTRUDEURS_MAX == 8, "dimensionnement acte au brainstorming jalon 3");

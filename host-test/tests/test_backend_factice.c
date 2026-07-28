@@ -44,7 +44,7 @@ void suite_backend_factice(void)
      * Plausible (350C, dans [-5, 500]) : distinct du scenario 4 ci-dessous. */
     backend_factice_scenario(3);
     VERIFIER(d->rafraichir(&etat) == ESP_OK);
-    VERIFIER(etat.buse_actuelle > 300.0f);
+    VERIFIER(etat.extrudeurs[0].actuelle > 300.0f);
     VERIFIER(strlen(etat.fichier) == KLIPPER_FICHIER_MAX - 1);
 
     /* Scenario aberrant : hors plage plausible, sert a verifier qu'un
@@ -52,8 +52,13 @@ void suite_backend_factice(void)
      * ui_format_temperature() dans ui/widgets/tuile.h, plage [-5, 500]). */
     backend_factice_scenario(4);
     VERIFIER(d->rafraichir(&etat) == ESP_OK);
-    VERIFIER(etat.buse_actuelle > 500.0f);
-    VERIFIER(etat.plateau_actuel < -5.0f);
+    VERIFIER(etat.extrudeurs[0].actuelle > 500.0f);
+    VERIFIER(etat.plateau.actuelle < -5.0f);
+
+    /* Un scenario mono-extrudeur remplit nb_extrudeurs et presente. */
+    VERIFIER(etat.nb_extrudeurs == 1);
+    VERIFIER(etat.extrudeurs[0].presente == true);
+    VERIFIER(etat.extrudeurs[1].presente == false);
 
     /* Les actions connues sont acceptees, les inconnues refusees explicitement. */
     VERIFIER(d->commande(&etat, BACKEND_ACTION_PAUSE, NULL) == ESP_OK);

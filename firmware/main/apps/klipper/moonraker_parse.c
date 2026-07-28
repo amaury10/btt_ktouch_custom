@@ -49,13 +49,23 @@ bool moonraker_parse_status(const char *json, size_t longueur, etat_klipper_t *s
     etat_klipper_t e;
     memset(&e, 0, sizeof(e));
 
+    /* v2 (tache 1, jalon 3a) : ce GET ne connait qu'un seul extrudeur et un
+     * seul plateau -- extrudeurs[1..7], position, vitesse/flux et macros
+     * restent a zero ici, c'est le sens documente de ces champs ("pas encore
+     * recu"). La souscription WebSocket (tache 5) les remplira. `presente`
+     * suit l'existence de l'objet JSON, pas une valeur a l'interieur : un
+     * extrudeur present mais a 0°C n'est pas la meme chose qu'un extrudeur
+     * absent. */
     const cJSON *extrudeur = cJSON_GetObjectItemCaseSensitive(statut, "extruder");
-    e.buse_actuelle = nombre_ou(extrudeur, "temperature", 0.0f);
-    e.buse_consigne = nombre_ou(extrudeur, "target", 0.0f);
+    e.extrudeurs[0].actuelle = nombre_ou(extrudeur, "temperature", 0.0f);
+    e.extrudeurs[0].consigne = nombre_ou(extrudeur, "target", 0.0f);
+    e.extrudeurs[0].presente = cJSON_IsObject(extrudeur);
+    e.nb_extrudeurs = e.extrudeurs[0].presente ? 1 : 0;
 
     const cJSON *plateau = cJSON_GetObjectItemCaseSensitive(statut, "heater_bed");
-    e.plateau_actuel = nombre_ou(plateau, "temperature", 0.0f);
-    e.plateau_consigne = nombre_ou(plateau, "target", 0.0f);
+    e.plateau.actuelle = nombre_ou(plateau, "temperature", 0.0f);
+    e.plateau.consigne = nombre_ou(plateau, "target", 0.0f);
+    e.plateau.presente = cJSON_IsObject(plateau);
 
     const cJSON *stats = cJSON_GetObjectItemCaseSensitive(statut, "print_stats");
     texte_ou_vide(stats, "filename", e.fichier, sizeof(e.fichier));
