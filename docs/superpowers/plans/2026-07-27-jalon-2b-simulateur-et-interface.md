@@ -22,7 +22,7 @@ Ces contraintes s'appliquent à **toutes** les tâches, sans rappel.
 - **Polices identiques des deux côtés.** Montserrat 14, 20, 28 et 48 activées à la fois dans `simulateur/lv_conf.h` et dans `firmware/sdkconfig.defaults`. Toute police utilisée par un écran doit être activée des deux côtés, sans quoi le simulateur ment.
 - **La partition `nvs` est partagée avec le firmware d'origine.** `nvs_flash_erase()` ne doit apparaître nulle part. Aucune configuration WiFi n'est jamais persistée.
 - **Aucune défaillance locale n'est fatale.** Pas d'`ESP_ERROR_CHECK` sur l'affichage, le tactile, le réseau ou le backend : on journalise et on continue, pour qu'une panne reste diagnosticable à distance par `/logs` et `/revert`.
-- **Le sauvetage du jalon 1 reste armé et intact** : minuteur, compteur de démarrages en mémoire RTC, `/revert`, et l'ordre de démarrage de `app_main()` (compteur → sauvetage → NVS → netlog → WiFi → serveur web → affichage). L'interface se construit **après** le serveur web, jamais avant.
+- **Le sauvetage du jalon 1 reste armé et intact** : minuteur, compteur de démarrages en mémoire RTC, `/revert`, et l'ordre de démarrage de `app_main()` (compteur → netlog → sauvetage → NVS → WiFi → serveur web → affichage — netlog précède délibérément l'armement du sauvetage, voir le commentaire en tête de `app_main()`). L'interface se construit **après** le serveur web, jamais avant.
 - **Aucun identifiant ni chemin local dans un fichier suivi.** `firmware/sdkconfig` est exclu du dépôt et contient les identifiants WiFi. Écrire `<chemin-vers-esp-idf>` et `<racine-du-depot>` dans la documentation.
 - ESP-IDF s'active en sourçant `export.ps1` **dans la même invocation** que toute commande `idf.py`.
 
@@ -758,6 +758,11 @@ git commit -m "feat(klipper): ecran d'accueil (temperatures, progression, fichie
   ```
   `clavier_mode_t` vaut `CLAVIER_TEXTE` ou `CLAVIER_NUMERIQUE`.
 
+  *(`confirmation_ouvrir_ex()` ajoutée à la revue de la tâche 9, fix round 1 :
+  même signature que `confirmation_ouvrir()` plus un `libelle_decliner`
+  personnalisé, pour éviter deux boutons qui commencent tous les deux par
+  "Cancel" dans le même dialogue — voir `confirmation.h`.)*
+
 **C'est le plus gros morceau partagé** (spécification §6) : adresse d'hôte, commande gcode, recherche de fichier, mot de passe WiFi. LVGL fournit `lv_keyboard` ; l'habiller en dialogue modal qui **rend une valeur** est le vrai travail, et il ne doit pas être refait deux fois.
 
 - [ ] **Step 1: Tests**
@@ -896,7 +901,7 @@ Expected : trois lignes `#define ... 1`.
 
 - [ ] **Step 2: Brancher l'interface dans `app_main`**
 
-L'ordre de démarrage ne bouge pas : compteur de démarrages → sauvetage armé → NVS → netlog → WiFi → **serveur web** → affichage → interface. La construction de l'habillage et l'empilement du premier écran se font en dernier, et **aucune** de ces étapes n'est enveloppée dans un `ESP_ERROR_CHECK`. Si `pt_display_init()` échoue, on journalise et le firmware continue à servir `/logs` et `/revert` — c'est la seule chose qui rend une panne récupérable à distance sur un appareil sans port série.
+L'ordre de démarrage ne bouge pas : compteur de démarrages → netlog → sauvetage armé → NVS → WiFi → **serveur web** → affichage → interface. La construction de l'habillage et l'empilement du premier écran se font en dernier, et **aucune** de ces étapes n'est enveloppée dans un `ESP_ERROR_CHECK`. Si `pt_display_init()` échoue, on journalise et le firmware continue à servir `/logs` et `/revert` — c'est la seule chose qui rend une panne récupérable à distance sur un appareil sans port série.
 
 Tout appel LVGL depuis `app_main` ou depuis la tâche d'interrogation passe par le verrou du BSP. Vérifier comment `PandaTouch_IDF` expose ce verrou et l'utiliser ; s'il n'en expose pas, construire l'interface avant de démarrer la boucle et n'appeler `habillage_pomper()` que depuis un `lv_timer`, qui s'exécute par construction sur le fil LVGL.
 

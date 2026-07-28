@@ -123,10 +123,14 @@ typedef struct {
     const char *titre;               /* affiché dans la barre d'état */
 
     void (*construire)(lv_obj_t *parent, void *contexte);
-    void (*mettre_a_jour)(const void *etat, void *contexte);
+    void (*mettre_a_jour)(const void *etat, bool donnees_perimees, void *contexte);
     void (*detruire)(void *contexte);
 } ecran_desc_t;
 ```
+
+*(`donnees_perimees` ajouté en cours de jalon — revue de la tâche 4 : sans lui,
+un écran n'a aucun chemin structurel pour recevoir la péremption et griser, et
+rien n'empêche d'afficher des zéros comme des mesures.)*
 
 C'est cette séparation qui rend une contribution locale : ajouter un panneau de
 macros, c'est un fichier, un descripteur, une ligne d'enregistrement. Et c'est
