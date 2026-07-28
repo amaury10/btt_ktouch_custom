@@ -76,12 +76,16 @@ _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_
  * 0) ci-dessous pose un style LOCAL a LV_STATE_DEFAULT. En LVGL 9, un style
  * local l'emporte sur tout style de theme quel que soit l'etat de l'objet --
  * sans un style local DEDIE a LV_STATE_DISABLED, poser LV_STATE_DISABLED sur
- * `bouton` (voir mettre_a_jour() plus bas) ne change AUCUN pixel : le thème
- * n'a jamais voix au chapitre ici. Constate par la revue au pixel pres (0
- * pixel de difference sur la rangee de boutons entre une capture "en ligne"
- * et une capture "perimee", E-STOP inclus) -- un lien mort affichait des
- * boutons pleinement armes qui ne repondaient plus au toucher, exactement le
- * contraire de ce que promettait ce fichier. Le correctif enregistre un
+ * `bouton` (voir mettre_a_jour() plus bas) ne change pas la couleur de fond
+ * resolue. Precision de la re-revue finale : le theme conserve UNE voie vers
+ * un bouton desactive -- son style `disabled` est un FILTRE de couleur gris
+ * a 50% (lv_theme_default.c), applique au dessin via les accesseurs
+ * _filtered, et il est de surcroit ANIME (~80 ms + 70 ms de delai) ; les
+ * captures "0 pixel de difference" de la revue etaient donc aussi un
+ * artefact d'horloge LVGL jamais avancee. Il n'empeche : un lien mort
+ * affichait des boutons pleinement armes (ou a peine delaves, une fois le
+ * temps ecoule) qui ne repondaient plus au toucher, exactement le contraire
+ * de ce que promettait ce fichier. Le correctif enregistre un
  * DEUXIEME style local, a LV_STATE_DISABLED cette fois (meme tier "local",
  * mais plus de bits d'etat en commun avec l'etat courant de l'objet quand il
  * est desactive : il gagne la resolution sans avoir a retirer le style
