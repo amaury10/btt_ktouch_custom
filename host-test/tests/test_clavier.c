@@ -1,0 +1,407 @@
+/* Tests du clavier modal (clavier.h) et du dialogue de confirmation
+ * (confirmation.h) — un seul fichier pour les deux, comme test_widgets.c
+ * regroupe déjà tuile et progression (tâche 5) : ce sont les deux moitiés
+ * du même morceau partagé (spécification §6, voir le brief de la tâche 7).
+ *
+ * Simulation d'événements : ni l'un ni l'autre widget n'expose ses lv_obj_t*
+ * internes (contrat opaque, voir clavier.h/confirmation.h) — les tests les
+ * retrouvent par parcours de l'arbre LVGL depuis lv_layer_top(), exactement
+ * comme test_navigation.c retrouve le conteneur d'un écran par
+ * lv_obj_get_child() plutôt que par un accesseur ajouté pour l'occasion. Pas
+ * de pointeur de périphérique tactile simulé : lv_obj_send_event() envoie
+ * directement les événements LV_EVENT_READY/CANCEL/CLICKED que lv_keyboard
+ * et lv_msgbox enverraient eux-mêmes sur un vrai appui (voir le brief), ce
+ * qui suffit puisque clavier.c/confirmation.c ne réagissent qu'à ces
+ * événements, jamais à un LV_EVENT_PRESSED brut. */
+#include <string.h>
+
+#include "lvgl.h"
+
+#include "clavier.h"
+#include "confirmation.h"
+#include "ecran.h"
+#include "navigation.h"
+#include "petit_test.h"
+
+/* Retrouve le premier descendant direct de `parent` dont la classe LVGL est
+ * `classe` (comparaison par pointeur de classe, voir lv_obj_check_type()) ;
+ * NULL si aucun. Ne descend pas récursivement : la profondeur d'un seul
+ * niveau suffit partout où ce fichier l'utilise (voir les commentaires de
+ * construction dans clavier.c/confirmation.c pour la structure exacte). */
+static lv_obj_t *enfant_de_classe(lv_obj_t *parent, const lv_obj_class_t *classe)
+{
+    if (parent == NULL) {
+        return NULL;
+    }
+    uint32_t n = lv_obj_get_child_count(parent);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *enfant = lv_obj_get_child(parent, i);
+        if (lv_obj_check_type(enfant, classe)) {
+            return enfant;
+        }
+    }
+    return NULL;
+}
+
+/* Dernier enfant ajouté à lv_layer_top() : c'est toujours le conteneur
+ * plein écran de clavier.c ou le fond de modale de confirmation.c, tant que
+ * rien d'autre dans ce binaire de tests n'ajoute d'enfant à la couche
+ * supérieure (vrai pour tout le reste du harnais : les autres suites
+ * travaillent sous lv_screen_active(), jamais sous lv_layer_top()). */
+static lv_obj_t *dernier_enfant_calque_superieur(void)
+{
+    lv_obj_t *calque = lv_layer_top();
+    uint32_t n = lv_obj_get_child_count(calque);
+    if (n == 0) {
+        return NULL;
+    }
+    return lv_obj_get_child(calque, n - 1);
+}
+
+/* ------------------------------------------------------------------------
+ * Section clavier
+ * ------------------------------------------------------------------------ */
+
+typedef struct {
+    int appels;
+    bool dernier_est_null;
+    char dernier_valeur[CLAVIER_VALEUR_MAX];
+    /* Pointeur BRUT reçu par le rappel (pas une copie) : conservé pour être
+     * relu après le pompage qui exécute la destruction asynchrone (voir la
+     * propriété 2 ci-dessous) — c'est cette relecture tardive qui prouve que
+     * le pointeur ne visait pas la textarea déjà détruite. */
+    const char *dernier_pointeur_brut;
+} trace_clavier_t;
+
+static trace_clavier_t g_trace_clavier;
+
+static void rappel_clavier(const char *valeur, void *contexte)
+{
+    (void)contexte;
+    g_trace_clavier.appels++;
+    g_trace_clavier.dernier_pointeur_brut = valeur;
+    if (valeur == NULL) {
+        g_trace_clavier.dernier_est_null = true;
+        g_trace_clavier.dernier_valeur[0] = '\0';
+    } else {
+        g_trace_clavier.dernier_est_null = false;
+        strncpy(g_trace_clavier.dernier_valeur, valeur, sizeof(g_trace_clavier.dernier_valeur) - 1);
+        g_trace_clavier.dernier_valeur[sizeof(g_trace_clavier.dernier_valeur) - 1] = '\0';
+    }
+}
+
+/* Second rappel, utilisé uniquement pour prouver qu'un second
+ * clavier_ouvrir() pendant qu'un premier est ouvert n'est jamais invoqué. */
+static int g_appels_rappel_refuse;
+static void rappel_refuse(const char *valeur, void *contexte)
+{
+    (void)valeur;
+    (void)contexte;
+    g_appels_rappel_refuse++;
+}
+
+/* Écran jouet empilé DEPUIS le rappel du clavier (propriété 3) : construire
+ * incrémente un compteur et pose un label, prouvant que la construction d'un
+ * nouvel écran juste après la fermeture programmée du clavier fonctionne
+ * normalement plutôt que de lire une mémoire déjà libérée. */
+static int g_ecran_apres_clavier_construits;
+static lv_obj_t *g_ecran_apres_clavier_label;
+
+static void ecran_apres_clavier_construire(lv_obj_t *parent, void *ctx)
+{
+    (void)ctx;
+    g_ecran_apres_clavier_construits++;
+    g_ecran_apres_clavier_label = lv_label_create(parent);
+    lv_label_set_text(g_ecran_apres_clavier_label, "apres-clavier");
+}
+
+static const ecran_desc_t ECRAN_APRES_CLAVIER = {
+    .id = "apres-clavier", .titre = "Apres clavier", .taille_contexte = 0,
+    .construire = ecran_apres_clavier_construire, .mettre_a_jour = NULL, .detruire = NULL,
+};
+
+static void rappel_empile_ecran(const char *valeur, void *contexte)
+{
+    (void)valeur;
+    (void)contexte;
+    g_trace_clavier.appels++;
+    /* L'essentiel de la propriété 3 : construire un nouvel écran (donc
+     * créer de nouveaux objets LVGL) DEPUIS le rappel, pendant que les
+     * objets de l'ancien clavier sont encore vivants (leur destruction n'est
+     * que programmée, voir clavier.c) mais plus jamais touchés par ce
+     * fichier. Sous ASan (actif sur la cible `tests`, voir
+     * host-test/CMakeLists.txt), une lecture après libération DANS notre
+     * propre code — navigation.c, compilé avec les désinfecteurs — serait
+     * détectée ici si clavier.c détruisait quoi que ce soit de façon
+     * synchrone avant cet appel. */
+    VERIFIER(navigation_empiler(&ECRAN_APRES_CLAVIER) == ESP_OK);
+}
+
+static void section_clavier(void)
+{
+    printf("suite : clavier\n");
+
+    /* ------------------------------------------------------------------
+     * Propriete 2 (annuler rend NULL) + garde "un seul clavier a la fois".
+     * ------------------------------------------------------------------ */
+    memset(&g_trace_clavier, 0, sizeof(g_trace_clavier));
+    g_appels_rappel_refuse = 0;
+
+    /* rien sur le calque superieur avant toute ouverture */
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    clavier_ouvrir("Host", "192.168.1.42", CLAVIER_TEXTE, rappel_clavier, NULL);
+    lv_obj_t *racine = dernier_enfant_calque_superieur();
+    /* le clavier a bien pose un conteneur plein ecran sur lv_layer_top() */
+    VERIFIER(racine != NULL);
+
+    /* Second appel pendant que le premier est ouvert : refuse, aucun second
+     * conteneur ajoute, rappel_refuse jamais invoque (meme apres avoir
+     * ferme le premier clavier plus bas). */
+    clavier_ouvrir("Autre", "", CLAVIER_TEXTE, rappel_refuse, NULL);
+    /* toujours un seul conteneur sur le calque superieur */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
+
+    lv_obj_t *kb = enfant_de_classe(racine, &lv_keyboard_class);
+    VERIFIER(kb != NULL);
+    /* mode texte par defaut demande */ VERIFIER(lv_keyboard_get_mode(kb) == LV_KEYBOARD_MODE_TEXT_LOWER);
+
+    lv_obj_send_event(kb, LV_EVENT_CANCEL, NULL);
+    lv_timer_handler(); /* execute la destruction asynchrone programmee par clavier.c */
+
+    /* Propriete 1 : le rappel a ete appele, une fois exactement. */
+    VERIFIER(g_trace_clavier.appels == 1);
+    /* Propriete 2 : annuler rend NULL. */
+    VERIFIER(g_trace_clavier.dernier_est_null == true);
+    /* le clavier refuse pendant l'ouverture du premier n'a jamais ete invoque */
+    VERIFIER(g_appels_rappel_refuse == 0);
+    /* le conteneur a bien disparu du calque superieur apres le pompage */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 0);
+
+    /* Un second CANCEL envoye au meme objet (deja detruit de facon
+     * asynchrone, mais l'evenement passerait par la meme fonction si elle ne
+     * se gardait pas elle-meme) ne doit rien declencher de plus : verifie
+     * AVANT le CANCEL ci-dessus qu'un rappel deja ferme reste a 1 aurait ete
+     * redondant ici puisque kb n'existe plus reellement une fois le pompage
+     * fait ; la garde de reentrance de clavier.c est plutot exercee plus bas
+     * (double evenement sur le MEME etat ouvert, sans pompage entre les
+     * deux) pour rester dans les limites d'une memoire encore valide. */
+
+    /* ------------------------------------------------------------------
+     * Propriete 1, volet "jamais deux" : deux evenements (READY puis
+     * CANCEL) livres au meme objet AVANT tout pompage — le second doit
+     * heurter la garde de reentrance de clavier.c (g_clavier.ouvert deja
+     * remis a false par le premier) plutot que d'invoquer le rappel une
+     * deuxieme fois. C'est exactement le "meme si LVGL delivre les deux"
+     * du brief.
+     * ------------------------------------------------------------------ */
+    memset(&g_trace_clavier, 0, sizeof(g_trace_clavier));
+    clavier_ouvrir("Host", "abc", CLAVIER_TEXTE, rappel_clavier, NULL);
+    racine = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine, &lv_keyboard_class);
+    VERIFIER(kb != NULL);
+
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    /* deuxieme evenement, delivre au meme objet pas encore reellement detruit */
+    lv_obj_send_event(kb, LV_EVENT_CANCEL, NULL);
+    lv_timer_handler();
+
+    /* un seul appel malgre les deux evenements livres */
+    VERIFIER(g_trace_clavier.appels == 1);
+    /* c'est bien le premier (READY -> valeur), pas le second (CANCEL -> NULL) */
+    VERIFIER(g_trace_clavier.dernier_est_null == false);
+    VERIFIER_TEXTE(g_trace_clavier.dernier_valeur, "abc");
+
+    /* ------------------------------------------------------------------
+     * Propriete 2, volet "valider rend la valeur saisie" + survie au-dela
+     * de la teardown de la textarea : la valeur est modifiee via l'API
+     * lv_textarea_* (equivalent programmatique de la saisie tactile, voir
+     * l'en-tete de ce fichier) puis validee.
+     * ------------------------------------------------------------------ */
+    memset(&g_trace_clavier, 0, sizeof(g_trace_clavier));
+    clavier_ouvrir("Gcode", "", CLAVIER_NUMERIQUE, rappel_clavier, NULL);
+    racine = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine, &lv_keyboard_class);
+    lv_obj_t *ta = enfant_de_classe(racine, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    /* mode numerique bien applique */ VERIFIER(lv_keyboard_get_mode(kb) == LV_KEYBOARD_MODE_NUMBER);
+
+    lv_textarea_set_text(ta, "M117 42");
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    /* Le rappel a deja ete invoque de facon synchrone par lv_obj_send_event
+     * ci-dessus (voir clavier.c : le pompage ne fait qu'executer la
+     * DESTRUCTION programmee, pas l'appel du rappel lui-meme). */
+    VERIFIER(g_trace_clavier.appels == 1);
+    VERIFIER(g_trace_clavier.dernier_est_null == false);
+    VERIFIER_TEXTE(g_trace_clavier.dernier_valeur, "M117 42");
+
+    lv_timer_handler(); /* detruit reellement la textarea maintenant */
+
+    /* Le pointeur BRUT recu par le rappel, relu APRES que lv_timer_handler()
+     * a execute lv_obj_delete_async() sur le conteneur (donc sur `ta`),
+     * pointe toujours vers une chaine valide et inchangee : clavier.c l'a
+     * pris dans son tampon statique g_clavier.valeur (voir son
+     * commentaire), jamais dans lv_textarea_get_text(ta). Ce que cette
+     * assertion PEUT detecter : une corruption du contenu ou un crash net
+     * si l'implementation rendait par erreur un pointeur dans la textarea
+     * (memoire LVGL, allouee par LV_STDLIB_BUILTIN — voir
+     * host-test/CMakeLists.txt) ; ce qu'elle NE PEUT PAS detecter : un
+     * rapport ASan formel sur cette lecture, puisque LVGL est compilee sans
+     * desinfecteurs et que sa memoire leur est invisible (meme avertissement
+     * que le brief de cette tache). La garantie vient de l'architecture
+     * (tampon statique jamais partage avec un objet LVGL), pas de l'outil. */
+    VERIFIER_TEXTE(g_trace_clavier.dernier_pointeur_brut, "M117 42");
+
+    /* ------------------------------------------------------------------
+     * Propriete 3 : ouvrir un ecran depuis le rappel ne lit pas de memoire
+     * liberee. navigation_init() d'abord, pile fraiche.
+     * ------------------------------------------------------------------ */
+    navigation_init(lv_screen_active());
+    g_ecran_apres_clavier_construits = 0;
+    g_ecran_apres_clavier_label = NULL;
+    memset(&g_trace_clavier, 0, sizeof(g_trace_clavier));
+
+    clavier_ouvrir("Confirmer", "valeur", CLAVIER_TEXTE, rappel_empile_ecran, NULL);
+    racine = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine, &lv_keyboard_class);
+    VERIFIER(kb != NULL);
+
+    /* Declenche evenement_clavier() : programme la destruction du clavier
+     * PUIS, dans rappel_empile_ecran() ci-dessus, empile un ecran tout neuf
+     * — donc cree de nouveaux objets LVGL — avant que le pompage n'ait
+     * seulement eu lieu une fois. Si clavier.c detruisait ses objets de
+     * facon synchrone au lieu d'asynchrone, ce serait ici, pendant la
+     * distribution meme de l'evenement READY par le clavier, que la
+     * destruction interviendrait — exactement le scenario que le brief
+     * decrit comme fragile. */
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+
+    /* le nouvel ecran est construit, avec son widget vivant et correct,
+     * AVANT meme tout pompage */
+    VERIFIER(g_ecran_apres_clavier_construits == 1);
+    VERIFIER(g_ecran_apres_clavier_label != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(g_ecran_apres_clavier_label), "apres-clavier");
+    VERIFIER(navigation_profondeur() == 1);
+    VERIFIER_TEXTE(navigation_id_courant(), "apres-clavier");
+
+    lv_timer_handler(); /* execute maintenant la destruction differee de l'ancien clavier */
+
+    /* le nouvel ecran (sous-arbre distinct de l'ancien clavier) est
+     * toujours vivant et inchange apres le pompage */
+    VERIFIER(g_ecran_apres_clavier_construits == 1);
+    VERIFIER_TEXTE(lv_label_get_text(g_ecran_apres_clavier_label), "apres-clavier");
+    VERIFIER(navigation_profondeur() == 1);
+    /* et le clavier a bien fini par disparaitre du calque superieur */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 0);
+
+    navigation_depiler(); /* rend le harnais propre pour la suite eventuelle */
+}
+
+/* ------------------------------------------------------------------------
+ * Section confirmation
+ * ------------------------------------------------------------------------ */
+
+typedef struct { int appels; bool dernier_confirme; } trace_confirmation_t;
+static trace_confirmation_t g_trace_confirmation;
+
+static void rappel_confirmation(bool confirme, void *contexte)
+{
+    (void)contexte;
+    g_trace_confirmation.appels++;
+    g_trace_confirmation.dernier_confirme = confirme;
+}
+
+static int g_appels_confirmation_refusee;
+static void rappel_confirmation_refusee(bool confirme, void *contexte)
+{
+    (void)confirme;
+    (void)contexte;
+    g_appels_confirmation_refusee++;
+}
+
+/* Retrouve le pied de la boite retournee par confirmation_ouvrir() : dernier
+ * enfant du calque superieur (le fond automatique de lv_msgbox_create(NULL),
+ * voir confirmation.c), dont le premier enfant est la boite elle-meme. */
+static lv_obj_t *dernier_msgbox(void)
+{
+    lv_obj_t *fond = dernier_enfant_calque_superieur();
+    if (fond == NULL) {
+        return NULL;
+    }
+    return lv_obj_get_child(fond, 0);
+}
+
+static void section_confirmation(void)
+{
+    printf("suite : confirmation\n");
+
+    /* ------------------------------------------------------------------
+     * Propriete 1 (une fois, jamais deux) + annuler rend confirme=false.
+     * ------------------------------------------------------------------ */
+    memset(&g_trace_confirmation, 0, sizeof(g_trace_confirmation));
+    g_appels_confirmation_refusee = 0;
+
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    confirmation_ouvrir("Annuler l'impression ?", "Cette action est irreversible.",
+                         "Cancel print", true, rappel_confirmation, NULL);
+    lv_obj_t *mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+
+    /* Second appel pendant que le premier dialogue est ouvert : refuse. */
+    confirmation_ouvrir("Autre", "msg", "Action", false, rappel_confirmation_refusee, NULL);
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
+
+    lv_obj_t *pied = lv_msgbox_get_footer(mbox);
+    VERIFIER(pied != NULL);
+    lv_obj_t *bouton_annuler = lv_obj_get_child(pied, 0);
+    lv_obj_t *bouton_action  = lv_obj_get_child(pied, 1);
+    VERIFIER(bouton_annuler != NULL);
+    VERIFIER(bouton_action != NULL);
+
+    /* destructif=true : bouton d'action rouge, PAS l'annulation */
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bouton_action, 0), lv_color_hex(0xE74C3C)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(bouton_annuler, 0), lv_color_hex(0xE74C3C)));
+    /* et n'est pas le bouton "par defaut" (etat FOCUS_KEY sur l'annulation, jamais sur l'action) */
+    VERIFIER(!lv_obj_has_state(bouton_action, LV_STATE_FOCUS_KEY));
+    VERIFIER(lv_obj_has_state(bouton_annuler, LV_STATE_FOCUS_KEY));
+
+    /* deux evenements livres au meme bouton avant tout pompage : un seul appel */
+    lv_obj_send_event(bouton_annuler, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(bouton_annuler, LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+
+    VERIFIER(g_trace_confirmation.appels == 1);
+    /* annuler rend confirme=false */ VERIFIER(g_trace_confirmation.dernier_confirme == false);
+    VERIFIER(g_appels_confirmation_refusee == 0);
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 0);
+
+    /* ------------------------------------------------------------------
+     * Le bouton d'action rend confirme=true ; non destructif => pas de
+     * rouge, pas de mise en avant forcee de l'annulation.
+     * ------------------------------------------------------------------ */
+    memset(&g_trace_confirmation, 0, sizeof(g_trace_confirmation));
+    confirmation_ouvrir("Wifi", "Se connecter a ce reseau ?", "Connect", false,
+                         rappel_confirmation, NULL);
+    mbox = dernier_msgbox();
+    pied = lv_msgbox_get_footer(mbox);
+    bouton_annuler = lv_obj_get_child(pied, 0);
+    bouton_action  = lv_obj_get_child(pied, 1);
+
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(bouton_action, 0), lv_color_hex(0xE74C3C)));
+    VERIFIER(!lv_obj_has_state(bouton_annuler, LV_STATE_FOCUS_KEY));
+
+    lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+
+    VERIFIER(g_trace_confirmation.appels == 1);
+    /* valider rend confirme=true */ VERIFIER(g_trace_confirmation.dernier_confirme == true);
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 0);
+}
+
+void suite_clavier(void)
+{
+    section_clavier();
+    section_confirmation();
+}

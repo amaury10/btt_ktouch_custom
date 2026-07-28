@@ -112,6 +112,7 @@ add_executable(tests
     tests/test_habillage.c
     tests/test_widgets.c
     tests/test_ecran_accueil.c
+    tests/test_clavier.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -123,6 +124,8 @@ add_executable(tests
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
+    ${WIDGETS_DIR}/clavier.c
+    ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c

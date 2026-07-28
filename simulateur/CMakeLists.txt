@@ -71,6 +71,8 @@ add_executable(ktouch-sim
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
+    ${WIDGETS_DIR}/clavier.c
+    ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
 )
 target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
