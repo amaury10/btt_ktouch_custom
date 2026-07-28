@@ -134,6 +134,20 @@ static void section_boucle_cycle(void)
  * Section 2 : ECRAN_JOUET -- affichage du compte, grisage.
  * ------------------------------------------------------------------------ */
 
+/* CRITICAL (revue finale jalon 2b) : meme decouverte, meme remede que
+ * pomper_transitions_style() dans test_commandes.c (voir son commentaire
+ * pour le detail complet) -- le theme LVGL par defaut anime bg_color/
+ * text_color sur un changement d'etat (LV_THEME_DEFAULT_TRANSITION_TIME=80,
+ * simulateur/lv_conf.h), et ce harnais ne fait jamais avancer lv_tick_get()
+ * ailleurs, donc l'animation reste figee a t=0 sans ce pompage explicite. */
+static void pomper_transitions_style(void)
+{
+    for (int i = 0; i < 5; i++) {
+        lv_tick_inc(100);
+        lv_timer_handler();
+    }
+}
+
 static void section_ecran(void)
 {
     printf("suite : jouet (ecran)\n");
@@ -156,6 +170,16 @@ static void section_ecran(void)
     VERIFIER(!lv_obj_has_state(ctx->bouton, LV_STATE_DISABLED));
     VERIFIER(ctx->donnees_perimees == false);
 
+    /* Reference active, capturee avant tout grisage -- meme technique que
+     * section_ecran_accueil_boutons() dans test_commandes.c (revue finale
+     * jalon 2b, CRITICAL) : lv_obj_has_state() seul ne prouve rien, c'est le
+     * drapeau que le code casse posait deja sans qu'aucun pixel ne bouge
+     * (0/32000 pixels de difference constates par la revue). La couleur
+     * RESOLUE doit reellement changer. */
+    lv_color_t fond_actif = lv_obj_get_style_bg_color(ctx->bouton, LV_PART_MAIN);
+    lv_obj_t *label = lv_obj_get_child(ctx->bouton, 0);
+    lv_color_t texte_actif = lv_obj_get_style_text_color(label, LV_PART_MAIN);
+
     /* Grisage systematique (spec 5.3), round-trip complet -- meme discipline
      * que test_ecran_accueil.c : donnees_perimees=false doit toujours rendre
      * l'ecran normal, y compris apres etre passe par l'etat grise. */
@@ -164,10 +188,23 @@ static void section_ecran(void)
     VERIFIER_TEXTE(lv_label_get_text(ctx->valeur), "Count: 43");
     VERIFIER(lv_obj_has_state(ctx->bouton, LV_STATE_DISABLED));
     VERIFIER(ctx->donnees_perimees == true);
+    /* pomper_transitions_style() termine la transition de theme avant de
+     * lire (voir son commentaire) : lv_obj_add_state() pose l'etat de facon
+     * synchrone, mais la couleur RESOLUE reste celle de depart tant que
+     * l'animation n'a pas tourne. */
+    pomper_transitions_style();
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton, LV_PART_MAIN), fond_actif));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(label, LV_PART_MAIN), texte_actif));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label, LV_PART_MAIN), lv_color_hex(0x6B7280)));
 
     ECRAN_JOUET.mettre_a_jour(&etat, false, ctx);
     VERIFIER(!lv_obj_has_state(ctx->bouton, LV_STATE_DISABLED));
     VERIFIER(ctx->donnees_perimees == false);
+    /* Retour EXACT a la reference active -- un grisage a sens unique serait
+     * tout aussi trompeur (lecon de la revue tache 4). */
+    pomper_transitions_style();
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton, LV_PART_MAIN), fond_actif));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label, LV_PART_MAIN), texte_actif));
 
     lv_obj_delete(parent);
     free(brut);

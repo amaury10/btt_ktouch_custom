@@ -48,6 +48,14 @@
 #define COULEUR_BOUTON_URGENCE   0xE74C3C /* meme rouge que la pastille "hors ligne", habillage.c */
 #define COULEUR_TEXTE_BOUTON     0xFFFFFF
 
+/* Poids (0..255) de la couleur de base d'un bouton dans son melange vers
+ * COULEUR_FOND pour obtenir la variante LV_STATE_DISABLED -- voir le
+ * commentaire de bouton_creer() ci-dessous pour pourquoi ce melange doit
+ * exister comme style local DEDIE, pas comme un simple recolorage. Faible
+ * (90/255, ~35% de couleur de base) : le bouton doit se fondre visiblement
+ * vers le panneau, y compris pour le rouge d'urgence. */
+#define BOUTON_DESACTIVE_MELANGE 90
+
 /* Le commentaire de tête promet que ces macros dérivées empêchent un
  * désalignement silencieux : ça ne vaut que si un débordement devient une
  * erreur de compilation plutôt qu'un pixel qui sort du cadre sans que
@@ -64,12 +72,33 @@ _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_
  * ecran_accueil_construire() plus bas, une fois `ctx` disponible pour servir
  * de user_data aux trois rappels (voir la tâche 9 et le commentaire de tête
  * de ecran_accueil.h). */
+/* CRITICAL (revue finale jalon 2b) : lv_obj_set_style_bg_color(bouton, ...,
+ * 0) ci-dessous pose un style LOCAL a LV_STATE_DEFAULT. En LVGL 9, un style
+ * local l'emporte sur tout style de theme quel que soit l'etat de l'objet --
+ * sans un style local DEDIE a LV_STATE_DISABLED, poser LV_STATE_DISABLED sur
+ * `bouton` (voir mettre_a_jour() plus bas) ne change AUCUN pixel : le thème
+ * n'a jamais voix au chapitre ici. Constate par la revue au pixel pres (0
+ * pixel de difference sur la rangee de boutons entre une capture "en ligne"
+ * et une capture "perimee", E-STOP inclus) -- un lien mort affichait des
+ * boutons pleinement armes qui ne repondaient plus au toucher, exactement le
+ * contraire de ce que promettait ce fichier. Le correctif enregistre un
+ * DEUXIEME style local, a LV_STATE_DISABLED cette fois (meme tier "local",
+ * mais plus de bits d'etat en commun avec l'etat courant de l'objet quand il
+ * est desactive : il gagne la resolution sans avoir a retirer le style
+ * DEFAULT). Meme raisonnement pour le label : son texte blanc est lui aussi
+ * un style local DEFAULT, donc grise a LV_STATE_DISABLED exige la meme paire
+ * de styles -- et exige que le LABEL LUI-MEME porte l'etat DISABLED (les
+ * etats LVGL ne se propagent pas automatiquement aux enfants), voir
+ * mettre_a_jour() qui bascule desormais le bouton ET son label ensemble. */
 static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, uint32_t couleur_fond, lv_coord_t x)
 {
     lv_obj_t *bouton = lv_button_create(parent);
     lv_obj_set_size(bouton, BOUTON_LARGEUR, BOUTON_HAUTEUR);
     lv_obj_set_pos(bouton, x, BOUTONS_Y);
     lv_obj_set_style_bg_color(bouton, lv_color_hex(couleur_fond), 0);
+    lv_color_t couleur_desactivee =
+        lv_color_mix(lv_color_hex(couleur_fond), lv_color_hex(COULEUR_FOND), BOUTON_DESACTIVE_MELANGE);
+    lv_obj_set_style_bg_color(bouton, couleur_desactivee, LV_STATE_DISABLED);
     lv_obj_set_style_border_width(bouton, 0, 0);
     lv_obj_set_style_shadow_width(bouton, 0, 0);
     lv_obj_set_style_radius(bouton, 10, 0);
@@ -77,10 +106,33 @@ static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, uint32_t coul
     lv_obj_t *label = lv_label_create(bouton);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_GRISE), LV_STATE_DISABLED);
     lv_label_set_text(label, texte);
     lv_obj_center(label);
 
     return bouton;
+}
+
+/* Bascule LV_STATE_DISABLED sur `bouton` ET sur son label enfant (voir le
+ * commentaire de bouton_creer() ci-dessus : un etat LVGL ne se propage
+ * jamais automatiquement a un enfant, donc le grisage du TEXTE exige que le
+ * label porte lui-meme l'etat, pas seulement le bouton). Appele
+ * systematiquement par mettre_a_jour(), jamais de facon incrementale --
+ * meme discipline que tuile_griser()/progression_griser(). */
+static void bouton_definir_desactive(lv_obj_t *bouton, bool desactive)
+{
+    lv_obj_t *label = lv_obj_get_child(bouton, 0);
+    if (desactive) {
+        lv_obj_add_state(bouton, LV_STATE_DISABLED);
+        if (label != NULL) {
+            lv_obj_add_state(label, LV_STATE_DISABLED);
+        }
+    } else {
+        lv_obj_remove_state(bouton, LV_STATE_DISABLED);
+        if (label != NULL) {
+            lv_obj_remove_state(label, LV_STATE_DISABLED);
+        }
+    }
 }
 
 /* Tâche 9 : envoie `action` via ui_commander() (la seule porte, voir
@@ -328,15 +380,9 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
      * (lv_obj_send_event(), qui ne passe jamais par la verification tactile
      * de lv_indev.c sur ce meme etat). */
     ctx->donnees_perimees = donnees_perimees;
-    if (donnees_perimees) {
-        lv_obj_add_state(ctx->bouton_pause, LV_STATE_DISABLED);
-        lv_obj_add_state(ctx->bouton_annuler, LV_STATE_DISABLED);
-        lv_obj_add_state(ctx->bouton_urgence, LV_STATE_DISABLED);
-    } else {
-        lv_obj_remove_state(ctx->bouton_pause, LV_STATE_DISABLED);
-        lv_obj_remove_state(ctx->bouton_annuler, LV_STATE_DISABLED);
-        lv_obj_remove_state(ctx->bouton_urgence, LV_STATE_DISABLED);
-    }
+    bouton_definir_desactive(ctx->bouton_pause, donnees_perimees);
+    bouton_definir_desactive(ctx->bouton_annuler, donnees_perimees);
+    bouton_definir_desactive(ctx->bouton_urgence, donnees_perimees);
 }
 
 const ecran_desc_t ECRAN_ACCUEIL = {

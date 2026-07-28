@@ -176,6 +176,33 @@ static lv_obj_t *dernier_msgbox(void)
     return lv_obj_get_child(fond, 0);
 }
 
+/* CRITICAL (revue finale jalon 2b) : decouverte en ecrivant le RED de ce
+ * fix -- le theme LVGL par defaut (LV_THEME_DEFAULT_TRANSITION_TIME=80,
+ * simulateur/lv_conf.h) anime bg_color/text_color sur CHAQUE changement
+ * d'etat des boutons, y compris LV_STATE_DISABLED. lv_obj_add_state() pose
+ * l'etat de facon synchrone, mais la couleur RESOLUE reste celle de depart
+ * (interpolee a t=0) tant que l'animation de transition n'a pas tourne --
+ * observe empiriquement (lv_obj_get_local_style_prop() confirmait le bon
+ * style local DISABLED enregistre pendant que lv_obj_get_style_bg_color()
+ * rendait encore l'ancienne couleur). Aucune autre suite de ce harnais n'a
+ * jamais eu besoin de faire avancer le temps LVGL : tuile_griser()/
+ * progression_griser() posent leurs styles sur des objets purges du theme
+ * via lv_obj_remove_style_all() (voir tuile.c/progression.c), donc sans
+ * transition enregistree -- les boutons de ecran_accueil.c, eux, gardent le
+ * theme (et sa transition) puisqu'ils passent par lv_button_create() sans
+ * jamais l'oter. lv_tick_inc() n'est jamais appele ailleurs dans ce
+ * harnais : sans lui lv_tick_get() reste fige et l'animation ne progresse
+ * JAMAIS, meme apres un nombre illimite de lv_timer_handler(). 5x100 ms
+ * couvre large la duree de transition (80 ms) et sa possible variante
+ * retardee (voir trans_delayed/trans_normal dans lv_theme_default.c). */
+static void pomper_transitions_style(void)
+{
+    for (int i = 0; i < 5; i++) {
+        lv_tick_inc(100);
+        lv_timer_handler();
+    }
+}
+
 static void section_ecran_accueil_boutons(void)
 {
     printf("suite : commandes (boutons ecran accueil)\n");
@@ -317,14 +344,38 @@ static void section_ecran_accueil_boutons(void)
 
     ECRAN_ACCUEIL.mettre_a_jour(&etat, true, ctx); /* la liaison se degrade PENDANT la lecture */
     VERIFIER(lv_obj_has_state(ctx->bouton_urgence, LV_STATE_DISABLED)); /* la rangee EST bien grisee... */
+    /* CRITICAL (revue finale jalon 2b) : le drapeau LV_STATE_DISABLED seul ne
+     * prouve rien -- c'est exactement le drapeau que le code casse posait
+     * deja, pixel-identique a l'etat arme (0/32000 pixels de difference
+     * constates par la revue sur la rangee de boutons, E-STOP compris). La
+     * couleur RESOLUE doit reellement changer, sinon un lien mort affiche un
+     * E-STOP pleinement arme qui ne repond plus au toucher. pomper_transitions_style()
+     * termine la transition de theme (voir son commentaire) avant de lire. */
+    pomper_transitions_style();
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_urgence, LV_PART_MAIN), lv_color_hex(0xE74C3C)));
 
     lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL); /* ...mais la confirmation deja ouverte part quand meme */
     VERIFIER(source_etat_sim_file_taille() == avant + 1);
     lv_timer_handler();
     source_etat_sim_cycle(); /* draine avant la suite */
 
-    /* Retour a des donnees fraiches pour le reste de la section. */
+    /* Retour a des donnees fraiches pour le reste de la section -- pompe
+     * AVANT de capturer la reference "active" ci-dessous, sinon la
+     * transition de retour depuis l'etat grise du bloc precedent pourrait
+     * encore etre en cours et fausser la reference elle-meme. */
     ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx);
+    pomper_transitions_style();
+
+    /* Couleurs de reference, boutons actifs -- capturees ICI, sur les memes
+     * objets `ctx->bouton_*` qui seront grises puis re-actives ci-dessous,
+     * pour prouver un aller-retour complet (meme discipline que
+     * tuile_griser()/progression_griser() : donnees_perimees=false doit
+     * toujours rendre EXACTEMENT les couleurs normales). */
+    lv_color_t fond_pause_actif = lv_obj_get_style_bg_color(ctx->bouton_pause, LV_PART_MAIN);
+    lv_color_t fond_annuler_actif = lv_obj_get_style_bg_color(ctx->bouton_annuler, LV_PART_MAIN);
+    lv_color_t fond_urgence_actif = lv_obj_get_style_bg_color(ctx->bouton_urgence, LV_PART_MAIN);
+    lv_obj_t *label_urgence = lv_obj_get_child(ctx->bouton_urgence, 0);
+    lv_color_t texte_urgence_actif = lv_obj_get_style_text_color(label_urgence, LV_PART_MAIN);
 
     /* --- Grisage sur donnees perimees (revue tache 6) : toute la rangee
      * prend LV_STATE_DISABLED, round-trip complet. */
@@ -332,6 +383,21 @@ static void section_ecran_accueil_boutons(void)
     VERIFIER(lv_obj_has_state(ctx->bouton_pause, LV_STATE_DISABLED));
     VERIFIER(lv_obj_has_state(ctx->bouton_annuler, LV_STATE_DISABLED));
     VERIFIER(lv_obj_has_state(ctx->bouton_urgence, LV_STATE_DISABLED));
+    /* CRITICAL (revue finale jalon 2b) : la couleur RESOLUE (bg des trois
+     * boutons, texte du label E-STOP) doit differer de la reference active
+     * capturee juste au-dessus -- lv_obj_get_style_*_color() resout pour
+     * l'etat COURANT de l'objet, mais seulement UNE FOIS la transition de
+     * theme terminee (voir pomper_transitions_style() ci-dessus : sans elle
+     * la couleur resolue reste celle de depart malgre lv_obj_add_state()
+     * deja applique de facon synchrone). Un simple lv_obj_has_state() ne
+     * l'aurait jamais attrape : c'est le drapeau que le code casse posait
+     * deja, sans qu'aucun pixel ne bouge. */
+    pomper_transitions_style();
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_pause, LV_PART_MAIN), fond_pause_actif));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_annuler, LV_PART_MAIN), fond_annuler_actif));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_urgence, LV_PART_MAIN), fond_urgence_actif));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(label_urgence, LV_PART_MAIN), texte_urgence_actif));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label_urgence, LV_PART_MAIN), lv_color_hex(0x6B7280)));
 
     /* Un clic direct (lv_obj_send_event() ne passe jamais par la
      * verification tactile de lv_indev.c sur LV_STATE_DISABLED, voir le
@@ -349,6 +415,16 @@ static void section_ecran_accueil_boutons(void)
     VERIFIER(!lv_obj_has_state(ctx->bouton_pause, LV_STATE_DISABLED));
     VERIFIER(!lv_obj_has_state(ctx->bouton_annuler, LV_STATE_DISABLED));
     VERIFIER(!lv_obj_has_state(ctx->bouton_urgence, LV_STATE_DISABLED));
+    /* La couleur resolue revient EXACTEMENT a la reference active -- pas
+     * seulement "differente du gris", un grisage a sens unique serait tout
+     * aussi trompeur (lecon de la revue tache 4, deja citee dans
+     * tuile_griser()). pomper_transitions_style() termine a nouveau la
+     * transition de retour avant de lire. */
+    pomper_transitions_style();
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_pause, LV_PART_MAIN), fond_pause_actif));
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_annuler, LV_PART_MAIN), fond_annuler_actif));
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(ctx->bouton_urgence, LV_PART_MAIN), fond_urgence_actif));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label_urgence, LV_PART_MAIN), texte_urgence_actif));
 
     avant = source_etat_sim_file_taille();
     lv_obj_send_event(ctx->bouton_pause, LV_EVENT_CLICKED, NULL);

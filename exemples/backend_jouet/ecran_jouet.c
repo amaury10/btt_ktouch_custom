@@ -17,6 +17,12 @@
 #define COULEUR_BOUTON       0x2A3644
 #define COULEUR_TEXTE_BOUTON 0xFFFFFF
 
+/* Meme melange que BOUTON_DESACTIVE_MELANGE dans ecran_accueil.c (voir son
+ * commentaire, et celui de bouton_reset_cb() ci-dessous, pour le bug CRITICAL
+ * qu'evite ce style local dedie a LV_STATE_DISABLED : ce fichier avait copie
+ * le motif casse, ce fork ne doit pas enseigner le meme bug). */
+#define BOUTON_DESACTIVE_MELANGE 90
+
 /* Meme motif que executer_commande() dans ecran_accueil.c : ui_commander()
  * est la seule porte (ui/source_etat.h), un echec SYNCHRONE se notifie via
  * habillage_notifier() -- jamais de boite d'erreur posee par l'ecran
@@ -63,6 +69,13 @@ static void ecran_jouet_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_size(ctx->bouton, 150, 60);
     lv_obj_set_pos(ctx->bouton, 20, 110);
     lv_obj_set_style_bg_color(ctx->bouton, lv_color_hex(COULEUR_BOUTON), 0);
+    /* CRITICAL (revue finale jalon 2b, mirroir du fix de ecran_accueil.c) :
+     * un style local pose a LV_STATE_DEFAULT l'emporte toujours sur le
+     * theme en LVGL 9, donc LV_STATE_DISABLED (mettre_a_jour() plus bas) ne
+     * changeait aucun pixel sans ce deuxieme style local dedie. */
+    lv_color_t couleur_desactivee =
+        lv_color_mix(lv_color_hex(COULEUR_BOUTON), lv_color_hex(COULEUR_FOND), BOUTON_DESACTIVE_MELANGE);
+    lv_obj_set_style_bg_color(ctx->bouton, couleur_desactivee, LV_STATE_DISABLED);
     lv_obj_set_style_border_width(ctx->bouton, 0, 0);
     lv_obj_set_style_shadow_width(ctx->bouton, 0, 0);
     lv_obj_set_style_radius(ctx->bouton, 10, 0);
@@ -71,6 +84,7 @@ static void ecran_jouet_construire(lv_obj_t *parent, void *contexte)
     lv_obj_t *label = lv_label_create(ctx->bouton);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_GRISE), LV_STATE_DISABLED);
     lv_label_set_text(label, "Reset");
     lv_obj_center(label);
 }
@@ -94,11 +108,23 @@ static void ecran_jouet_mettre_a_jour(const void *etat, bool donnees_perimees, v
     uint32_t couleur = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE;
     lv_obj_set_style_text_color(ctx->valeur, lv_color_hex(couleur), 0);
 
+    /* L'etat LVGL ne se propage jamais automatiquement a un enfant : le
+     * label du bouton doit porter LV_STATE_DISABLED lui-meme pour que son
+     * style local de texte grise (voir ecran_jouet_construire() ci-dessus)
+     * se resolve reellement -- meme raisonnement que bouton_definir_desactive()
+     * dans ecran_accueil.c. */
     ctx->donnees_perimees = donnees_perimees;
+    lv_obj_t *label = lv_obj_get_child(ctx->bouton, 0);
     if (donnees_perimees) {
         lv_obj_add_state(ctx->bouton, LV_STATE_DISABLED);
+        if (label != NULL) {
+            lv_obj_add_state(label, LV_STATE_DISABLED);
+        }
     } else {
         lv_obj_remove_state(ctx->bouton, LV_STATE_DISABLED);
+        if (label != NULL) {
+            lv_obj_remove_state(label, LV_STATE_DISABLED);
+        }
     }
 }
 
