@@ -56,17 +56,21 @@ set(ESP_ERR_SHIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # et source_etat_sim.c (voir son en-tête) : ces quatre fichiers de core/,
 # déjà réutilisés tels quels par host-test/CMakeLists.txt, entrent ici pour
 # la même raison — une seule implémentation, jamais une copie qui pourrait
-# diverger.
+# diverger. hote_parse.c (tâche 8) rejoint le lot pour la même raison :
+# ecran_configuration.c s'appuie dessus pour valider la saisie de l'écran de
+# configuration, jamais un second analyseur.
 add_executable(ktouch-sim
     main.c
     afficheur.c
     plateforme_sim.c
     source_etat_sim.c
+    source_reglages_sim.c
     ${CORE_DIR}/plateforme.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c
     ${CORE_DIR}/boucle_cycle.c
+    ${CORE_DIR}/hote_parse.c
     ${UI_DIR}/navigation.c
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
@@ -74,6 +78,7 @@ add_executable(ktouch-sim
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
+    ${ECRANS_DIR}/ecran_configuration.c
 )
 target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)

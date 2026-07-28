@@ -113,6 +113,7 @@ add_executable(tests
     tests/test_widgets.c
     tests/test_ecran_accueil.c
     tests/test_clavier.c
+    tests/test_ecran_configuration.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -127,8 +128,10 @@ add_executable(tests
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
+    ${ECRANS_DIR}/ecran_configuration.c
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c
+    ${SIM_DIR}/source_reglages_sim.c
 )
 target_link_libraries(tests PRIVATE cjson lvgl m)
 # Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
