@@ -1,0 +1,8 @@
+# Ce backend et cet écran jouets se compilent sous WSL (gcc), à la fois par
+# simulateur/ et par host-test/ (voir leurs CMakeLists.txt respectifs). Le
+# dépôt a core.autocrlf=true côté Windows ; sans cette déclaration, ces
+# fichiers seraient convertis en CRLF au prochain checkout, en décalage avec
+# le reste du code compilé sous WSL (voir host-test/.gitattributes et
+# simulateur/.gitattributes pour le même principe, déjà motivé une première
+# fois par run.sh).
+* text=auto eol=lf

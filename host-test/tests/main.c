@@ -21,6 +21,7 @@ void suite_ecran_accueil(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
 void suite_commandes(void);
+void suite_jouet(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -80,6 +81,11 @@ int main(void)
      * par section_enregistrer() (singleton process-wide, voir le commentaire
      * de tete de test_commandes.c). */
     suite_commandes();
+    /* Tache 11 : doit rester APRES suite_commandes() -- sa derniere section
+     * reutilise la boucle simulee deja demarree par celle-ci (autre
+     * singleton process-wide, voir le commentaire de tete de
+     * test_jouet.c). */
+    suite_jouet();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

@@ -41,6 +41,11 @@ set(WIDGETS_DIR ${UI_DIR}/widgets)
 # que WIDGETS_DIR ci-dessus, une seule implémentation, jamais une copie.
 set(KLIPPER_DIR ${CORE_DIR}/../apps/klipper)
 set(ECRANS_DIR ${KLIPPER_DIR}/ecrans)
+# backend_jouet.{c,h} / ecran_jouet.{c,h} (tache 11) : voir le meme
+# commentaire dans simulateur/CMakeLists.txt -- exemples/, pas apps/, ce
+# n'est pas une application du firmware mais le modele que le harnais de
+# tests hote exerce pour prouver l'independance de core/ et ui/.
+set(EXEMPLES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../exemples/backend_jouet)
 
 # LVGL entre dans le harnais de test hote pour rendre la navigation testable
 # sur PC : reutilise le SEUL sous-module et la SEULE lv_conf.h de
@@ -115,6 +120,7 @@ add_executable(tests
     tests/test_clavier.c
     tests/test_ecran_configuration.c
     tests/test_commandes.c
+    tests/test_jouet.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -133,12 +139,14 @@ add_executable(tests
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c
     ${SIM_DIR}/source_reglages_sim.c
+    ${EXEMPLES_DIR}/backend_jouet.c
+    ${EXEMPLES_DIR}/ecran_jouet.c
 )
 target_link_libraries(tests PRIVATE cjson lvgl m)
 # Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
 # neutre entre host-test/ et simulateur/ : les deux le consomment (voir
 # simulateur/CMakeLists.txt), et aucun des deux ne le possede plus.
-target_include_directories(tests PRIVATE ${CORE_DIR} ${KLIPPER_DIR} ${ECRANS_DIR} ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
+target_include_directories(tests PRIVATE ${CORE_DIR} ${KLIPPER_DIR} ${ECRANS_DIR} ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${EXEMPLES_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.

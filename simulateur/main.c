@@ -15,7 +15,34 @@
  * comme ce fichier avait lui-même remplacé la mire de vérification de la
  * tâche 1 (voir task-1-report.md) — un écran jouet qui a rempli son rôle une
  * fois ne mérite pas un second indicateur de ligne de commande pour choisir
- * entre lui et l'écran réel. */
+ * entre lui et l'écran réel.
+ *
+ * Tâche 11 : `--app jouet` bascule ce même point d'entrée sur
+ * exemples/backend_jouet/ (backend_jouet.c + ecran_jouet.c) au lieu de
+ * l'application Klipper -- l'assemblage, ici, est le SEUL endroit que la
+ * tâche 11 autorise à toucher ; ni core/ ni ui/ n'ont changé une ligne (voir
+ * task-11-report.md pour la vérification littérale). Un détail EST resté
+ * hors de portée de ce fichier : habillage_pomper() (ui/habillage.c) porte
+ * un tampon `etat_klipper_t` concret pour relayer etat/génération/liaison à
+ * navigation_mettre_a_jour() -- lire son commentaire de tête, qui documente
+ * ce couplage comme le second site qu'un fork adapte. Avec un backend dont
+ * l'état ne fait pas exactement sizeof(etat_klipper_t) octets,
+ * ui_etat_instantane() interne à habillage_pomper() échoue sa vérification
+ * de taille (voir source_etat_sim.c) et rend disponible=false : la barre
+ * d'état continue de se rafraîchir (titre, heure, wifi, batterie — aucun ne
+ * dépend de la taille de l'état applicatif), mais SA PASTILLE DE LIAISON
+ * reste figée sur "connecting"/gris, et surtout navigation_mettre_a_jour()
+ * n'est jamais appelée par habillage_pomper() lui-même pour cet écran-là.
+ * jouet_pomper() ci-dessous contourne ce SEUL défaut sans toucher ui/ : il
+ * appelle lui-même ui_etat_instantane() (façade générique, pointeur + taille,
+ * voir ui/source_etat.h) avec un tampon etat_jouet_t, calcule
+ * donnees_perimees via habillage_donnees_perimees() (fonction pure, publique,
+ * elle aussi générique) et relaie directement à navigation_mettre_a_jour()
+ * (également générique, void *etat, voir ui/navigation.h) -- trois appels
+ * publics que habillage_pomper() fait déjà lui-même en interne, simplement
+ * réassemblés ici pour un état de taille différente. Reste néanmoins un vrai
+ * défaut du socle pour un fork non-Klipper : une pastille de connexion
+ * fausse est un vrai regret, documenté dans task-11-report.md. */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,15 +54,22 @@
 
 #include "backend.h"
 #include "backend_factice.h"
+#include "backend_jouet.h"
 #include "clavier.h"
 #include "confirmation.h"
 #include "ecran_accueil.h"
 #include "ecran_configuration.h"
+#include "ecran_jouet.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
 #include "source_etat.h"
 #include "source_etat_sim.h"
+
+typedef enum {
+    APP_ACCUEIL = 0, /* Klipper (comportement par defaut, inchange) */
+    APP_JOUET,       /* tache 11 : exemples/backend_jouet/ */
+} app_t;
 
 /* --- Backend qui échoue systématiquement -------------------------------- *
  * Sert uniquement à démontrer, dans le simulateur, l'état dégradé/hors
@@ -81,6 +115,70 @@ static const backend_desc_t BACKEND_ECHEC_DESC = {
     .commande = echec_commande,
 };
 
+/* --- Backend qui échoue systématiquement, variante jouet (tâche 11) -------
+ * Même rôle que BACKEND_ECHEC_DESC ci-dessus (démontrer l'état dégradé/hors
+ * ligne pour --app jouet --echec), mais dimensionné sur etat_jouet_t : la
+ * struct ci-dessus ne peut PAS être réutilisée telle quelle, elle est câblée
+ * en dur sur sizeof(etat_klipper_t) (son .taille_etat, et le memset() de
+ * echec_demarrer()) -- un fork qui voudrait la partager entre deux
+ * applications devrait déjà la paramétrer sur une taille, ce n'était pas fait
+ * avant la tâche 11. Dupliquée ici plutôt que généralisée : quatre petites
+ * fonctions locales à ce fichier, plus simple à lire qu'une indirection pour
+ * un unique appelant. */
+static esp_err_t jouet_echec_demarrer(void *etat, const backend_hote_t *hote)
+{
+    (void)hote;
+    memset(etat, 0, sizeof(etat_jouet_t));
+    return ESP_OK;
+}
+
+static esp_err_t jouet_echec_rafraichir(void *etat)
+{
+    (void)etat;
+    return ESP_FAIL;
+}
+
+static void jouet_echec_arreter(void *etat)
+{
+    (void)etat;
+}
+
+static esp_err_t jouet_echec_commande(void *etat, const char *action, const char *arguments_json)
+{
+    (void)etat;
+    (void)action;
+    (void)arguments_json;
+    return ESP_ERR_NOT_SUPPORTED;
+}
+
+static const backend_desc_t BACKEND_JOUET_ECHEC_DESC = {
+    .nom = "jouet-echec-demo",
+    .taille_etat = sizeof(etat_jouet_t),
+    .demarrer = jouet_echec_demarrer,
+    .rafraichir = jouet_echec_rafraichir,
+    .arreter = jouet_echec_arreter,
+    .commande = jouet_echec_commande,
+};
+
+/* Relaie l'état du backend jouet au sommet de la pile de navigation --
+ * l'équivalent, pour --app jouet, de ce que habillage_pomper() fait déjà en
+ * interne pour etat_klipper_t (voir son commentaire dans ui/habillage.c) :
+ * ui_etat_instantane() est la façade générique de ui/source_etat.h (void*,
+ * taille), habillage_donnees_perimees() et navigation_mettre_a_jour() sont
+ * elles aussi des fonctions publiques génériques de ui/ -- rien ici n'entre
+ * dans core/ ni dans ui/. Voir le commentaire de tête de ce fichier pour
+ * pourquoi ce relais existe séparément de habillage_pomper() plutôt que de
+ * passer par lui. */
+static void jouet_pomper(void)
+{
+    etat_jouet_t etat;
+    uint32_t generation = 0;
+    liaison_etat_t liaison = LIAISON_CONNEXION;
+    if (ui_etat_instantane(&etat, sizeof(etat), &generation, &liaison)) {
+        navigation_mettre_a_jour(&etat, habillage_donnees_perimees(liaison));
+    }
+}
+
 /* --- Démonstration du clavier modal et du dialogue de confirmation --------
  * (tâche 7) : --scenario 5/6 ci-dessous, en mode capture uniquement. Ces
  * rappels ne sont jamais invoqués par une capture hors écran (rien n'y
@@ -106,6 +204,7 @@ int main(int argc, char **argv)
     int cycles = 5;
     int scenario = 1;
     bool echec = false;
+    app_t app = APP_ACCUEIL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--capture") == 0 && i + 1 < argc) {
@@ -116,6 +215,13 @@ int main(int argc, char **argv)
             scenario = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--echec") == 0) {
             echec = true;
+        } else if (strcmp(argv[i], "--app") == 0 && i + 1 < argc) {
+            /* Tache 11 : "accueil" (defaut, Klipper) ou "jouet"
+             * (exemples/backend_jouet/) -- toute autre valeur retombe sur
+             * "accueil" plutot que d'echouer, meme politique defensive que
+             * --scenario pour un numero inconnu. */
+            const char *valeur = argv[++i];
+            app = (strcmp(valeur, "jouet") == 0) ? APP_JOUET : APP_ACCUEIL;
         }
     }
 
@@ -128,40 +234,55 @@ int main(int argc, char **argv)
 
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
-    /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
-     * ECRAN_ACCUEIL (jamais seul), exactement la topologie que app_main.c
-     * construit sur un appareil jamais configuré (reglages_configures()
-     * faux) -- voir README §Options pour la numérotation complète. Empiler
-     * ECRAN_CONFIGURATION seul (comme ce fichier le faisait avant la revue de
-     * la tâche 8, round 1, Q1) rendrait son bouton Save un cul-de-sac :
-     * navigation_accueil() est un no-op à profondeur 1, Save n'aurait donc
-     * aucun endroit où revenir. Ces deux numéros ne correspondent à aucun
-     * scénario du backend factice (voir backend_factice_scenario() plus bas,
-     * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
-    navigation_empiler(&ECRAN_ACCUEIL);
-    bool ecran_config = (scenario == 7 || scenario == 8);
-    if (ecran_config) {
-        navigation_empiler(&ECRAN_CONFIGURATION);
+
+    bool ecran_config = false;
+    if (app == APP_JOUET) {
+        /* Tache 11 : ECRAN_JOUET seul, jamais empile avec ECRAN_ACCUEIL --
+         * les deux applications ne partagent aucun ecran. */
+        navigation_empiler(&ECRAN_JOUET);
+    } else {
+        /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
+         * ECRAN_ACCUEIL (jamais seul), exactement la topologie que app_main.c
+         * construit sur un appareil jamais configuré (reglages_configures()
+         * faux) -- voir README §Options pour la numérotation complète. Empiler
+         * ECRAN_CONFIGURATION seul (comme ce fichier le faisait avant la revue de
+         * la tâche 8, round 1, Q1) rendrait son bouton Save un cul-de-sac :
+         * navigation_accueil() est un no-op à profondeur 1, Save n'aurait donc
+         * aucun endroit où revenir. Ces deux numéros ne correspondent à aucun
+         * scénario du backend factice (voir backend_factice_scenario() plus bas,
+         * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
+        navigation_empiler(&ECRAN_ACCUEIL);
+        ecran_config = (scenario == 7 || scenario == 8);
+        if (ecran_config) {
+            navigation_empiler(&ECRAN_CONFIGURATION);
+        }
     }
 
-    const backend_desc_t *backend = echec ? &BACKEND_ECHEC_DESC : backend_factice_desc();
-    if (!echec) {
-        backend_factice_scenario(scenario);
+    const backend_desc_t *backend;
+    if (app == APP_JOUET) {
+        backend = echec ? &BACKEND_JOUET_ECHEC_DESC : backend_jouet_desc();
+    } else {
+        backend = echec ? &BACKEND_ECHEC_DESC : backend_factice_desc();
+        if (!echec) {
+            backend_factice_scenario(scenario);
+        }
     }
     if (!source_etat_sim_demarrer(backend)) {
         fprintf(stderr, "echec du demarrage de la boucle simulee\n");
     }
 
-    /* --scenario 9 (tache 9, mode capture uniquement) : demontre l'echec
-     * ASYNCHRONE d'une commande -- ui_commander() l'accepte tout de suite
-     * (ESP_OK), mais son execution reelle, plus tard par la boucle simulee,
-     * echoue deliberement (backend_factice_commande_echoue(true), tache 9) --
-     * exactement le chemin qu'un simple appui bouton ne peut pas montrer ici
-     * (aucune simulation d'entree tactile en mode capture, voir le
-     * commentaire de tete de ce fichier). Empilee AVANT la boucle de cycles
-     * ci-dessous : le premier appel a source_etat_sim_cycle() l'execute et la
-     * fait echouer, et le habillage_pomper() du meme tour de boucle remonte
-     * cet echec au bandeau de notification (voir ui_commande_echec() dans
+    /* --scenario 9 (tache 9, mode capture uniquement, --app accueil
+     * seulement -- backend_factice_commande_echoue() n'a de sens que contre
+     * backend_factice_desc()) : demontre l'echec ASYNCHRONE d'une commande --
+     * ui_commander() l'accepte tout de suite (ESP_OK), mais son execution
+     * reelle, plus tard par la boucle simulee, echoue deliberement
+     * (backend_factice_commande_echoue(true), tache 9) -- exactement le
+     * chemin qu'un simple appui bouton ne peut pas montrer ici (aucune
+     * simulation d'entree tactile en mode capture, voir le commentaire de
+     * tete de ce fichier). Empilee AVANT la boucle de cycles ci-dessous : le
+     * premier appel a source_etat_sim_cycle() l'execute et la fait echouer,
+     * et le habillage_pomper() du meme tour de boucle remonte cet echec au
+     * bandeau de notification (voir ui_commande_echec() dans
      * ui/source_etat.h et son polling par habillage_pomper()) -- sans
      * attendre le "host connected" que --cycles positif declenche par
      * ailleurs plus bas (voir la note sur ce bandeau-la). Ne correspond a
@@ -169,7 +290,7 @@ int main(int argc, char **argv)
      * scenario 3, "printing" plausible -- voir backend_factice_scenario()) :
      * Pause a un sens contre un etat "printing", meme si aucun champ de cet
      * etat n'influence l'echec force lui-meme. */
-    if (scenario == 9) {
+    if (app == APP_ACCUEIL && scenario == 9) {
         backend_factice_commande_echoue(true);
         esp_err_t erreur_commande = ui_commander(BACKEND_ACTION_PAUSE, NULL);
         if (erreur_commande != ESP_OK) {
@@ -190,16 +311,27 @@ int main(int argc, char **argv)
         for (int i = 0; i < cycles; i++) {
             source_etat_sim_cycle();
             habillage_pomper();
+            if (app == APP_JOUET) {
+                /* Voir le commentaire de tête de ce fichier et celui de
+                 * jouet_pomper() : habillage_pomper() ne peut pas relayer
+                 * etat_jouet_t lui-même (tampon interne dimensionné sur
+                 * etat_klipper_t), ce second appel referme la boucle pour cet
+                 * écran-là sans toucher ui/. */
+                jouet_pomper();
+            }
         }
         if (cycles == 0) {
             habillage_pomper();
+            if (app == APP_JOUET) {
+                jouet_pomper();
+            }
         }
         /* scenario 9 exclu : la boucle ci-dessus a deja fait remonter, via
          * habillage_pomper(), le bandeau d'echec de commande que ce scenario
          * existe pour capturer -- un "host connected" ecrirait par-dessus
          * (habillage_notifier() REMPLACE, jamais n'empile, voir son
          * commentaire dans habillage.h) avant meme la capture. */
-        if (cycles > 0 && scenario != 9) {
+        if (cycles > 0 && !(app == APP_ACCUEIL && scenario == 9)) {
             habillage_notifier(echec ? "connection lost" : "host connected", echec);
         }
 
@@ -213,10 +345,12 @@ int main(int argc, char **argv)
          * traités comme "tout autre numéro", README §Options) : le fond
          * derrière les modales est donc celui du scénario 3 (valeurs
          * extrêmes mais plausibles), un arrière-plan quelconque puisque
-         * seule la modale elle-même importe pour cette capture. */
-        if (scenario == 5) {
+         * seule la modale elle-même importe pour cette capture. Rien de tout
+         * ceci ne s'applique à --app jouet (pas de clavier, pas de
+         * configuration a saisir). */
+        if (app == APP_ACCUEIL && scenario == 5) {
             clavier_ouvrir("Host address", "192.168.1.42", CLAVIER_TEXTE, demo_clavier_rappel, NULL);
-        } else if (scenario == 6) {
+        } else if (app == APP_ACCUEIL && scenario == 6) {
             /* confirmation_ouvrir_ex(), pas confirmation_ouvrir() : reprend
              * EXACTEMENT la copie que le vrai bouton Cancel envoie depuis
              * ecran_accueil.c (fix round 1, revue tache 9, LOW) -- un declin
@@ -225,7 +359,7 @@ int main(int argc, char **argv)
             confirmation_ouvrir_ex("Cancel print?",
                                     "This will stop the current print. This cannot be undone.",
                                     "Cancel print", true, "Keep printing", demo_confirmation_rappel, NULL);
-        } else if (scenario == 8) {
+        } else if (app == APP_ACCUEIL && scenario == 8) {
             /* Tâche 8 : clavier ouvert par-dessus ECRAN_CONFIGURATION (déjà
              * empilé plus haut, voir `ecran_config`), avec une adresse
              * pré-remplie comme si elle venait d'être saisie -- même
@@ -257,6 +391,9 @@ int main(int argc, char **argv)
     for (;;) {
         afficheur_pomper(16);
         habillage_pomper();
+        if (app == APP_JOUET) {
+            jouet_pomper(); /* voir le commentaire de tete de ce fichier */
+        }
         usleep(16 * 1000);
         accumulateur_ms += 16;
         if (accumulateur_ms >= 1000) {

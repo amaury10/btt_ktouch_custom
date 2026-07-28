@@ -40,6 +40,11 @@ set(WIDGETS_DIR ${UI_DIR}/widgets)
 # dans le harnais de tests hôte (voir host-test/CMakeLists.txt).
 set(KLIPPER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/apps/klipper)
 set(ECRANS_DIR ${KLIPPER_DIR}/ecrans)
+# backend_jouet.{c,h} / ecran_jouet.{c,h} (tache 11) vivent sous exemples/,
+# HORS de firmware/main/apps/ : ce n'est pas une application du firmware,
+# c'est le modele que --app jouet demontre pour un fork non-Klipper -- voir
+# exemples/backend_jouet/README.md.
+set(EXEMPLES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../exemples/backend_jouet)
 # navigation.c rend esp_err_t (ESP_OK, ESP_ERR_NO_MEM, ...) pour rester le
 # même contrat des deux côtés (voir core/backend.h) ; hors ESP-IDF, ce type
 # vient du même shim que le harnais de test hôte, sous un répertoire de
@@ -79,7 +84,9 @@ add_executable(ktouch-sim
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
     ${ECRANS_DIR}/ecran_configuration.c
+    ${EXEMPLES_DIR}/backend_jouet.c
+    ${EXEMPLES_DIR}/ecran_jouet.c
 )
-target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)
