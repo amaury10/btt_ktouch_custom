@@ -87,6 +87,14 @@ static void section_moonraker_chemin_commande(void)
     /* `chemin` NULL / `taille` nulle : false, jamais un plantage. */
     VERIFIER(moonraker_chemin_commande(BACKEND_ACTION_PAUSE, NULL, sizeof(chemin)) == false);
     VERIFIER(moonraker_chemin_commande(BACKEND_ACTION_PAUSE, chemin, 0) == false);
+
+    /* Tampon trop court : false, jamais un chemin tronque presente comme
+     * valide (re-revue tache 9, round 1 : le correctif existait mais aucun
+     * test ne l'epinglait -- un retour a un snprintf sans controle de
+     * longueur serait passe inapercu). "printer/print/pause" fait 19
+     * caracteres : 8 octets tronquent a coup sur. */
+    char court[8];
+    VERIFIER(moonraker_chemin_commande(BACKEND_ACTION_PAUSE, court, sizeof(court)) == false);
 }
 
 /* ------------------------------------------------------------------------
