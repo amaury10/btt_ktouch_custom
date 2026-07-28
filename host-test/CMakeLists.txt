@@ -19,6 +19,12 @@ option(KTOUCH_HOST_TEST_SANITIZERS
 # compilables hors ESP-IDF : c'est la contrainte qui garantit qu'elles ne
 # dependent pas du materiel.
 set(CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/core)
+# web_macros.{c,h} (revue tache 1, jalon 3a, fix round 1) : extrait de
+# web.c, qui lui NE se compile PAS ici (esp_http_server.h). C'est la seule
+# partie de main/ directement au-dessus de core/ qui a besoin d'etre
+# testable au harnais hote -- deliberement sans dependance ESP-IDF pour ca,
+# voir web_macros.h.
+set(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
 # La couche ui/ (descripteur d'ecran, navigation) doit rester compilable hors
 # ESP-IDF au meme titre que core/ : voir firmware/main/ui/navigation.c, qui
 # n'inclut que "lvgl.h" et le shim esp_err.h ci-dessous, jamais de header
@@ -121,6 +127,8 @@ add_executable(tests
     tests/test_ecran_configuration.c
     tests/test_commandes.c
     tests/test_jouet.c
+    tests/test_web_macros.c
+    ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -146,7 +154,7 @@ target_link_libraries(tests PRIVATE cjson lvgl m)
 # Le shim esp_err.h vit sous un repertoire de premier niveau (../shim),
 # neutre entre host-test/ et simulateur/ : les deux le consomment (voir
 # simulateur/CMakeLists.txt), et aucun des deux ne le possede plus.
-target_include_directories(tests PRIVATE ${CORE_DIR} ${KLIPPER_DIR} ${ECRANS_DIR} ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${EXEMPLES_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
+target_include_directories(tests PRIVATE ${MAIN_DIR} ${CORE_DIR} ${KLIPPER_DIR} ${ECRANS_DIR} ${UI_DIR} ${WIDGETS_DIR} ${SIM_DIR} ${EXEMPLES_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 # -Werror ne s'applique qu'a notre propre code : cJSON est vendorise, et le
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.

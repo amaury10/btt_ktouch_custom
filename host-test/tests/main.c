@@ -22,6 +22,7 @@ void suite_clavier(void);
 void suite_ecran_configuration(void);
 void suite_commandes(void);
 void suite_jouet(void);
+void suite_web_macros(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -93,6 +94,10 @@ int main(void)
      * verifie source_etat_sim_est_demarre() a son entree (voir
      * source_etat_sim.h). */
     suite_jouet();
+
+    /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
+     * contrainte d'ordre. */
+    suite_web_macros();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

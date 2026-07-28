@@ -47,6 +47,7 @@
 #include "liaison.h"
 #include "netlog.h"
 #include "rescue.h"
+#include "web_macros.h"
 #include "wifi.h"
 
 static const char *TAG = "web";
@@ -260,13 +261,27 @@ static esp_err_t gestion_state(httpd_req_t *req)
             /* `macros` en tableau de chaines : le nom de macro Klipper est
              * la seule information utile a un client, l'index dans le
              * tampon fixe etat_klipper_t::macros n'a pas de sens hors du
-             * firmware. */
+             * firmware.
+             *
+             * Fix round 1 (revue tache 1, MAJOR) : `nb_macros` est ecrit par
+             * un producteur amont (voir web_macros.h) et n'est PAS garanti
+             * <= KLIPPER_MACROS_MAX a ce point -- c'est exactement le cas
+             * que `macros_tronquees` existe pour signaler. Passer
+             * `etat.nb_macros` non borne a cJSON_CreateStringArray() ferait
+             * lire ce dernier au-dela des KLIPPER_MACROS_MAX entrees
+             * remplies de `noms_macros` ci-dessous, dereferencant de la
+             * memoire de pile non initialisee comme autant de pointeurs de
+             * chaine -- undefined behaviour, plantage probable, fuite
+             * d'information possible sur une route de diagnostic. Une SEULE
+             * valeur bornee (`n`) alimente a la fois la boucle de
+             * remplissage et le compte passe a cJSON : aucune chance que les
+             * deux divergent a nouveau. */
+            uint8_t n = web_nb_macros_serialisables(etat.nb_macros);
             const char *noms_macros[KLIPPER_MACROS_MAX];
-            for (uint8_t i = 0; i < etat.nb_macros && i < KLIPPER_MACROS_MAX; i++) {
+            for (uint8_t i = 0; i < n; i++) {
                 noms_macros[i] = etat.macros[i];
             }
-            cJSON_AddItemToObject(etat_json, "macros",
-                                   cJSON_CreateStringArray(noms_macros, etat.nb_macros));
+            cJSON_AddItemToObject(etat_json, "macros", cJSON_CreateStringArray(noms_macros, n));
             cJSON_AddBoolToObject(etat_json, "macros_tronquees", etat.macros_tronquees);
 
             cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
