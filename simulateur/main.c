@@ -203,7 +203,11 @@ int main(int argc, char **argv)
 {
     const char *chemin_capture = NULL;
     int cycles = 5;
-    int scenario = 1;
+    /* Scenario par defaut : 0 (repos), pas 1 (impression) -- demande de
+     * l'utilisateur : une machine qui demarre doit se presenter au repos,
+     * comme le ferait l'appareil reel a cote d'une imprimante inactive ;
+     * l'impression se demande explicitement (--scenario 1). */
+    int scenario = 0;
     bool echec = false;
     app_t app = APP_ACCUEIL;
 

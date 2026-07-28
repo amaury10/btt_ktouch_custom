@@ -80,7 +80,8 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
   `backend_factice_scenario()` dans `firmware/main/core/backend_factice.h`,
   la seule source de vérité pour cette numérotation — elle a déjà changé une
   fois pendant ce jalon). Numérotation actuelle :
-  - `0` — repos (`etat = "standby"`, rien ne chauffe, rien n'imprime) ;
+  - `0` — repos (`etat = "standby"`, rien ne chauffe, rien n'imprime) —
+    **c'est le défaut** quand `--scenario` n'est pas donné ;
   - `1` — impression en cours, la progression avance à chaque cycle ;
   - `2` — **pause** (impression en cours, `impression_en_pause = true`,
     progression figée à 50 %) — PAS un état de repos, malgré ce qu'un nom de
