@@ -285,9 +285,12 @@ Même modèle à trois niveaux que le 2b :
 
 ## 9. Non-objectifs du jalon 3
 
-Caméra, timelapse, tableaux de bord multi-imprimantes simultanés (le parc de 3f bascule, il n'agrège pas), éditeur de configuration Klipper,
-courbes de température (graphes temporels), rendu 3D de quoi que ce soit,
-moteur de mise à jour (reste le jalon 2c), fork astro (jalon dédié).
+Caméra, timelapse, tableaux de bord multi-imprimantes simultanés (le parc de
+3f bascule, il n'agrège pas — la synthèse légère du parc est un candidat
+jalon 4, voir §11), éditeur de configuration Klipper (candidat jalon 4),
+courbes de température (graphes temporels — le tuning PID du jalon 4 lèvera
+ce non-objectif), rendu 3D de quoi que ce soit, moteur de mise à jour (reste
+le jalon 2c), fork astro (jalon dédié).
 
 ## 10. Critères de succès
 
@@ -313,4 +316,22 @@ moteur de mise à jour (reste le jalon 2c), fork astro (jalon dédié).
 ## 11. Suite
 
 Après le jalon 3 : le moteur de mise à jour (2c, jamais oublié), puis le fork
-astro — dont ce jalon aura prouvé le socle par les huit critères ci-dessus.
+astro — dont ce jalon aura prouvé le socle par les neuf critères ci-dessus.
+
+**Candidats consignés pour un jalon 4** (demandes utilisateur du 2026-07-28,
+à re-brainstormer le moment venu, sous réserve explicite « si ça rentre dans
+l'écran » — un 800×480 tactile, pas un poste de travail) :
+
+- **éditeur de configuration « basique »** : lecture et édition des fichiers
+  de config Klipper via `server.files` (printer.cfg et includes), avec
+  sauvegarde + redémarrage Klipper — « basique » : édition texte au clavier
+  tactile, pas d'assistance sémantique ;
+- **vue tuning PID** : graphe température/consigne en direct pendant un
+  `PID_CALIBRATE`, lancement de l'autotune, application du résultat — c'est
+  la première vraie courbe temporelle du projet (le non-objectif « graphes »
+  du jalon 3 saute à ce moment-là) ;
+- **écran de synthèse du parc** : l'exception assumée au modèle « une active
+  à la fois » de 3f — une vue légère qui interroge périodiquement chaque
+  profil et affiche a minima l'état de chacune (idle, impression à X %,
+  erreur, éteinte/injoignable). Pas des tableaux de bord complets : un état
+  par ligne, et un tap bascule vers cette imprimante.
