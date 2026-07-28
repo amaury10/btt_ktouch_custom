@@ -127,14 +127,21 @@ int main(int argc, char **argv)
 
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
-    /* --scenario 7/8 (tâche 8) : démarre sur ECRAN_CONFIGURATION plutôt que
-     * ECRAN_ACCUEIL, comme app_main.c le ferait sur un appareil jamais
-     * configuré (reglages_configures() faux) -- voir README §Options pour la
-     * numérotation complète. Ces deux numéros ne correspondent à aucun
+    /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
+     * ECRAN_ACCUEIL (jamais seul), exactement la topologie que app_main.c
+     * construit sur un appareil jamais configuré (reglages_configures()
+     * faux) -- voir README §Options pour la numérotation complète. Empiler
+     * ECRAN_CONFIGURATION seul (comme ce fichier le faisait avant la revue de
+     * la tâche 8, round 1, Q1) rendrait son bouton Save un cul-de-sac :
+     * navigation_accueil() est un no-op à profondeur 1, Save n'aurait donc
+     * aucun endroit où revenir. Ces deux numéros ne correspondent à aucun
      * scénario du backend factice (voir backend_factice_scenario() plus bas,
      * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
+    navigation_empiler(&ECRAN_ACCUEIL);
     bool ecran_config = (scenario == 7 || scenario == 8);
-    navigation_empiler(ecran_config ? &ECRAN_CONFIGURATION : &ECRAN_ACCUEIL);
+    if (ecran_config) {
+        navigation_empiler(&ECRAN_CONFIGURATION);
+    }
 
     const backend_desc_t *backend = echec ? &BACKEND_ECHEC_DESC : backend_factice_desc();
     if (!echec) {

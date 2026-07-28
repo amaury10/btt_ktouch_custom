@@ -300,12 +300,15 @@ void app_main(void)
 
     if (!reglages_configures()) {
         /* Premier démarrage, ou réglages jamais saisis : normal, pas une
-         * erreur. L'écran de première configuration qui renseignera l'hôte
-         * appartient au sous-jalon 2b — en attendant, ne pas démarrer la
-         * boucle plutôt que de la lancer contre une adresse vide, qui
-         * échouerait à chaque cycle pour rien. */
+         * erreur. L'écran de première configuration (ECRAN_CONFIGURATION,
+         * empilé plus bas sous PT_LVGL_SCOPE_LOCK()) renseignera l'hôte ;
+         * en attendant qu'il le fasse, ne pas démarrer la boucle plutôt que
+         * de la lancer contre une adresse vide, qui échouerait à chaque
+         * cycle pour rien. Texte corrigé (revue tâche 8, round 1, Q6) :
+         * l'ancienne version annonçait cet écran "à venir au sous-jalon 2b"
+         * -- c'était vrai avant la tâche 8, plus depuis. */
         JOURNAL_ALERTE(TAG, "aucun hote configure : la boucle d'interrogation ne demarre pas "
-                       "(ecran de configuration a venir au sous-jalon 2b)");
+                       "(en attente de l'ecran de configuration)");
     } else {
         /* Sélection du backend par le nom que porte CHAQUE descripteur
          * lui-même (desc->nom), jamais par une chaîne recopiée ici : ainsi
@@ -411,11 +414,39 @@ void app_main(void)
              * est déjà connu à ce point (reglages_charger() a tourné plus
              * haut) et que ce site est déjà sous PT_LVGL_SCOPE_LOCK() pour
              * build_test_pattern() ci-dessus — le même verrou protège donc
-             * cette construction-ci sans rien inventer. ECRAN_CONFIGURATION
-             * tant qu'aucun hôte n'a jamais été saisi (Kconfig compris, voir
-             * reglages.h) ; ECRAN_ACCUEIL sinon.
+             * cette construction-ci sans rien inventer.
              *
-             * Ce que ce câblage NE fait PAS, et qui reste explicitement le
+             * ECRAN_ACCUEIL est TOUJOURS empilé en premier, jamais seulement
+             * ECRAN_CONFIGURATION seul (corrigé revue tâche 8, round 1,
+             * Q1 IMPORTANT) : navigation_accueil() (bouton Save de l'écran de
+             * configuration) est un `while (profondeur > 1)`, un no-op à
+             * profondeur 1 -- avec ECRAN_CONFIGURATION seul en fond de pile,
+             * Save n'aurait donc LITTÉRALEMENT aucun endroit où revenir : la
+             * bannière "Settings saved" s'affiche, l'écran ne bouge pas, et
+             * le bouton retour reste cacher (profondeur == 1). Reproduit et
+             * confirmé par la revue avec la vraie topologie de ce fichier.
+             * Empiler l'accueil D'ABORD puis, si l'appareil n'est pas encore
+             * configuré, ECRAN_CONFIGURATION PAR-DESSUS lui donne un sens
+             * réel à Save (retour à l'accueil, déjà construit et grisé
+             * puisque la boucle ne démarre pas tant que l'hôte n'est pas
+             * configuré) et fait apparaître le bouton retour (profondeur > 1)
+             * pour qui veut jeter un œil à l'accueil en cours de
+             * configuration sans valider quoi que ce soit. */
+            habillage_construire(lv_screen_active());
+            esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL);
+            if (erreur_accueil != ESP_OK) {
+                JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
+                               esp_err_to_name(erreur_accueil));
+            }
+            if (!reglages_configures()) {
+                esp_err_t erreur_config = navigation_empiler(&ECRAN_CONFIGURATION);
+                if (erreur_config != ESP_OK) {
+                    JOURNAL_ERREUR(TAG, "navigation_empiler(configuration) a echoue (%s)",
+                                   esp_err_to_name(erreur_config));
+                }
+            }
+
+            /* Ce que ce câblage NE fait PAS, et qui reste explicitement le
              * travail de la tâche 10 : un rafraîchissement PÉRIODIQUE de la
              * barre d'état (heure, wifi, notifications qui expirent). Un seul
              * habillage_pomper() ci-dessous peuple la barre une fois, à la
@@ -426,18 +457,27 @@ void app_main(void)
              * trancher. Notée dans le rapport de tâche 8.
              *
              * La mire de build_test_pattern() ci-dessus n'est PAS retirée :
-             * l'habillage la couvre entièrement une fois construit (fond
-             * opaque plein cadre, voir habillage.c), mais rafraichir_etat_ecran()
-             * continue de tourner sans changement dans la boucle 5 s plus bas
-             * — rien du diagnostic WiFi du jalon 1 n'est supprimé, il devient
-             * seulement invisible tant que l'écran réel est affiché. */
-            const ecran_desc_t *ecran_depart = reglages_configures() ? &ECRAN_ACCUEIL : &ECRAN_CONFIGURATION;
-            habillage_construire(lv_screen_active());
-            esp_err_t erreur_ecran = navigation_empiler(ecran_depart);
-            if (erreur_ecran != ESP_OK) {
-                JOURNAL_ERREUR(TAG, "navigation_empiler(%s) a echoue (%s) : ecran de depart absent",
-                               ecran_depart->id, esp_err_to_name(erreur_ecran));
-            }
+             * comportement inchangé au niveau code (corrigé revue tâche 8,
+             * round 1, Q5 : ce paragraphe affirmait à tort que "l'habillage
+             * la couvre entièrement, fond opaque plein cadre" -- FAUX :
+             * g_contenu, la zone que habillage_construire() crée pour
+             * accueillir la navigation, est intégralement TRANSPARENTE
+             * (lv_obj_remove_style_all(), voir habillage.c). Ce qui couvre
+             * réellement la mire est la SOMME de la bande d'état opaque
+             * (44 px) et du fond opaque que CHAQUE écran empilé pose
+             * lui-même sur la totalité de sa propre zone (voir COULEUR_FOND
+             * dans ecran_accueil.c/ecran_configuration.c) -- une convention
+             * suivie par les deux écrans actuels, pas une garantie que
+             * habillage.c impose. Si navigation_empiler() échouait ici
+             * (pile pleine, allocation refusée -- voir les JOURNAL_ERREUR
+             * ci-dessus), rien ne serait empilé et la mire referait surface
+             * au travers de g_contenu transparent : un repli dégradé mais
+             * honnête (une mire lisible plutôt qu'un écran gris uniforme),
+             * pas un défaut à corriger. rafraichir_etat_ecran() continue de
+             * tourner sans changement dans la boucle 5 s plus bas quel que
+             * soit ce résultat — rien du diagnostic WiFi du jalon 1 n'est
+             * supprimé, il devient seulement invisible tant qu'un écran
+             * réel couvre effectivement l'affichage. */
             habillage_pomper();
         }
 
