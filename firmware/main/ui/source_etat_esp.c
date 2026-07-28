@@ -23,3 +23,8 @@ esp_err_t ui_commander(const char *action, const char *arguments_json)
 {
     return boucle_commander(action, arguments_json);
 }
+
+bool ui_commande_echec(char *action, size_t taille)
+{
+    return boucle_commande_echec(action, taille);
+}

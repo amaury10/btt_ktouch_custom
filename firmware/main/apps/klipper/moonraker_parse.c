@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "backend.h"
 #include "cJSON.h"
 
 /* Lit un nombre optionnel ; laisse `defaut` si le champ manque ou n'en est pas un. */
@@ -99,5 +100,31 @@ bool moonraker_parse_status(const char *json, size_t longueur, etat_klipper_t *s
 
     *sortie = e;
     cJSON_Delete(racine);
+    return true;
+}
+
+bool moonraker_chemin_commande(const char *action, char *chemin, size_t taille)
+{
+    if (action == NULL || chemin == NULL || taille == 0) {
+        return false;
+    }
+
+    const char *trouve;
+    if (strcmp(action, BACKEND_ACTION_PAUSE) == 0) {
+        trouve = "printer/print/pause";
+    } else if (strcmp(action, BACKEND_ACTION_REPRENDRE) == 0) {
+        trouve = "printer/print/resume";
+    } else if (strcmp(action, BACKEND_ACTION_ANNULER) == 0) {
+        trouve = "printer/print/cancel";
+    } else if (strcmp(action, BACKEND_ACTION_URGENCE) == 0) {
+        trouve = "printer/emergency_stop";
+    } else {
+        /* Action inconnue : ne rien ecrire dans `chemin`, l'appelant ne doit
+         * jamais emettre de requete avec un tampon a moitie rempli ou perime
+         * d'un appel precedent. */
+        return false;
+    }
+
+    snprintf(chemin, taille, "%s", trouve);
     return true;
 }

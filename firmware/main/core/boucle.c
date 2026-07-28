@@ -78,6 +78,14 @@ static uint32_t               s_tas_libre_min = UINT32_MAX;
  * tampon arrière, jamais celui qu'un lecteur consulte. */
 static SemaphoreHandle_t      g_mutex_etat;
 
+/* Tâche 9 : dernier échec de commande en attente d'être consommé par
+ * boucle_commande_echec() (voir son commentaire dans boucle.h), protégé par
+ * le MÊME g_mutex_etat que le reste de ce triplet d'état partagé entre la
+ * tâche d'interrogation et un appelant concurrent -- jamais un second mutex
+ * pour une aussi petite section critique (un snprintf et deux booléens). */
+static char g_echec_action[BOUCLE_ACTION_MAX];
+static bool g_echec_en_attente = false;
+
 /* Dépile et exécute toutes les commandes en attente. Appelée par la tâche
  * d'interrogation elle-même, jamais par l'appelant de boucle_commander() —
  * c'est ce qui tient la promesse du brief : un appui bouton n'attend jamais
@@ -102,6 +110,17 @@ static void boucle_traiter_commandes(void)
             JOURNAL_INFO(TAG, "commande %s executee", cmd.action);
         } else {
             JOURNAL_ALERTE(TAG, "commande %s en echec (%s)", cmd.action, esp_err_to_name(erreur));
+
+            /* Tâche 9 : mémorise cet échec pour qu'habillage_pomper() puisse
+             * le remonter à l'écran via ui_commande_echec() -- sans ceci, un
+             * échec survenu APRÈS que ui_commander() a déjà rendu ESP_OK à
+             * son appelant ne serait jamais visible que dans ce journal.
+             * Sous mutex : lu depuis une autre tâche (LVGL) par
+             * boucle_commande_echec(), jamais protégé autrement ici. */
+            xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
+            strlcpy(g_echec_action, cmd.action, sizeof(g_echec_action));
+            g_echec_en_attente = true;
+            xSemaphoreGive(g_mutex_etat);
         }
     }
 }
@@ -375,4 +394,21 @@ esp_err_t boucle_commander(const char *action, const char *arguments_json)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+bool boucle_commande_echec(char *action, size_t taille)
+{
+    if (!g_demarre || action == NULL || taille == 0) {
+        return false;
+    }
+
+    bool en_attente;
+    xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
+    en_attente = g_echec_en_attente;
+    if (en_attente) {
+        strlcpy(action, g_echec_action, taille);
+        g_echec_en_attente = false;
+    }
+    xSemaphoreGive(g_mutex_etat);
+    return en_attente;
 }

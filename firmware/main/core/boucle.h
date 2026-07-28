@@ -91,3 +91,12 @@ bool boucle_instantane(void *dest, size_t taille, uint32_t *generation, liaison_
  * son bouton un instant plutôt que de rester silencieux sur une commande
  * perdue. */
 esp_err_t boucle_commander(const char *action, const char *arguments_json);
+
+/* Miroir de ui_commande_echec() (voir ui/source_etat.h) côté boucle réelle :
+ * même contrat de consommation unique, sous le même g_mutex_etat que
+ * boucle_instantane()/boucle_etat_copier() (critique courte, jamais autour
+ * d'une requête HTTP -- voir boucle_traiter_commandes() dans boucle.c, seul
+ * site qui écrit l'état consommé ici). `taille` doit être au moins
+ * UI_COMMANDE_ACTION_MAX (source_etat.h) pour ne jamais tronquer une action
+ * connue. */
+bool boucle_commande_echec(char *action, size_t taille);

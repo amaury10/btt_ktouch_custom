@@ -53,3 +53,36 @@ bool ui_etat_instantane(void *dest, size_t taille, uint32_t *generation, liaison
  * si `action` est NULL ou trop long, ESP_ERR_NO_MEM si la file est pleine —
  * reprise exacte du contrat de boucle_commander() (core/boucle.h). */
 esp_err_t ui_commander(const char *action, const char *arguments_json);
+
+/* Taille de tampon suffisante pour toute action rendue par ui_commande_echec()
+ * ci-dessous : reprend la marge de BOUCLE_ACTION_MAX (core/boucle.c) et
+ * ACTION_MAX (simulateur/source_etat_sim.c), jamais incluses ici pour ne pas
+ * coupler ce fichier-façade à leurs détails internes -- les trois valeurs
+ * doivent rester en accord (vérifié par host-test/tests/test_commandes.c, qui
+ * exerce une action de 14 octets, "arret_urgence", nettement en-dessous des
+ * trois). */
+#define UI_COMMANDE_ACTION_MAX 32
+
+/* Tâche 9 : remonte l'échec d'une commande exécutée de façon ASYNCHRONE par
+ * la boucle d'interrogation -- après que ui_commander() a déjà rendu ESP_OK
+ * (acceptée en file), donc après que l'appelant d'origine (un rappel de
+ * bouton LVGL) a déjà rendu la main sans connaître le résultat réel (voir le
+ * commentaire de ui_commander() ci-dessus : son code de retour ne dit jamais
+ * si la commande a réussi). Sans cette fonction, un tel échec ne serait
+ * journalisé que côté boucle (JOURNAL_ALERTE), invisible à l'écran -- exactement
+ * le trou que la revue de la tâche 9 a nommé.
+ *
+ * Rend true et copie dans `action` (au moins `taille` octets, voir
+ * UI_COMMANDE_ACTION_MAX) le nom de la commande dont le DERNIER résultat connu
+ * est un échec, si cet échec n'a pas déjà été rendu par un appel précédent --
+ * consommation unique, comme une file à un seul élément : un second appel
+ * immédiat rend false tant qu'aucun nouvel échec n'est survenu depuis. Conçue
+ * pour être appelée à intervalle régulier par habillage_pomper() (la seule
+ * tâche qui touche LVGL à cadence fixe, voir ui/habillage.c), qui traduit un
+ * true en habillage_notifier(..., true) -- c'est le SEUL site qui décide de
+ * remonter ceci à l'écran, jamais boucle.c/source_etat_sim.c eux-mêmes
+ * (core/ reste LVGL-free, voir leur propre commentaire de tête).
+ *
+ * Rend false sans toucher `action` si la boucle n'a pas démarré, si `action`
+ * est NULL, si `taille` vaut 0, ou si aucun échec n'est en attente. */
+bool ui_commande_echec(char *action, size_t taille);

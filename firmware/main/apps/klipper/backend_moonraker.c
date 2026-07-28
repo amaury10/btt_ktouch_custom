@@ -515,16 +515,11 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
         return ESP_ERR_INVALID_STATE;
     }
 
-    const char *chemin;
-    if (strcmp(action, BACKEND_ACTION_PAUSE) == 0) {
-        chemin = "printer/print/pause";
-    } else if (strcmp(action, BACKEND_ACTION_REPRENDRE) == 0) {
-        chemin = "printer/print/resume";
-    } else if (strcmp(action, BACKEND_ACTION_ANNULER) == 0) {
-        chemin = "printer/print/cancel";
-    } else if (strcmp(action, BACKEND_ACTION_URGENCE) == 0) {
-        chemin = "printer/emergency_stop";
-    } else {
+    /* Correspondance action -> chemin extraite en fonction pure (revue tache 9)
+     * pour etre testable sans reseau, voir moonraker_chemin_commande() et
+     * host-test/tests/test_commandes.c. */
+    char chemin[MOONRAKER_CHEMIN_COMMANDE_MAX];
+    if (!moonraker_chemin_commande(action, chemin, sizeof(chemin))) {
         /* Une action inconnue doit echouer fort et explicitement, pour que
          * l'interface puisse griser un bouton en connaissant la raison —
          * jamais l'ignorer en silence (meme regle que backend_factice.c). */

@@ -2,7 +2,9 @@
 #include "habillage.h"
 
 #include <stdio.h>
+#include <string.h>
 
+#include "backend.h"
 #include "etat_klipper.h"
 #include "journal.h"
 #include "navigation.h"
@@ -91,6 +93,28 @@ uint32_t habillage_couleur_liaison(liaison_etat_t etat)
 bool habillage_donnees_perimees(liaison_etat_t etat)
 {
     return etat != LIAISON_EN_LIGNE;
+}
+
+/* Tâche 9 : traduit une action interne (BACKEND_ACTION_PAUSE/REPRENDRE/
+ * ANNULER/URGENCE, voir core/backend.h -- ce sont les seules valeurs que
+ * ui_commande_echec() peut jamais rendre, puisqu'elles sont aussi les seules
+ * que ecran_accueil.c empile via ui_commander()) en un mot anglais présentable
+ * dans le bandeau de notification (§5.3 : texte d'interface en anglais,
+ * jamais un identifiant interne francophone brut comme "reprendre"). Second
+ * site de couplage à une application Klipper précise dans ce fichier par
+ * ailleurs générique (voir le commentaire de tête de habillage.h) -- au même
+ * titre que l'unique site déjà documenté là (ui_etat_instantane() /
+ * etat_klipper_t) : un fork adapte ce fichier-ci, pas ecran.h/navigation.c.
+ * Défensif sur une action non reconnue (rendue telle quelle) plutôt que de
+ * planter ou d'inventer un texte qui masquerait un futur cas réel -- ne
+ * devrait jamais arriver en pratique. */
+static const char *libelle_commande(const char *action)
+{
+    if (strcmp(action, BACKEND_ACTION_PAUSE) == 0)     return "pause";
+    if (strcmp(action, BACKEND_ACTION_REPRENDRE) == 0) return "resume";
+    if (strcmp(action, BACKEND_ACTION_ANNULER) == 0)   return "cancel";
+    if (strcmp(action, BACKEND_ACTION_URGENCE) == 0)   return "emergency stop";
+    return action;
 }
 
 static void bouton_retour_cb(lv_event_t *e)
@@ -308,6 +332,19 @@ void habillage_pomper(void)
          * rafraîchir, et ui_etat_instantane() n'aurait de toute façon rien
          * à transmettre à une navigation qui n'existe pas. */
         return;
+    }
+
+    /* Tâche 9 : remonte l'échec ASYNCHRONE d'une commande (exécutée par la
+     * boucle APRÈS que ui_commander() a déjà rendu la main à son appelant
+     * d'origine, voir le commentaire de ui_commande_echec() dans
+     * source_etat.h) avant toute autre chose ici -- indépendant de la
+     * génération de l'état, qui ne change pas forcément quand une commande
+     * échoue (une pause refusée laisse l'imprimante dans le même état). */
+    char action_echouee[UI_COMMANDE_ACTION_MAX];
+    if (ui_commande_echec(action_echouee, sizeof(action_echouee))) {
+        char texte[64];
+        snprintf(texte, sizeof(texte), "Command failed: %s", libelle_commande(action_echouee));
+        habillage_notifier(texte, true);
     }
 
     uint32_t generation = 0;

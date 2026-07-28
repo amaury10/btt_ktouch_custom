@@ -8,9 +8,14 @@
  * d'entre elles ne désaligne pas silencieusement le reste de la colonne. */
 #include "ecran_accueil.h"
 
+#include <stdio.h>
 #include <string.h>
 
+#include "backend.h"
+#include "confirmation.h"
 #include "etat_klipper.h"
+#include "habillage.h"
+#include "source_etat.h"
 
 #define LARGEUR_CONTENU 800
 
@@ -54,10 +59,11 @@ _Static_assert(MARGE + 2 * TUILE_LARGEUR + MARGE <= LARGEUR_CONTENU,
 _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_CONTENU,
                 "les trois boutons + marges/ecarts debordent de la largeur du contenu");
 
-/* Un bouton créé ici mais INERTE : aucun lv_obj_add_event_cb(). Câbler une
- * action est le travail de la tâche 9, une fois la file de commandes en
- * place (voir le commentaire de tête de ce fichier et celui de
- * ecran_accueil.h). */
+/* Construit le bouton lui-même (taille, position, couleur, libellé initial) ;
+ * ne pose AUCUN lv_obj_add_event_cb() -- c'est le travail de l'appelant, dans
+ * ecran_accueil_construire() plus bas, une fois `ctx` disponible pour servir
+ * de user_data aux trois rappels (voir la tâche 9 et le commentaire de tête
+ * de ecran_accueil.h). */
 static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, uint32_t couleur_fond, lv_coord_t x)
 {
     lv_obj_t *bouton = lv_button_create(parent);
@@ -75,6 +81,89 @@ static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, uint32_t coul
     lv_obj_center(label);
 
     return bouton;
+}
+
+/* Tâche 9 : envoie `action` via ui_commander() (la seule porte, voir
+ * ui/source_etat.h) et notifie un échec SYNCHRONE (file pleine, boucle pas
+ * démarrée) avec `libelle` -- un mot anglais présentable, jamais l'action
+ * interne francophone brute (BACKEND_ACTION_REPRENDRE vaut "reprendre").
+ * L'échec ASYNCHRONE (commande acceptée ici, mais qui échoue plus tard à
+ * l'exécution réelle par la boucle) est un chemin SÉPARÉ, remonté par
+ * habillage_pomper() via ui_commande_echec() -- voir son commentaire dans
+ * source_etat.h -- jamais depuis cet écran, qui n'a aucun moyen de connaître
+ * ce résultat tardif (ui_commander() rend la main immédiatement, voir son
+ * propre commentaire). N'écrit jamais l'état localement pour "faire réactif" :
+ * le brief est explicite, un écran qui anticipe affiche du faux dès que la
+ * commande échoue -- le prochain sondage (génération suivante) dira la
+ * vérité. */
+static void executer_commande(const char *action, const char *libelle)
+{
+    esp_err_t erreur = ui_commander(action, NULL);
+    if (erreur != ESP_OK) {
+        char texte[64];
+        snprintf(texte, sizeof(texte), "Command failed: %s", libelle);
+        habillage_notifier(texte, true);
+    }
+}
+
+static void bouton_pause_cb(lv_event_t *e)
+{
+    ecran_accueil_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx == NULL || ctx->donnees_perimees) {
+        /* Garde défensive : LV_STATE_DISABLED (voir mettre_a_jour() plus bas)
+         * bloque déjà un appui tactile réel (lv_indev.c vérifie cet état
+         * avant de délivrer LV_EVENT_CLICKED), mais host-test/tests/
+         * test_commandes.c envoie l'événement directement via
+         * lv_obj_send_event(), qui ne passe jamais par cette vérification --
+         * ce `if` est ce qui rend le grisage honnête même sous cette
+         * simulation-là, pas seulement sous un vrai doigt. */
+        return;
+    }
+    if (ctx->en_pause) {
+        executer_commande(BACKEND_ACTION_REPRENDRE, "resume");
+    } else {
+        executer_commande(BACKEND_ACTION_PAUSE, "pause");
+    }
+}
+
+static void rappel_confirmation_annuler(bool confirme, void *contexte)
+{
+    ecran_accueil_ctx_t *ctx = contexte;
+    if (!confirme || ctx == NULL || ctx->donnees_perimees) {
+        return;
+    }
+    executer_commande(BACKEND_ACTION_ANNULER, "cancel");
+}
+
+static void rappel_confirmation_urgence(bool confirme, void *contexte)
+{
+    ecran_accueil_ctx_t *ctx = contexte;
+    if (!confirme || ctx == NULL || ctx->donnees_perimees) {
+        return;
+    }
+    executer_commande(BACKEND_ACTION_URGENCE, "emergency stop");
+}
+
+static void bouton_annuler_cb(lv_event_t *e)
+{
+    ecran_accueil_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx == NULL || ctx->donnees_perimees) {
+        return;
+    }
+    confirmation_ouvrir("Cancel print?",
+                         "This will stop the current print. This cannot be undone.",
+                         "Cancel print", true, rappel_confirmation_annuler, ctx);
+}
+
+static void bouton_urgence_cb(lv_event_t *e)
+{
+    ecran_accueil_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx == NULL || ctx->donnees_perimees) {
+        return;
+    }
+    confirmation_ouvrir("Emergency stop?",
+                         "This will immediately halt the printer. This cannot be undone.",
+                         "E-STOP", true, rappel_confirmation_urgence, ctx);
 }
 
 static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
@@ -127,10 +216,19 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
     lv_obj_align_to(ctx->temps, ctx->progression.racine, LV_ALIGN_CENTER, TEMPS_DECALAGE_X, 0);
 
     ctx->bouton_pause = bouton_creer(parent, "Pause", COULEUR_BOUTON, MARGE);
+    /* Seul enfant du bouton (voir bouton_creer()) : conservé pour que
+     * mettre_a_jour() puisse faire basculer "Pause"/"Resume" sans reparcourir
+     * l'arbre a chaque appel. */
+    ctx->label_pause = lv_obj_get_child(ctx->bouton_pause, 0);
+    lv_obj_add_event_cb(ctx->bouton_pause, bouton_pause_cb, LV_EVENT_CLICKED, ctx);
+
     ctx->bouton_annuler =
         bouton_creer(parent, "Cancel", COULEUR_BOUTON, MARGE + BOUTON_LARGEUR + BOUTON_ECART);
+    lv_obj_add_event_cb(ctx->bouton_annuler, bouton_annuler_cb, LV_EVENT_CLICKED, ctx);
+
     ctx->bouton_urgence = bouton_creer(parent, "E-STOP", COULEUR_BOUTON_URGENCE,
                                         MARGE + 2 * (BOUTON_LARGEUR + BOUTON_ECART));
+    lv_obj_add_event_cb(ctx->bouton_urgence, bouton_urgence_cb, LV_EVENT_CLICKED, ctx);
 }
 
 static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
@@ -169,6 +267,14 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
     ui_format_duree(temps, sizeof(temps), e->temps_restant_s);
     lv_label_set_text(ctx->temps, temps);
 
+    /* Tache 9 : bascule Pause/Resume selon l'etat REEL rapporte par le
+     * backend, jamais un etat que le clic aurait anticipe -- ctx->en_pause
+     * est relu par bouton_pause_cb() pour decider QUELLE action envoyer au
+     * prochain clic. Une seule tuile de bouton, deux libelles, comme
+     * l'exige le brief. */
+    ctx->en_pause = e->impression_en_pause;
+    lv_label_set_text(ctx->label_pause, ctx->en_pause ? "Resume" : "Pause");
+
     /* Grisage systematique a chaque appel, jamais incremental (meme lecon
      * que tuile_griser()/progression_griser(), voir la revue de la tache 4) :
      * un appel avec donnees_perimees=false doit rendre exactement les
@@ -179,6 +285,28 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
     uint32_t couleur_texte = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
     lv_obj_set_style_text_color(ctx->fichier, lv_color_hex(couleur_texte), 0);
     lv_obj_set_style_text_color(ctx->temps, lv_color_hex(couleur_texte), 0);
+
+    /* Tache 9 (revue tache 6) : toute la rangee de boutons -- pas seulement
+     * E-STOP -- prend LV_STATE_DISABLED sur donnees_perimees. Un bouton qui
+     * s'enfonce visiblement et ne fait rien sur une liaison morte est un
+     * mensonge d'interface ; §5.3 interdit le TEXTE d'erreur sur l'ecran, pas
+     * l'etat desactive. Systematique a chaque appel, comme le grisage
+     * ci-dessus : donnees_perimees=false doit toujours rendre les trois
+     * boutons reactifs, y compris apres plusieurs allers-retours. ctx->
+     * donnees_perimees est relu par les trois rappels de clic (voir plus
+     * haut) pour rester honnete meme sous un evenement envoye directement
+     * (lv_obj_send_event(), qui ne passe jamais par la verification tactile
+     * de lv_indev.c sur ce meme etat). */
+    ctx->donnees_perimees = donnees_perimees;
+    if (donnees_perimees) {
+        lv_obj_add_state(ctx->bouton_pause, LV_STATE_DISABLED);
+        lv_obj_add_state(ctx->bouton_annuler, LV_STATE_DISABLED);
+        lv_obj_add_state(ctx->bouton_urgence, LV_STATE_DISABLED);
+    } else {
+        lv_obj_remove_state(ctx->bouton_pause, LV_STATE_DISABLED);
+        lv_obj_remove_state(ctx->bouton_annuler, LV_STATE_DISABLED);
+        lv_obj_remove_state(ctx->bouton_urgence, LV_STATE_DISABLED);
+    }
 }
 
 const ecran_desc_t ECRAN_ACCUEIL = {

@@ -10,12 +10,17 @@
  * reste testable sans jamais regarder un pixel.
  *
  * Contrairement au reste de ui/ (ecran.h, navigation.h : entièrement
- * opaques sur `void *etat`), habillage.c est couplé à `etat_klipper_t` en
- * UN seul site (l'appel à ui_etat_instantane() dans habillage_pomper(), qui
- * doit connaître la taille exacte de l'état du backend pour en obtenir quoi
- * que ce soit — voir le commentaire de source_etat.h). Un fork avec une
- * autre application (une machine non-Klipper) adapte ce fichier-là, pas
- * ecran.h/navigation.c qui restent réutilisables tels quels. */
+ * opaques sur `void *etat`), habillage.c est couplé à l'application Klipper
+ * en DEUX sites (tâche 9 : un second est apparu depuis la version initiale de
+ * ce commentaire, qui n'en comptait qu'un). Le premier : l'appel à
+ * ui_etat_instantane() dans habillage_pomper(), qui doit connaître la taille
+ * exacte de l'état du backend (`etat_klipper_t`) pour en obtenir quoi que ce
+ * soit — voir le commentaire de source_etat.h. Le second : libelle_commande()
+ * dans habillage.c, qui traduit les actions BACKEND_ACTION_* (core/backend.h)
+ * en mots anglais pour le bandeau de notification, après un échec de commande
+ * asynchrone (voir ui_commande_echec() dans source_etat.h). Un fork avec une
+ * autre application (une machine non-Klipper) adapte ce fichier-là aux deux
+ * sites, pas ecran.h/navigation.c qui restent réutilisables tels quels. */
 #pragma once
 
 #include <stdbool.h>

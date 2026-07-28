@@ -103,11 +103,18 @@ void suite_ecran_accueil(void)
      * ui_format_temperature()/ui_format_duree()/progression_definir()
      * tolerent deja n'importe quelle valeur finie sans planter (voir leurs
      * propres tests dans test_widgets.c), rien n'a donc besoin d'etre
-     * "raisonnable" pour que cet appel soit sur. Les deux booleens en fin de
-     * structure restent eux aussi a 0x7F : ecran_accueil.c ne les lit
-     * jamais (aucun `e->impression_en_...` dans mettre_a_jour()), donc
-     * aucun chargement de `_Bool` invalide ne se produit sous
-     * -fsanitize=undefined.
+     * "raisonnable" pour que cet appel soit sur. `impression_en_cours` reste
+     * a 0x7F : mettre_a_jour() ne le lit jamais. `impression_en_pause`, en
+     * revanche, DOIT etre remis a une valeur valide explicitement (tache 9,
+     * revue) -- ecran_accueil.c le lit desormais pour faire basculer le
+     * libelle Pause/Resume, et un octet 0x7F n'est pas une valeur valide de
+     * `_Bool` : laisse tel quel, ce chargement s'arrete sous
+     * -fsanitize=undefined ("load of value 127, which is not a valid value
+     * for type '_Bool'") -- RED genuinement observe en ecrivant ce fichier,
+     * voir task-9-report.md. Rouge du harnais de test, pas du code de
+     * production : mettre_a_jour() lit un champ que le brief lui demande
+     * desormais de lire, l'entree pathologique de CE test doit simplement
+     * rester dans le domaine valide de _Bool sur ce champ precis.
      *
      * IMPORTANT (verifie a la revue, voir task-6-report.md "Fix round 1") :
      * passer par mettre_a_jour() -> lv_label_set_text() ici n'aboutit PAS a
@@ -129,6 +136,7 @@ void suite_ecran_accueil(void)
     VERIFIER(e != NULL);
     memset(e, 0x7F, sizeof(*e));
     memset(e->fichier, 'x', KLIPPER_FICHIER_MAX);
+    e->impression_en_pause = false; /* voir le commentaire ci-dessus */
 
     VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(e, false, ctx), true));
     const char *nom_affiche = lv_label_get_text(ctx->fichier);

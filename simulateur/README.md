@@ -112,6 +112,16 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
     comportement du scénario 3). Utiliser `--cycles 0` avec `7` pour une
     capture "au repos" sans le bandeau "host connected" que `--cycles`
     positif déclenche par ailleurs (voir plus bas).
+  - `9` (tâche 9, mode capture uniquement) : démontre l'échec ASYNCHRONE
+    d'une commande -- `ui_commander()` l'accepte tout de suite (`ESP_OK`),
+    mais son exécution réelle, plus tard par la boucle simulée, échoue
+    délibérément (`backend_factice_commande_echoue(true)`, voir
+    `firmware/main/core/backend_factice.h`) avant même le premier cycle de
+    `--cycles`. Comme `5`/`6`/`7`/`8`, ne correspond à aucun scénario du
+    backend factice (repli sur le comportement du scénario 3) ; contrairement
+    à eux, laisse aussi le bandeau "host connected" de côté (voir plus bas)
+    pour que le bandeau d'échec ("Command failed: pause") reste visible sur
+    la capture au lieu d'être remplacé.
   - tout autre numéro retombe sur le comportement du scénario 3 (voir
     `backend_factice_rafraichir()`).
 - `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`

@@ -14,6 +14,11 @@ static const char *TAG = "backend_factice";
  * etat_klipper_t. */
 static int g_scenario = 0;
 
+/* Tâche 9 : bascule de backend_factice_commande_echoue(), voir son
+ * commentaire dans backend_factice.h. Statique de fichier comme g_scenario
+ * ci-dessus, pour la même raison. */
+static bool g_commande_echoue = false;
+
 /* Progression du scénario 1, portée ICI plutôt que relue depuis `etat` : le
  * socle remet `etat` à zéro avant CHAQUE appel de rafraichir() (voir le
  * contrat documenté sur backend_desc_t::rafraichir dans backend.h), donc
@@ -40,6 +45,11 @@ static float g_progression_scenario1 = 0.0f;
 void backend_factice_scenario(int numero)
 {
     g_scenario = numero;
+}
+
+void backend_factice_commande_echoue(bool echoue)
+{
+    g_commande_echoue = echoue;
 }
 
 static esp_err_t backend_factice_demarrer(void *etat, const backend_hote_t *hote)
@@ -177,6 +187,16 @@ static esp_err_t backend_factice_commande(void *etat, const char *action,
         strcmp(action, BACKEND_ACTION_REPRENDRE) == 0 ||
         strcmp(action, BACKEND_ACTION_ANNULER) == 0 ||
         strcmp(action, BACKEND_ACTION_URGENCE) == 0) {
+        if (g_commande_echoue) {
+            /* Echec deliberement force (voir backend_factice_commande_echoue()) :
+             * une action par ailleurs valide echoue quand meme, pour exercer le
+             * chemin d'echec ASYNCHRONE (commande acceptee en file, executee plus
+             * tard, et C'EST LA qu'elle echoue) plutot que le seul chemin
+             * synchrone (file pleine) que ui_commander() peut deja signaler
+             * directement a l'appelant. */
+            JOURNAL_ALERTE(TAG, "commande %s en echec (force par backend_factice_commande_echoue)", action);
+            return ESP_FAIL;
+        }
         JOURNAL_INFO(TAG, "commande %s", action);
         return ESP_OK;
     }

@@ -47,6 +47,13 @@ static commande_t g_file[FILE_PROFONDEUR];
 static size_t      g_file_tete = 0;
 static size_t      g_file_taille = 0;
 
+/* Tâche 9 : miroir mono-thread de g_echec_action/g_echec_en_attente dans
+ * core/boucle.c -- même contrat, sans mutex puisque rien ici ne peut être
+ * préempté entre deux instructions (voir le commentaire de tête de ce
+ * fichier). */
+static char g_echec_action[ACTION_MAX];
+static bool g_echec_en_attente = false;
+
 static bool file_pousser(const commande_t *cmd)
 {
     if (g_file_taille >= FILE_PROFONDEUR) {
@@ -122,6 +129,11 @@ static void traiter_commandes(void)
             JOURNAL_INFO(TAG, "commande %s executee", cmd.action);
         } else {
             JOURNAL_ALERTE(TAG, "commande %s en echec", cmd.action);
+            /* Meme miroir que core/boucle.c : memorise l'echec pour qu'un
+             * futur ui_commande_echec() (appele par habillage_pomper()) le
+             * remonte au bandeau de notification. */
+            snprintf(g_echec_action, sizeof(g_echec_action), "%s", cmd.action);
+            g_echec_en_attente = true;
         }
     }
 }
@@ -198,4 +210,19 @@ esp_err_t ui_commander(const char *action, const char *arguments_json)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+bool ui_commande_echec(char *action, size_t taille)
+{
+    if (!g_demarre || action == NULL || taille == 0 || !g_echec_en_attente) {
+        return false;
+    }
+    snprintf(action, taille, "%s", g_echec_action);
+    g_echec_en_attente = false;
+    return true;
+}
+
+size_t source_etat_sim_file_taille(void)
+{
+    return g_file_taille;
 }

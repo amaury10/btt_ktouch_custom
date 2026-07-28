@@ -42,3 +42,13 @@ bool source_etat_sim_demarrer(const backend_desc_t *desc);
  * jamais avancer le temps ni ne bloque : c'est à l'appelant (simulateur/main.c)
  * de décider du rythme auquel il appelle cette fonction. */
 void source_etat_sim_cycle(void);
+
+/* EXPOSÉ POUR LES TESTS UNIQUEMENT (tâche 9) : nombre de commandes
+ * actuellement en attente dans la file interne -- jamais consommé par
+ * simulateur/main.c, qui n'a besoin que des deux fonctions ci-dessus.
+ * ui_commander() (source_etat.h) ne dit que "acceptée ou non", jamais combien
+ * de commandes attendent déjà ; host-test/tests/test_commandes.c s'en sert
+ * pour prouver qu'un dialogue de confirmation DÉCLINÉ n'empile RIEN (la
+ * taille de la file ne bouge pas), ce qu'aucune fonction publique de
+ * source_etat.h ne permet d'observer directement. 0 avant tout démarrage. */
+size_t source_etat_sim_file_taille(void);

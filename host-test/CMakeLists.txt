@@ -114,6 +114,7 @@ add_executable(tests
     tests/test_ecran_accueil.c
     tests/test_clavier.c
     tests/test_ecran_configuration.c
+    tests/test_commandes.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c

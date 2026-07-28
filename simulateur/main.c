@@ -34,6 +34,7 @@
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
+#include "source_etat.h"
 #include "source_etat_sim.h"
 
 /* --- Backend qui échoue systématiquement -------------------------------- *
@@ -151,6 +152,35 @@ int main(int argc, char **argv)
         fprintf(stderr, "echec du demarrage de la boucle simulee\n");
     }
 
+    /* --scenario 9 (tache 9, mode capture uniquement) : demontre l'echec
+     * ASYNCHRONE d'une commande -- ui_commander() l'accepte tout de suite
+     * (ESP_OK), mais son execution reelle, plus tard par la boucle simulee,
+     * echoue deliberement (backend_factice_commande_echoue(true), tache 9) --
+     * exactement le chemin qu'un simple appui bouton ne peut pas montrer ici
+     * (aucune simulation d'entree tactile en mode capture, voir le
+     * commentaire de tete de ce fichier). Empilee AVANT la boucle de cycles
+     * ci-dessous : le premier appel a source_etat_sim_cycle() l'execute et la
+     * fait echouer, et le habillage_pomper() du meme tour de boucle remonte
+     * cet echec au bandeau de notification (voir ui_commande_echec() dans
+     * ui/source_etat.h et son polling par habillage_pomper()) -- sans
+     * attendre le "host connected" que --cycles positif declenche par
+     * ailleurs plus bas (voir la note sur ce bandeau-la). Ne correspond a
+     * aucun scenario du backend factice (retombe sur le comportement du
+     * scenario 3, "printing" plausible -- voir backend_factice_scenario()) :
+     * Pause a un sens contre un etat "printing", meme si aucun champ de cet
+     * etat n'influence l'echec force lui-meme. */
+    if (scenario == 9) {
+        backend_factice_commande_echoue(true);
+        esp_err_t erreur_commande = ui_commander(BACKEND_ACTION_PAUSE, NULL);
+        if (erreur_commande != ESP_OK) {
+            /* esp_err_to_name() n'existe pas dans shim/esp_err.h (doublure
+             * minimale, voir son commentaire de tete) : le code numerique
+             * suffit ici, ce n'est qu'un message de diagnostic sur stderr. */
+            fprintf(stderr, "scenario 9 : ui_commander a refuse la commande (code %d)\n",
+                    (int)erreur_commande);
+        }
+    }
+
     if (chemin_capture != NULL) {
         /* --cycles fait avancer la boucle simulée d'autant de "secondes"
          * avant la capture : un cycle = un rafraîchissement du backend +
@@ -164,7 +194,12 @@ int main(int argc, char **argv)
         if (cycles == 0) {
             habillage_pomper();
         }
-        if (cycles > 0) {
+        /* scenario 9 exclu : la boucle ci-dessus a deja fait remonter, via
+         * habillage_pomper(), le bandeau d'echec de commande que ce scenario
+         * existe pour capturer -- un "host connected" ecrirait par-dessus
+         * (habillage_notifier() REMPLACE, jamais n'empile, voir son
+         * commentaire dans habillage.h) avant meme la capture. */
+        if (cycles > 0 && scenario != 9) {
             habillage_notifier(echec ? "connection lost" : "host connected", echec);
         }
 
