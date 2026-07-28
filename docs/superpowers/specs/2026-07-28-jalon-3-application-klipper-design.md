@@ -115,7 +115,13 @@ L'écran d'impression du 2b gagne le pilotage en cours :
   le widget arrive avec cet écran conformément au principe d'extraction) ;
 - **miniatures** : Moonraker sert les vignettes PNG embarquées par les
   slicers ; décodage PNG en PSRAM, cache borné avec éviction, placeholder si
-  absente ou trop grande ;
+  absente ou trop grande. **Position de repli (décision utilisateur), même
+  convention que la bed mesh** : si les miniatures s'avèrent trop coûteuses
+  ou fragiles (décodage, mémoire, latence), l'écran est livré en liste
+  seule — nom, date, taille — pleinement fonctionnel, et l'abandon des
+  vignettes est consigné avec sa raison. La liste n'attend jamais les
+  miniatures : elle s'affiche d'abord, les vignettes arrivent ensuite,
+  chacune quand elle est décodée ;
 - métadonnées avant lancement (temps estimé, filament) ;
 - lancement avec confirmation (`printer.print.start`), et c'est CE chemin qui
   active le bouton Imprimer de 3b.
