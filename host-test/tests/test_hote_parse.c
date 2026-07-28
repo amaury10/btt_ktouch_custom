@@ -16,13 +16,109 @@ void suite_hote_parse(void)
         VERIFIER(h.port == 7125);
     }
 
-    /* Adresse IPv6 littérale : contient elle-même plusieurs ':' — le
-     * découpage doit se faire sur le DERNIER, pas le premier. */
+    /* Adresse IPv6 littérale SANS crochets : ambiguë -- le découpage sur le
+     * DERNIER ':' donnerait "fe80::1", mais rien ne distingue alors ce cas de
+     * "a:b:c" (adresse "a:b", tout aussi arbitraire). REJETÉE depuis la revue
+     * de la tâche 8 (round 1) : avant ce correctif, ce cas était accepté et
+     * produisait ensuite une URL Moonraker elle-même ambiguë
+     * ("http://fe80::1:7125/...", voir backend_moonraker.c) -- non conforme à
+     * RFC 3986 §3.2.2, qui exige la forme "[adresse]" pour tout hôte IPv6
+     * littéral dans une URI. La forme entre crochets ci-dessous est
+     * désormais la SEULE façon exploitable de saisir une adresse IPv6. */
     {
         backend_hote_t h;
-        VERIFIER(hote_parse("fe80::1:8080", &h) == true);
+        VERIFIER(hote_parse("fe80::1:8080", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+        VERIFIER(h.port == HOTE_PARSE_PORT_DEFAUT);
+    }
+
+    /* Même règle, cas dégénéré à trois ':' : la chaîne entière est jugée
+     * inexploitable, pas seulement la première paire — même diagnostic que
+     * ci-dessus (candidat d'adresse "::" ou "a:b", qui contient lui-même un
+     * ':'). */
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse(":::", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+        VERIFIER(h.port == HOTE_PARSE_PORT_DEFAUT);
+    }
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("a:b:c", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+        VERIFIER(h.port == HOTE_PARSE_PORT_DEFAUT);
+    }
+
+    /* Adresse IPv6 entre crochets (RFC 3986 §3.2.2) : la SEULE forme
+     * exploitable pour une adresse qui contient elle-même des ':' --
+     * crochets retirés pour le stockage (voir backend.h : adresse "sans
+     * schéma", pas "sans crochets" à la lettre, mais c'est la convention
+     * retenue ici pour que backend_moonraker.c n'ait qu'à réencadrer au
+     * moment de construire l'URL, jamais à décider où). */
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("[fe80::1]:8080", &h) == true);
         VERIFIER_TEXTE(h.adresse, "fe80::1");
         VERIFIER(h.port == 8080);
+    }
+
+    /* Crochets sans port : port par défaut, même règle que "moulinex.local:"
+     * plus bas pour la forme sans crochets. */
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("[fe80::1]", &h) == true);
+        VERIFIER_TEXTE(h.adresse, "fe80::1");
+        VERIFIER(h.port == HOTE_PARSE_PORT_DEFAUT);
+    }
+
+    /* Crochet ouvrant jamais refermé, ou contenu vide entre crochets : chaîne
+     * jugée inexploitable dans les deux cas, jamais une adresse tronquée ou
+     * vide silencieusement acceptée. */
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("[fe80::1", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+    }
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("[]:80", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+    }
+
+    /* Préfixe de schéma ("http://", ou n'importe quel "://") : rejeté
+     * d'emblée, avant même toute tentative de découpage sur ':' -- sans quoi
+     * une valeur collée depuis un navigateur ("http://192.168.1.50:7125")
+     * serait acceptée avec pour adresse "http", puis reconstruite en
+     * "http://http://..." par backend_moonraker.c (revue tâche 8, round 1). */
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("http://host:7125", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+    }
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("http://192.168.1.50:7125", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+    }
+
+    /* Espace de tête ou de fin : REJETÉ, jamais tronqué silencieusement --
+     * même politique que le brief de la tâche 8 l'exige pour la troncature :
+     * une saisie qui contient un défaut visible doit être visiblement
+     * refusée, pas discrètement corrigée à la place de l'utilisateur. */
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse(" 192.168.1.50:7125", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+    }
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse("192.168.1.50:7125 ", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
+    }
+    {
+        backend_hote_t h;
+        VERIFIER(hote_parse(" 192.168.1.50 ", &h) == false);
+        VERIFIER_TEXTE(h.adresse, "");
     }
 
     /* Pas de ':' du tout : chaîne entièrement inexploitable, adresse et

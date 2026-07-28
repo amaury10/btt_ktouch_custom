@@ -57,7 +57,10 @@ static char g_tampon_reponse[MOONRAKER_TAMPON_OCTETS];
  * + ":" (1) + port (5 chiffres max) + "/" (1) + le plus long chemin utilisé
  * ici (l'interrogation, ~74 octets) + le nul terminal. Marge ronde
  * au-dessus de cette somme plutôt qu'un calcul au plus juste, pour ne pas
- * avoir à revenir ici si le chemin d'interrogation s'allonge d'un objet. */
+ * avoir à revenir ici si le chemin d'interrogation s'allonge d'un objet --
+ * cette marge couvre aussi, sans qu'il soit besoin de la grossir, les deux
+ * octets de crochets qu'une adresse IPv6 ajoute (voir
+ * moonraker_construire_url()). */
 #define MOONRAKER_URL_OCTETS (BACKEND_HOTE_LONGUEUR_MAX + 128)
 
 /* Délai appliqué à CHAQUE opération socket individuelle (connexion, lecture) :
@@ -119,10 +122,27 @@ static bool           g_actif = false;
 static esp_http_client_handle_t g_client = NULL;
 
 /* Construit "http://<adresse>:<port>/<chemin>" dans `tampon`. `chemin` ne
- * doit pas commencer par '/'. */
+ * doit pas commencer par '/'.
+ *
+ * `g_hote.adresse` est stockée SANS crochets, même pour un littéral IPv6
+ * (hote_parse.c les retire à l'analyse -- voir son commentaire de tête,
+ * revue de la tâche 8, round 1) : les remettre est donc le travail de CE
+ * site, le seul qui assemble une URL à partir de `g_hote`. Sans eux,
+ * "fe80::1" donnerait "http://fe80::1:7125/..." -- une URL elle-même
+ * ambiguë (impossible de distinguer les ':' de l'adresse de celui du port),
+ * non conforme à RFC 3986 §3.2.2 qui exige la forme "[adresse]" pour tout
+ * hôte IPv6 littéral dans une URI. Détecté ici par la seule présence d'un
+ * ':' dans l'adresse stockée : hote_parse() garantit déjà qu'une adresse
+ * acceptée qui contient un ':' provient forcément de la forme entre
+ * crochets (voir hote_parse_sans_crochets(), qui rejette toute adresse
+ * candidate contenant elle-même un ':'), jamais d'un hasard. */
 static void moonraker_construire_url(char *tampon, size_t taille, const char *chemin)
 {
-    snprintf(tampon, taille, "http://%s:%u/%s", g_hote.adresse, (unsigned)g_hote.port, chemin);
+    if (strchr(g_hote.adresse, ':') != NULL) {
+        snprintf(tampon, taille, "http://[%s]:%u/%s", g_hote.adresse, (unsigned)g_hote.port, chemin);
+    } else {
+        snprintf(tampon, taille, "http://%s:%u/%s", g_hote.adresse, (unsigned)g_hote.port, chemin);
+    }
 }
 
 /* Cadencement du journal d'échecs de moonraker_requete() (revue de fin de

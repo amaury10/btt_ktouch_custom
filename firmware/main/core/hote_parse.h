@@ -19,22 +19,45 @@
 /* Découpe `chaine` ("adresse:port") et remplit `sortie`. Fonction pure : ni
  * état, ni E/S, ni journalisation.
  *
- * Le découpage se fait sur le DERNIER ':' de la chaîne : une adresse IPv6
- * littérale contient elle-même des ':', et splitter sur le premier casserait
- * ce cas précis.
+ * Rejets d'emblée, avant tout découpage (revue de la tâche 8, round 1 —
+ * une chaîne qui contredit une de ces règles se lit comme un URL collé
+ * depuis un navigateur ou une saisie accidentellement encadrée d'espaces,
+ * jamais comme un hôte que l'utilisateur avait réellement l'intention de
+ * saisir) :
+ * - un espace de tête ou de fin (jamais tronqué silencieusement : une
+ *   saisie qui contient un défaut visible doit être visiblement refusée) ;
+ * - un préfixe de schéma, détecté par la seule présence de "://" n'importe
+ *   où dans la chaîne (ex. "http://192.168.1.50:7125", qui produirait sinon
+ *   une adresse "http" et une URL Moonraker doublement préfixée).
  *
- * Adresse et port sont validés indépendamment l'un de l'autre :
- * - Si aucun ':' n'est trouvé, ou si la partie adresse ne tient pas dans
+ * Deux formes ensuite, selon que `chaine` commence par '[' ou non :
+ * - Forme entre crochets "[adresse]" ou "[adresse]:port" (RFC 3986 §3.2.2) :
+ *   la SEULE forme exploitable pour une adresse qui contient elle-même des
+ *   ':' (IPv6 littéral). Les crochets sont retirés pour le stockage dans
+ *   sortie->adresse (backend_moonraker.c les remet au moment de construire
+ *   l'URL, voir son commentaire). Un crochet ouvrant jamais refermé, ou un
+ *   contenu vide entre crochets, rend la chaîne entière inexploitable.
+ * - Forme "adresse:port" classique, découpée sur le DERNIER ':' de la
+ *   chaîne — MAIS si la partie adresse ainsi obtenue contient elle-même un
+ *   ':', la chaîne est jugée AMBIGUË et rejetée entièrement plutôt que
+ *   d'accepter une adresse arbitraire (avant la revue de la tâche 8,
+ *   "fe80::1:8080" était accepté avec pour adresse "fe80::1" ; c'est
+ *   exactement cette ambiguïté — indiscernable de "a:b:c", adresse "a:b" —
+ *   que la forme entre crochets ci-dessus existe pour lever). Si aucun ':'
+ *   n'est trouvé du tout, ou si la partie adresse ne tient pas dans
  *   sortie->adresse (BACKEND_HOTE_LONGUEUR_MAX octets, nul compris), la
- *   chaîne entière est jugée inexploitable : sortie->adresse est vidée et
- *   sortie->port retombe sur HOTE_PARSE_PORT_DEFAUT.
- * - Sinon l'adresse (éventuellement vide, ex. ":1234") est copiée telle
- *   quelle. Le port n'est accepté que s'il s'écrit en base 10, sans signe ni
- *   caractère superflu, et vaut entre 1 et 65535 ; sinon il retombe seul sur
- *   HOTE_PARSE_PORT_DEFAUT, sans affecter l'adresse déjà copiée.
+ *   chaîne entière est également jugée inexploitable.
+ *
+ * Dans les deux formes, une fois l'adresse obtenue (éventuellement vide,
+ * ex. ":1234") : le port n'est accepté que s'il s'écrit en base 10, sans
+ * signe ni caractère superflu, et vaut entre 1 et 65535 ; sinon il retombe
+ * seul sur HOTE_PARSE_PORT_DEFAUT, sans affecter l'adresse déjà copiée ni
+ * rejeter la chaîne.
  *
  * Rend vrai si `sortie->adresse` est non vide en sortie, c'est-à-dire si le
  * résultat décrit un hôte exploitable — même si le port, lui, a dû retomber
- * sur sa valeur par défaut. Rend faux sinon (chaîne inexploitable, ou adresse
- * vide dans la chaîne d'origine, ex. ":1234"). */
+ * sur sa valeur par défaut. Rend faux sinon (chaîne inexploitable au sens
+ * ci-dessus, ou adresse vide dans la chaîne d'origine, ex. ":1234"). Sur
+ * refus, sortie->adresse est TOUJOURS vidée et sortie->port TOUJOURS remis à
+ * HOTE_PARSE_PORT_DEFAUT — jamais une valeur partiellement construite. */
 bool hote_parse(const char *chaine, backend_hote_t *sortie);
