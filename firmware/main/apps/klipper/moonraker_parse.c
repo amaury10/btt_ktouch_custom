@@ -1,4 +1,4 @@
-﻿#include "moonraker_parse.h"
+#include "moonraker_parse.h"
 
 #include <math.h>
 #include <stdio.h>
