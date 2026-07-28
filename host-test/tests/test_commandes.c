@@ -17,11 +17,17 @@
  *   4. L'échec ASYNCHRONE d'une commande (acceptée par ui_commander(), mais
  *      qui échoue plus tard à l'exécution réelle par la boucle) remonté
  *      jusqu'au bandeau de notification de l'habillage -- réutilise
- *      l'habillage déjà construit par suite_ecran_configuration()
- *      (singleton, voir son propre commentaire dans test_ecran_configuration.c :
- *      "cette suite est la derniere du harnais"), donc CE fichier doit être
- *      enregistré APRÈS elle dans tests/main.c pour que ce singleton existe
- *      déjà quand cette section tourne. */
+ *      l'habillage déjà construit par suite_ecran_configuration() (SEULE
+ *      suite du harnais à appeler habillage_construire(), voir son propre
+ *      commentaire dans test_ecran_configuration.c), donc CE fichier doit
+ *      être enregistré APRÈS elle dans tests/main.c pour que ce singleton
+ *      existe déjà quand cette section tourne.
+ *   5. Un échec d'arrêt d'urgence protégé d'un écrasement par un échec de
+ *      pause dans la MÊME rafale de traitement de file (fix round 1, revue
+ *      tâche 9, MEDIUM 1).
+ *   6. File pleine (fix round 1, revue tâche 9, MEDIUM 2) : ui_commander()
+ *      rend ESP_ERR_NO_MEM au bouton, qui le notifie -- chemin SYNCHRONE,
+ *      distinct des sections 4/5 ci-dessus. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -211,6 +217,14 @@ static void section_ecran_accueil_boutons(void)
     lv_obj_send_event(ctx->bouton_pause, LV_EVENT_CLICKED, NULL);
     VERIFIER(source_etat_sim_file_taille() == avant + 1);
     VERIFIER(dernier_enfant_calque_superieur() == NULL); /* pas de confirmation pour Pause */
+    /* MEDIUM 3 (revue tache 9, fix round 1) : le brief est explicite -- ne
+     * JAMAIS anticiper l'etat localement pour "faire reactif", un ecran qui
+     * anticipe affiche du faux des que la commande echoue. Mutation-prouve
+     * par la revue : ajouter un lv_label_set_text(ctx->label_pause, "Resume")
+     * dans bouton_pause_cb() gardait la suite a 561/0 sans cette assertion --
+     * le libelle doit rester "Pause" jusqu'au PROCHAIN mettre_a_jour(),
+     * jamais mis a jour par le clic lui-meme. */
+    VERIFIER_TEXTE(lv_label_get_text(ctx->label_pause), "Pause");
     source_etat_sim_cycle(); /* draine avant la suite (echoue jamais ici, commande_echoue=false) */
 
     /* --- Cancel, decline : ouvre la confirmation, n'empile RIEN tant que
@@ -229,6 +243,12 @@ static void section_ecran_accueil_boutons(void)
     VERIFIER(bouton_action != NULL);
     /* destructif=true : bouton d'action rouge, comme l'exige confirmation.h */
     VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bouton_action, 0), lv_color_hex(0xE74C3C)));
+    /* LOW (revue tache 9, fix round 1) : le bouton d'action lit deja "Cancel
+     * print" -- un declin par defaut "Cancel" ferait deux boutons commencant
+     * tous les deux par le meme mot dans le meme dialogue. confirmation_ouvrir_ex()
+     * (ecran_accueil.c) lui donne desormais "Keep printing", sans ambiguite
+     * sur ce qu'il fait reellement (rien : l'impression continue). */
+    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_decliner, 0)), "Keep printing");
 
     lv_obj_send_event(bouton_decliner, LV_EVENT_CLICKED, NULL);
     lv_timer_handler(); /* acheve la fermeture asynchrone du dialogue */
@@ -251,19 +271,52 @@ static void section_ecran_accueil_boutons(void)
     lv_timer_handler();
     source_etat_sim_cycle(); /* draine avant la suite */
 
-    /* --- E-STOP, confirme : meme mecanisme, message et libelle propres. */
+    /* --- E-STOP, confirme : meme mecanisme, message et libelle propres.
+     * Declin par defaut "Cancel" ici (pas de "Cancel" en double dans le
+     * libelle d'action "E-STOP", contrairement au dialogue Cancel print
+     * ci-dessus -- confirmation_ouvrir() simple, pas confirmation_ouvrir_ex()). */
     avant = source_etat_sim_file_taille();
     lv_obj_send_event(ctx->bouton_urgence, LV_EVENT_CLICKED, NULL);
     mbox = dernier_msgbox();
     VERIFIER(mbox != NULL);
     VERIFIER_TEXTE(lv_label_get_text(lv_msgbox_get_title(mbox)), "Emergency stop?");
     pied = lv_msgbox_get_footer(mbox);
+    bouton_decliner = lv_obj_get_child(pied, 0);
     bouton_action = lv_obj_get_child(pied, 1);
+    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_decliner, 0)), "Cancel");
     VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bouton_action, 0), lv_color_hex(0xE74C3C)));
     lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL);
     VERIFIER(source_etat_sim_file_taille() == avant + 1);
     lv_timer_handler();
     source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- HIGH (revue tache 9, fix round 1) : une confirmation DEJA DONNEE
+     * doit partir meme si la liaison s'est degradee PENDANT que le dialogue
+     * etait ouvert -- le dialogue reste ouvert le temps qu'un humain lise
+     * "This will immediately halt the printer", largement plus que les ~3 s
+     * (3 sondages manques) qu'il faut a LIAISON_DEGRADEE pour s'installer.
+     * Reproduit exactement le scenario de la revue : ouvre le dialogue AVEC
+     * des donnees fraiches, grise la rangee PENDANT qu'il est ouvert (ce
+     * qu'habillage_pomper() ferait sur cible entre deux pompes), PUIS
+     * confirme. RED contre le code avant ce fix : file inchangee, bandeau
+     * intact, dialogue disparu comme si la commande etait partie. */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->bouton_urgence, LV_EVENT_CLICKED, NULL);
+    mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+    pied = lv_msgbox_get_footer(mbox);
+    bouton_action = lv_obj_get_child(pied, 1);
+
+    ECRAN_ACCUEIL.mettre_a_jour(&etat, true, ctx); /* la liaison se degrade PENDANT la lecture */
+    VERIFIER(lv_obj_has_state(ctx->bouton_urgence, LV_STATE_DISABLED)); /* la rangee EST bien grisee... */
+
+    lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL); /* ...mais la confirmation deja ouverte part quand meme */
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    lv_timer_handler();
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* Retour a des donnees fraiches pour le reste de la section. */
+    ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx);
 
     /* --- Grisage sur donnees perimees (revue tache 6) : toute la rangee
      * prend LV_STATE_DISABLED, round-trip complet. */
@@ -355,9 +408,106 @@ static void section_echec_asynchrone(void)
     VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "sentinelle");
 
     /* Restaure le comportement normal du backend factice : hygiene de fin de
-     * fichier, au cas ou un futur test ajoute plus bas (ou un reordonnancement
-     * de tests/main.c) compterait dessus. */
+     * section, au cas ou une section suivante compterait dessus. */
     backend_factice_commande_echoue(false);
+}
+
+/* ------------------------------------------------------------------------
+ * Section 5 : un echec d'arret d'urgence protege d'un ecrasement par un
+ * echec d'une AUTRE action dans la MEME rafale de traitement de file
+ * (fix round 1, revue tache 9, MEDIUM 1).
+ * ------------------------------------------------------------------------ */
+
+static void section_echec_urgence_priorite(void)
+{
+    printf("suite : commandes (echec urgence protege d'un ecrasement)\n");
+
+    /* Meme technique de restauration que section_echec_asynchrone() ci-dessus
+     * (voir son commentaire) : remet le bandeau en dernier enfant de
+     * lv_screen_active() avant de le chercher. Idempotent si l'arbre est deja
+     * dans cet etat (rien empile depuis la section precedente). */
+    navigation_init(lv_screen_active());
+    lv_obj_t *ecran = lv_screen_active();
+    lv_obj_t *bandeau = lv_obj_get_child(ecran, lv_obj_get_child_count(ecran) - 1);
+    VERIFIER(bandeau != NULL);
+    lv_obj_t *bandeau_texte = lv_obj_get_child(bandeau, 0);
+    VERIFIER(bandeau_texte != NULL);
+
+    /* MEDIUM 1 (revue tache 9, fix round 1) : deux commandes en file, toutes
+     * deux vouees a l'echec, drainees en UNE SEULE rafale par
+     * source_etat_sim_cycle() (traiter_commandes() depile tout ce qui est en
+     * file sans jamais rendre la main entre deux commandes -- rien n'oblige
+     * un pompage entre elles). Sans la protection ajoutee par ce fix,
+     * l'echec de l'arret d'urgence (traite EN PREMIER, voir l'ordre FIFO de
+     * la file) serait ecrase par celui de la pause qui le suit dans la MEME
+     * rafale -- exactement le scenario reproduit par la revue. */
+    backend_factice_commande_echoue(true);
+    VERIFIER(ui_commander(BACKEND_ACTION_URGENCE, NULL) == ESP_OK);
+    VERIFIER(ui_commander(BACKEND_ACTION_PAUSE, NULL) == ESP_OK);
+    source_etat_sim_cycle(); /* draine les DEUX dans la MEME rafale -- les deux echouent */
+    habillage_pomper();      /* ne doit remonter QUE l'echec de l'arret d'urgence */
+
+    VERIFIER(!lv_obj_has_flag(bandeau, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Command failed: emergency stop");
+
+    backend_factice_commande_echoue(false);
+}
+
+/* ------------------------------------------------------------------------
+ * Section 6 : file pleine -- chemin SYNCHRONE (ui_commander() rend
+ * ESP_ERR_NO_MEM tout de suite au clic), distinct de l'echec ASYNCHRONE des
+ * sections 4/5 ci-dessus (fix round 1, revue tache 9, MEDIUM 2).
+ * ------------------------------------------------------------------------ */
+
+static void section_file_pleine(void)
+{
+    printf("suite : commandes (file pleine -> notification)\n");
+
+    navigation_init(lv_screen_active()); /* meme restauration que les sections 4/5 */
+    lv_obj_t *ecran = lv_screen_active();
+    lv_obj_t *bandeau = lv_obj_get_child(ecran, lv_obj_get_child_count(ecran) - 1);
+    VERIFIER(bandeau != NULL);
+    lv_obj_t *bandeau_texte = lv_obj_get_child(bandeau, 0);
+    VERIFIER(bandeau_texte != NULL);
+
+    /* Texte de depart bien distinct de celui attendu en fin de section : les
+     * assertions finales ne passeraient pas "par hasard" si rien n'ecrivait
+     * jamais dans le bandeau (meme discipline que le RED provoque par la
+     * revue : mutation-prouve, executer_commande() vide de son
+     * habillage_notifier() gardait la suite a 561/0 sans un test comme
+     * celui-ci). */
+    habillage_notifier("sentinelle-file-pleine", false);
+
+    lv_obj_t *parent = lv_obj_create(lv_screen_active());
+    void *brut = calloc(1, ECRAN_ACCUEIL.taille_contexte);
+    VERIFIER(brut != NULL);
+    ecran_accueil_ctx_t *ctx = (ecran_accueil_ctx_t *)brut;
+    ECRAN_ACCUEIL.construire(parent, ctx);
+
+    etat_klipper_t etat;
+    memset(&etat, 0, sizeof(etat));
+    etat.impression_en_cours = true;
+    ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx);
+
+    /* MEDIUM 2 : remplit la file (profondeur 4, FILE_PROFONDEUR dans
+     * source_etat_sim.c) directement via ui_commander(), puis un clic REEL
+     * sur Pause pour le 5eme -- lui seul doit rendre ESP_ERR_NO_MEM. */
+    VERIFIER(source_etat_sim_file_taille() == 0);
+    for (int i = 0; i < 4; i++) {
+        VERIFIER(ui_commander(BACKEND_ACTION_PAUSE, NULL) == ESP_OK);
+    }
+    VERIFIER(source_etat_sim_file_taille() == 4);
+
+    lv_obj_send_event(ctx->bouton_pause, LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == 4); /* inchangee : le 5eme a ete refuse */
+    VERIFIER(!lv_obj_has_flag(bandeau, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Command failed: pause");
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bandeau, 0), lv_color_hex(0xB3352C)));
+
+    source_etat_sim_cycle(); /* draine les 4 commandes reellement en file (aucune n'echoue ici) */
+
+    lv_obj_delete(parent);
+    free(brut);
 }
 
 void suite_commandes(void)
@@ -366,4 +516,6 @@ void suite_commandes(void)
     section_backend_factice_commande();
     section_ecran_accueil_boutons();
     section_echec_asynchrone();
+    section_echec_urgence_priorite();
+    section_file_pleine();
 }

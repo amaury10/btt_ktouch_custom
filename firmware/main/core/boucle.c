@@ -116,10 +116,32 @@ static void boucle_traiter_commandes(void)
              * échec survenu APRÈS que ui_commander() a déjà rendu ESP_OK à
              * son appelant ne serait jamais visible que dans ce journal.
              * Sous mutex : lu depuis une autre tâche (LVGL) par
-             * boucle_commande_echec(), jamais protégé autrement ici. */
+             * boucle_commande_echec(), jamais protégé autrement ici.
+             *
+             * Fix round 1 (revue tâche 9, MEDIUM 1) : un seul emplacement,
+             * dernier-écrit-gagne -- si une file pleine (profondeur 4) draine
+             * plusieurs échecs d'affilée SANS qu'habillage_pomper() ne
+             * pompe entre deux (rien ne l'y oblige, c'est une tâche
+             * séparée), seul le DERNIER échec de la rafale survit jusqu'au
+             * bandeau. Un arrêt d'urgence en échec, suivi d'une pause elle
+             * aussi en échec dans la MÊME rafale, ferait alors disparaître
+             * l'échec de l'arrêt d'urgence -- inacceptable pour l'action la
+             * plus critique du firmware. Ne JAMAIS écraser un échec
+             * BACKEND_ACTION_URGENCE déjà en attente par un échec d'une
+             * AUTRE action ; un second échec d'urgence peut en revanche
+             * remplacer le premier (même action, aucune information perdue).
+             * Reste vrai que deux échecs NON-urgence dans la même rafale se
+             * comportent toujours dernier-écrit-gagne -- le premier des deux
+             * est silencieusement perdu, seul le cas urgence est protégé
+             * ici. */
             xSemaphoreTake(g_mutex_etat, portMAX_DELAY);
-            strlcpy(g_echec_action, cmd.action, sizeof(g_echec_action));
-            g_echec_en_attente = true;
+            bool garder_urgence_en_attente = g_echec_en_attente &&
+                strcmp(g_echec_action, BACKEND_ACTION_URGENCE) == 0 &&
+                strcmp(cmd.action, BACKEND_ACTION_URGENCE) != 0;
+            if (!garder_urgence_en_attente) {
+                strlcpy(g_echec_action, cmd.action, sizeof(g_echec_action));
+                g_echec_en_attente = true;
+            }
             xSemaphoreGive(g_mutex_etat);
         }
     }

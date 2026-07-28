@@ -25,10 +25,26 @@
  * objets LVGL programmés à la destruction) au moment de cet appel. */
 typedef void (*confirmation_rappel_t)(bool confirme, void *contexte);
 
+/* Comme confirmation_ouvrir() ci-dessous, mais avec un libellé personnalisé
+ * pour le bouton de déclin (au lieu du "Cancel" fixe) -- utile quand
+ * `libelle_action` commence lui-même par "Cancel" ("Cancel print", par
+ * exemple) : deux boutons qui commencent tous les deux par le même mot dans
+ * le même dialogue prêtent à confusion sur celui qui annule vraiment l'action
+ * (revue tâche 9, fix round 1, LOW — voir ecran_accueil.c, dialogue "Cancel
+ * print?", dont le bouton de déclin lit désormais "Keep printing"). NULL pour
+ * `libelle_decliner` est traité comme chaîne vide, même politique que les
+ * autres paramètres texte de cette fonction. */
+void confirmation_ouvrir_ex(const char *titre, const char *message,
+                             const char *libelle_action, bool destructif,
+                             const char *libelle_decliner,
+                             confirmation_rappel_t rappel, void *contexte);
+
 /* Ouvre un dialogue de confirmation centré, avec `titre`, `message` et un
  * bouton d'action libellé `libelle_action` à côté d'un bouton d'annulation
- * fixe. NULL pour `titre`/`message`/`libelle_action` est traité comme
- * chaîne vide (même politique que le reste de ui/).
+ * fixe libellé "Cancel" — équivalent à confirmation_ouvrir_ex(..., "Cancel",
+ * rappel, contexte), voir ci-dessus pour un libellé de déclin personnalisé.
+ * NULL pour `titre`/`message`/`libelle_action` est traité comme chaîne vide
+ * (même politique que le reste de ui/).
  *
  * `destructif` vrai colore le bouton d'action en rouge et lui refuse tout
  * état "par défaut" (pas de mise en avant visuelle/de focus) — une action

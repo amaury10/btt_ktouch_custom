@@ -58,9 +58,17 @@ esp_err_t ui_commander(const char *action, const char *arguments_json);
  * ci-dessous : reprend la marge de BOUCLE_ACTION_MAX (core/boucle.c) et
  * ACTION_MAX (simulateur/source_etat_sim.c), jamais incluses ici pour ne pas
  * coupler ce fichier-façade à leurs détails internes -- les trois valeurs
- * doivent rester en accord (vérifié par host-test/tests/test_commandes.c, qui
- * exerce une action de 14 octets, "arret_urgence", nettement en-dessous des
- * trois). */
+ * doivent rester en accord. Corrigé (revue tâche 9, fix round 1, LOW) : la
+ * version précédente de ce commentaire prétendait que
+ * host-test/tests/test_commandes.c « vérifie » les trois en accord via une
+ * action de 14 octets ("arret_urgence") -- FAUX pour BOUCLE_ACTION_MAX,
+ * propre à core/boucle.c, jamais compilé sur PC (ESP-only, voir le
+ * commentaire de tête de ui/source_etat_esp.c) : aucun test hôte ne peut
+ * l'atteindre. Le test hôte exerce réellement ACTION_MAX
+ * (simulateur/source_etat_sim.c, lié par host-test) et cette macro-ci ; l'
+ * accord avec BOUCLE_ACTION_MAX reste une invariante à maintenir À LA MAIN
+ * (revue de code), jamais vérifiée mécaniquement avant la cible ESP-IDF
+ * (tâche 10). */
 #define UI_COMMANDE_ACTION_MAX 32
 
 /* Tâche 9 : remonte l'échec d'une commande exécutée de façon ASYNCHRONE par

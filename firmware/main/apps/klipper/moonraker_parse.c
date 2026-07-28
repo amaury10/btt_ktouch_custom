@@ -125,6 +125,20 @@ bool moonraker_chemin_commande(const char *action, char *chemin, size_t taille)
         return false;
     }
 
-    snprintf(chemin, taille, "%s", trouve);
+    /* Fix round 1 (revue tache 9, LOW) : snprintf() tronque en silence sans
+     * jamais le signaler par sa valeur de retour a lui seul -- il faut
+     * COMPARER cette valeur a `taille` pour distinguer une copie complete
+     * d'une copie tronquee. Sans cette comparaison, un appelant qui passerait
+     * un tampon trop court verrait `true` ET un chemin coupe, l'exact
+     * contraire de ce que backend_moonraker_commande() attend d'un chemin
+     * "connu" -- une requete partirait vers une URL qui n'est PAS celle
+     * demandee. N'arrive jamais en pratique avec MOONRAKER_CHEMIN_COMMANDE_MAX
+     * (32, largement au-dessus des 23 octets de "printer/emergency_stop\0",
+     * le plus long des quatre) : defensif contre un futur appelant qui
+     * passerait un tampon plus court, pas un bug observe. */
+    int ecrit = snprintf(chemin, taille, "%s", trouve);
+    if (ecrit < 0 || (size_t)ecrit >= taille) {
+        return false;
+    }
     return true;
 }

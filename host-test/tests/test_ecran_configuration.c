@@ -402,9 +402,15 @@ static void section_enregistrer(void)
     printf("suite : ecran configuration (bouton Save)\n");
 
     /* Une seule habillage_construire() par binaire de tests (singleton, voir
-     * habillage.h) : cette suite est la derniere du harnais (voir
-     * tests/main.c), aucune autre n'appelle habillage_construire() avant
-     * elle. */
+     * habillage.h) : cette suite est la SEULE a appeler habillage_construire()
+     * dans tout le harnais (voir tests/main.c) -- aucune autre suite avant OU
+     * apres elle ne le fait. Corrige (revue tache 9, fix round 1, LOW) : la
+     * version precedente de ce commentaire disait "cette suite est la
+     * derniere du harnais", vrai au moment ou elle a ete ecrite mais rendu
+     * FAUX par l'ajout de suite_commandes() (tests/test_commandes.c), qui
+     * s'execute apres celle-ci et reutilise cet habillage deja construit --
+     * voir son propre commentaire de tete pour le detail de cette
+     * reutilisation. */
     habillage_construire(lv_screen_active());
     lv_obj_t *bandeau = lv_obj_get_child(lv_screen_active(), lv_obj_get_child_count(lv_screen_active()) - 1);
     VERIFIER(bandeau != NULL);

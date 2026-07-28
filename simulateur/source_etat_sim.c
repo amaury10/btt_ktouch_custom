@@ -98,6 +98,16 @@ bool source_etat_sim_demarrer(const backend_desc_t *desc)
     g_desc = desc;
     g_file_tete = 0;
     g_file_taille = 0;
+    /* Fix round 1 (revue tache 9, LOW) : reinitialisation incomplete avant
+     * ce fix -- la file etait remise a zero mais pas le sceau d'echec de
+     * commande, laissant g_echec_en_attente survivre a un (hypothetique)
+     * redemarrage. Un seul demarrage existe reellement dans ce process (voir
+     * la garde g_demarre juste au-dessus), donc ce n'etait pas observable en
+     * pratique -- complete quand meme pour que l'etat de depart soit
+     * explicitement propre, plutot que de compter sur l'initialisation
+     * statique a zero du fichier. */
+    g_echec_action[0] = '\0';
+    g_echec_en_attente = false;
 
     void *initial = etat_store_tampon_arriere(&g_store);
     esp_err_t erreur = desc->demarrer(initial, NULL);
@@ -129,11 +139,27 @@ static void traiter_commandes(void)
             JOURNAL_INFO(TAG, "commande %s executee", cmd.action);
         } else {
             JOURNAL_ALERTE(TAG, "commande %s en echec", cmd.action);
-            /* Meme miroir que core/boucle.c : memorise l'echec pour qu'un
-             * futur ui_commande_echec() (appele par habillage_pomper()) le
-             * remonte au bandeau de notification. */
-            snprintf(g_echec_action, sizeof(g_echec_action), "%s", cmd.action);
-            g_echec_en_attente = true;
+            /* Meme miroir que core/boucle.c, y compris la protection de
+             * l'echec d'arret d'urgence (fix round 1, revue tache 9,
+             * MEDIUM 1) : un seul emplacement, dernier-ecrit-gagne, SAUF
+             * qu'un echec BACKEND_ACTION_URGENCE deja en attente n'est
+             * jamais ecrase par l'echec d'une AUTRE action -- une rafale qui
+             * draine plusieurs echecs d'affilee (la file entiere, profondeur
+             * 4, sans pompage entre deux -- rien ne l'exige, voir
+             * traiter_commandes() appelee une seule fois par cycle) ne doit
+             * jamais faire disparaitre l'echec de l'action la plus critique
+             * du firmware derriere celui d'une pause ou d'une annulation. Un
+             * second echec d'urgence peut en revanche remplacer le premier
+             * (meme action). Deux echecs NON-urgence dans la meme rafale
+             * restent dernier-ecrit-gagne, comme avant ce fix -- seul le cas
+             * urgence est protege ici. */
+            bool garder_urgence_en_attente = g_echec_en_attente &&
+                strcmp(g_echec_action, BACKEND_ACTION_URGENCE) == 0 &&
+                strcmp(cmd.action, BACKEND_ACTION_URGENCE) != 0;
+            if (!garder_urgence_en_attente) {
+                snprintf(g_echec_action, sizeof(g_echec_action), "%s", cmd.action);
+                g_echec_en_attente = true;
+            }
         }
     }
 }

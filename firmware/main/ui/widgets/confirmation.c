@@ -72,16 +72,17 @@ static void bouton_action_cb(lv_event_t *e)
     fermer_et_rappeler(true);
 }
 
-void confirmation_ouvrir(const char *titre, const char *message,
-                          const char *libelle_action, bool destructif,
-                          confirmation_rappel_t rappel, void *contexte)
+void confirmation_ouvrir_ex(const char *titre, const char *message,
+                             const char *libelle_action, bool destructif,
+                             const char *libelle_decliner,
+                             confirmation_rappel_t rappel, void *contexte)
 {
     if (rappel == NULL) {
-        JOURNAL_ERREUR(TAG, "confirmation_ouvrir : rappel NULL, refuse");
+        JOURNAL_ERREUR(TAG, "confirmation_ouvrir_ex : rappel NULL, refuse");
         return;
     }
     if (g_confirmation.ouvert) {
-        JOURNAL_ALERTE(TAG, "confirmation_ouvrir appele alors qu'un dialogue est deja ouvert ; ignore");
+        JOURNAL_ALERTE(TAG, "confirmation_ouvrir_ex appele alors qu'un dialogue est deja ouvert ; ignore");
         return;
     }
 
@@ -110,7 +111,8 @@ void confirmation_ouvrir(const char *titre, const char *message,
      * confirmation) suppose cet ordre pour retrouver les deux boutons dans
      * le pied du dialogue — documenté ici parce que c'est le seul endroit
      * qui le garantit. */
-    lv_obj_t *bouton_annuler = lv_msgbox_add_footer_button(g_confirmation.mbox, "Cancel");
+    lv_obj_t *bouton_annuler =
+        lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_decliner != NULL ? libelle_decliner : "");
     lv_obj_add_event_cb(bouton_annuler, bouton_annuler_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *bouton_action =
@@ -130,4 +132,11 @@ void confirmation_ouvrir(const char *titre, const char *message,
     g_confirmation.rappel   = rappel;
     g_confirmation.contexte = contexte;
     g_confirmation.ouvert   = true;
+}
+
+void confirmation_ouvrir(const char *titre, const char *message,
+                          const char *libelle_action, bool destructif,
+                          confirmation_rappel_t rappel, void *contexte)
+{
+    confirmation_ouvrir_ex(titre, message, libelle_action, destructif, "Cancel", rappel, contexte);
 }

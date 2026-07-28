@@ -217,9 +217,14 @@ int main(int argc, char **argv)
         if (scenario == 5) {
             clavier_ouvrir("Host address", "192.168.1.42", CLAVIER_TEXTE, demo_clavier_rappel, NULL);
         } else if (scenario == 6) {
-            confirmation_ouvrir("Cancel print?",
-                                 "This will stop the current print. This cannot be undone.",
-                                 "Cancel print", true, demo_confirmation_rappel, NULL);
+            /* confirmation_ouvrir_ex(), pas confirmation_ouvrir() : reprend
+             * EXACTEMENT la copie que le vrai bouton Cancel envoie depuis
+             * ecran_accueil.c (fix round 1, revue tache 9, LOW) -- un declin
+             * par defaut "Cancel" ferait deux boutons qui commencent tous les
+             * deux par le meme mot a cote de l'action "Cancel print". */
+            confirmation_ouvrir_ex("Cancel print?",
+                                    "This will stop the current print. This cannot be undone.",
+                                    "Cancel print", true, "Keep printing", demo_confirmation_rappel, NULL);
         } else if (scenario == 8) {
             /* Tâche 8 : clavier ouvert par-dessus ECRAN_CONFIGURATION (déjà
              * empilé plus haut, voir `ecran_config`), avec une adresse

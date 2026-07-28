@@ -129,7 +129,24 @@ static void bouton_pause_cb(lv_event_t *e)
 static void rappel_confirmation_annuler(bool confirme, void *contexte)
 {
     ecran_accueil_ctx_t *ctx = contexte;
-    if (!confirme || ctx == NULL || ctx->donnees_perimees) {
+    /* Fix round 1 (revue tache 9, HIGH) : NE PAS relire ctx->donnees_perimees
+     * ici. Le dialogue reste ouvert le temps qu'un humain lise "This will
+     * stop the current print" -- largement plus que les ~3 s (3 sondages
+     * manques) qu'il faut a LIAISON_DEGRADEE pour s'installer. Avec la garde
+     * ici, une liaison qui se degrade PENDANT que le dialogue est ouvert
+     * faisait disparaitre une confirmation deja donnee sans rien empiler ni
+     * rien notifier -- observe empiriquement par la revue : file 0->0,
+     * bandeau intact. Une fois l'utilisateur confirme, la commande DOIT
+     * partir ; si la liaison est reellement morte, ui_commander() l'accepte
+     * quand meme (il ne connait que la profondeur de la file, jamais l'etat
+     * de la liaison) et c'est backend_moonraker_commande() qui echouera a
+     * l'execution reelle -- l'echec ASYNCHRONE remonte alors honnetement par
+     * le sceau existant (ui_commande_echec(), voir habillage_pomper()), sans
+     * qu'aucune commande n'ait jamais ete perdue en silence. La garde sur la
+     * peremption reste a sa bonne place : bouton_annuler_cb() ci-dessous,
+     * ou elle grise l'OUVERTURE du dialogue -- exactement le miroir de
+     * LV_STATE_DISABLED. */
+    if (!confirme || ctx == NULL) {
         return;
     }
     executer_commande(BACKEND_ACTION_ANNULER, "cancel");
@@ -138,7 +155,14 @@ static void rappel_confirmation_annuler(bool confirme, void *contexte)
 static void rappel_confirmation_urgence(bool confirme, void *contexte)
 {
     ecran_accueil_ctx_t *ctx = contexte;
-    if (!confirme || ctx == NULL || ctx->donnees_perimees) {
+    /* Fix round 1 (revue tache 9, HIGH) : meme raisonnement que
+     * rappel_confirmation_annuler() ci-dessus, encore plus critique ici --
+     * c'est le bouton d'ARRET D'URGENCE. Une imprimante en trouble, un
+     * utilisateur qui tape E-STOP, lit "This will immediately halt the
+     * printer", et la liaison qui se degrade PENDANT cette lecture ne doit
+     * JAMAIS transformer une confirmation deja donnee en un dialogue qui se
+     * ferme sans rien faire. */
+    if (!confirme || ctx == NULL) {
         return;
     }
     executer_commande(BACKEND_ACTION_URGENCE, "emergency stop");
@@ -150,9 +174,15 @@ static void bouton_annuler_cb(lv_event_t *e)
     if (ctx == NULL || ctx->donnees_perimees) {
         return;
     }
-    confirmation_ouvrir("Cancel print?",
-                         "This will stop the current print. This cannot be undone.",
-                         "Cancel print", true, rappel_confirmation_annuler, ctx);
+    /* confirmation_ouvrir_ex(), pas confirmation_ouvrir() : le bouton d'action
+     * lit deja "Cancel print", un bouton de declin par defaut "Cancel" ferait
+     * deux boutons commencant tous les deux par le meme mot dans le meme
+     * dialogue -- lequel annule vraiment l'impression ? (revue tache 9, fix
+     * round 1, LOW). "Keep printing" dit sans ambiguite ce que ce bouton
+     * fait reellement : rien, l'impression continue. */
+    confirmation_ouvrir_ex("Cancel print?",
+                            "This will stop the current print. This cannot be undone.",
+                            "Cancel print", true, "Keep printing", rappel_confirmation_annuler, ctx);
 }
 
 static void bouton_urgence_cb(lv_event_t *e)
