@@ -91,6 +91,18 @@ void confirmation_ouvrir(const char *titre, const char *message,
      * besoin de reproduire ici la mise en page que clavier.c fait à la
      * main pour son propre plein écran. */
     g_confirmation.mbox = lv_msgbox_create(NULL);
+
+    /* Le thème par défaut de LVGL peint le fond automatique de la modale en
+     * gris clair à 50% d'opacité (theme->styles.msgbox_backdrop_bg, voir
+     * lv_theme_default.c: style_set_bg_color(..., lv_palette_main(GREY)) —
+     * un ÉCLAIRCISSEMENT de l'écran derrière, qui réduit le contraste de ce
+     * dialogue au lieu de le faire ressortir. Contraire à l'effet recherché
+     * pour une confirmation qui peut porter une action destructive : assombri
+     * ici, explicitement, par-dessus le style du thème. */
+    lv_obj_t *fond = lv_obj_get_parent(g_confirmation.mbox);
+    lv_obj_set_style_bg_color(fond, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(fond, LV_OPA_60, 0);
+
     lv_msgbox_add_title(g_confirmation.mbox, titre != NULL ? titre : "");
     lv_msgbox_add_text(g_confirmation.mbox, message != NULL ? message : "");
 

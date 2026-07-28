@@ -56,3 +56,15 @@ typedef void (*clavier_rappel_t)(const char *valeur, void *contexte);
  * l'un devient inaccessible sont pires qu'un appel refusé. */
 void clavier_ouvrir(const char *titre, const char *valeur_initiale,
                      clavier_mode_t mode, clavier_rappel_t rappel, void *contexte);
+
+/* `valeur_initiale` plus longue que CLAVIER_VALEUR_MAX - 1 OCTETS (pas
+ * caractères) est tronquée avant d'être posée dans la textarea, toujours
+ * NUL-terminée ; la valeur rendue au rappel en cas de validation est
+ * tronquée à la même borne (voir clavier.c). `lv_textarea_set_max_length()`,
+ * appliqué à la saisie tactile, borne un nombre de CARACTÈRES, pas d'octets
+ * — une distinction sans conséquence depuis le clavier lui-même (les cartes
+ * de lv_keyboard n'insèrent que de l'ASCII, un octet par caractère) mais qui
+ * s'applique à `valeur_initiale`, fournie par l'appelant et tronquée d'un
+ * coup plutôt que caractère par caractère : une valeur initiale non-ASCII
+ * pourrait en théorie être coupée au milieu d'une séquence UTF-8
+ * multi-octets si elle approche la borne. */

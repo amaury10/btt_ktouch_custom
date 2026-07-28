@@ -125,15 +125,27 @@ static void rappel_empile_ecran(const char *valeur, void *contexte)
     (void)valeur;
     (void)contexte;
     g_trace_clavier.appels++;
-    /* L'essentiel de la propriété 3 : construire un nouvel écran (donc
-     * créer de nouveaux objets LVGL) DEPUIS le rappel, pendant que les
-     * objets de l'ancien clavier sont encore vivants (leur destruction n'est
-     * que programmée, voir clavier.c) mais plus jamais touchés par ce
-     * fichier. Sous ASan (actif sur la cible `tests`, voir
-     * host-test/CMakeLists.txt), une lecture après libération DANS notre
-     * propre code — navigation.c, compilé avec les désinfecteurs — serait
-     * détectée ici si clavier.c détruisait quoi que ce soit de façon
-     * synchrone avant cet appel. */
+    /* Construit un nouvel écran (donc de nouveaux objets LVGL) DEPUIS le
+     * rappel, pendant que les objets de l'ancien clavier sont encore vivants
+     * (leur destruction n'est que programmée, voir clavier.c) — le mode
+     * d'emploi naturel du rappel.
+     *
+     * Calibrage de ce que ce VERIFIER peut et ne peut PAS détecter (revue
+     * tâche 7, round 1 : la version précédente de ce commentaire prétendait
+     * qu'ASan détecterait ici une lecture après libération « dans
+     * navigation.c » si clavier.c détruisait ses objets de façon
+     * synchrone — c'est faux, et l'expérience 1 du rapport de tâche 7 le
+     * prouve). `navigation_empiler()` construit sous `lv_screen_active()`,
+     * un sous-arbre entièrement DISJOINT de celui du clavier sur
+     * `lv_layer_top()` : rien de ce que ce rappel touche ne recoupe jamais
+     * la mémoire du clavier, qu'elle soit libérée de façon synchrone ou
+     * asynchrone. Ce bloc prouve seulement qu'empiler un écran depuis le
+     * rappel produit un widget vivant et correct (voir les VERIFIER juste
+     * après l'envoi de l'événement, plus bas) — pas que la destruction du
+     * clavier est réellement différée. Cette preuve-là est ailleurs : voir
+     * le VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1) juste après
+     * l'envoi de LV_EVENT_READY, seul point de ce test où le comportement
+     * observable diffère entre une destruction synchrone et asynchrone. */
     VERIFIER(navigation_empiler(&ECRAN_APRES_CLAVIER) == ESP_OK);
 }
 
@@ -167,6 +179,13 @@ static void section_clavier(void)
     /* mode texte par defaut demande */ VERIFIER(lv_keyboard_get_mode(kb) == LV_KEYBOARD_MODE_TEXT_LOWER);
 
     lv_obj_send_event(kb, LV_EVENT_CANCEL, NULL);
+    /* Le clavier est encore VIVANT ici : sa destruction n'est que
+     * programmee. Avec lv_obj_delete() synchrone a la place de
+     * lv_obj_delete_async() dans clavier.c, ce compteur vaudrait deja 0
+     * (verifie : experience 1 du rapport de tache 7, RED provoque puis
+     * annule). Volet CANCEL de l'assertion symetrique de la propriete 3
+     * plus bas (volet READY). */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
     lv_timer_handler(); /* execute la destruction asynchrone programmee par clavier.c */
 
     /* Propriete 1 : le rappel a ete appele, une fois exactement. */
@@ -269,13 +288,29 @@ static void section_clavier(void)
 
     /* Declenche evenement_clavier() : programme la destruction du clavier
      * PUIS, dans rappel_empile_ecran() ci-dessus, empile un ecran tout neuf
-     * — donc cree de nouveaux objets LVGL — avant que le pompage n'ait
-     * seulement eu lieu une fois. Si clavier.c detruisait ses objets de
-     * facon synchrone au lieu d'asynchrone, ce serait ici, pendant la
-     * distribution meme de l'evenement READY par le clavier, que la
-     * destruction interviendrait — exactement le scenario que le brief
-     * decrit comme fragile. */
+     * (sous-arbre disjoint sous lv_screen_active(), voir son commentaire) —
+     * avant que le pompage n'ait seulement eu lieu une fois. */
     lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+
+    /* L'assertion QUI DISCRIMINE reellement une destruction synchrone d'une
+     * asynchrone (revue tache 7, round 1 : la version precedente de ce test
+     * n'en avait aucune ici — les VERIFIER qui suivent portent tous sur le
+     * sous-arbre DISJOINT construit par rappel_empile_ecran(), voir son
+     * commentaire, et restent vrais quelle que soit l'implementation de
+     * clavier.c). Le clavier est encore VIVANT ici : sa destruction n'est
+     * que programmee. Avec lv_obj_delete() synchrone a la place de
+     * lv_obj_delete_async() dans clavier.c, ce compteur vaudrait deja 0 —
+     * verifie : experience 1 du rapport de tache 7 (RED provoque, colle
+     * ci-dessous, puis implementation restauree) :
+     *
+     *   ECHEC .../test_clavier.c:<cette ligne> :
+     *   lv_obj_get_child_count(lv_layer_top()) == 1
+     *
+     * (lv_obj_get_child_count(lv_layer_top()) valait 0 : le clavier avait
+     * deja disparu, detruit de facon synchrone pendant sa propre
+     * distribution d'evenement READY, avant meme que rappel_empile_ecran()
+     * ne soit appele). */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
 
     /* le nouvel ecran est construit, avec son widget vivant et correct,
      * AVANT meme tout pompage */
@@ -349,6 +384,15 @@ static void section_confirmation(void)
     lv_obj_t *mbox = dernier_msgbox();
     VERIFIER(mbox != NULL);
 
+    /* Fond assombri explicitement par confirmation.c, par-dessus le gris
+     * eclaircissant que le theme par defaut pose sur msgbox_backdrop_class
+     * (voir le commentaire de confirmation_ouvrir() dans confirmation.c) :
+     * verifie ici pour qu'un futur ajustement de theme ne puisse pas
+     * reprendre la main en silence sur un dialogue destructif. */
+    lv_obj_t *fond_modale = dernier_enfant_calque_superieur();
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(fond_modale, 0), lv_color_hex(0x000000)));
+    VERIFIER(lv_obj_get_style_bg_opa(fond_modale, 0) == LV_OPA_60);
+
     /* Second appel pendant que le premier dialogue est ouvert : refuse. */
     confirmation_ouvrir("Autre", "msg", "Action", false, rappel_confirmation_refusee, NULL);
     VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
@@ -370,6 +414,11 @@ static void section_confirmation(void)
     /* deux evenements livres au meme bouton avant tout pompage : un seul appel */
     lv_obj_send_event(bouton_annuler, LV_EVENT_CLICKED, NULL);
     lv_obj_send_event(bouton_annuler, LV_EVENT_CLICKED, NULL);
+    /* Le dialogue est encore VIVANT ici : sa destruction (via
+     * lv_msgbox_close_async(), voir confirmation.c) n'est que programmee.
+     * Avec lv_msgbox_close() synchrone, ce compteur vaudrait deja 0 — meme
+     * methode discriminante que celle du clavier, voir task-7-report.md. */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
     lv_timer_handler();
 
     VERIFIER(g_trace_confirmation.appels == 1);
@@ -393,6 +442,8 @@ static void section_confirmation(void)
     VERIFIER(!lv_obj_has_state(bouton_annuler, LV_STATE_FOCUS_KEY));
 
     lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL);
+    /* meme assertion discriminante que ci-dessus, chemin "action" cette fois */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
     lv_timer_handler();
 
     VERIFIER(g_trace_confirmation.appels == 1);

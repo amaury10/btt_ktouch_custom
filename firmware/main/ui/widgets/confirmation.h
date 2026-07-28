@@ -42,3 +42,18 @@ typedef void (*confirmation_rappel_t)(bool confirme, void *contexte);
 void confirmation_ouvrir(const char *titre, const char *message,
                           const char *libelle_action, bool destructif,
                           confirmation_rappel_t rappel, void *contexte);
+
+/* Fermeture : les deux boutons de pied sont les SEULES sorties. Un
+ * effleurement du fond (hors de la boîte) et une touche ECHAP (clavier
+ * physique/encodeur) ne ferment PAS le dialogue — délibérément :
+ * confirmation.c n'ajoute ni bouton de fermeture d'en-tête ni gestionnaire
+ * sur le fond (voir lv_msgbox_add_close_button(), jamais appelée ici). Un
+ * dialogue qui peut porter une action destructive ne doit avoir aucune
+ * sortie silencieuse : un tap accidentel à côté de la boîte ou une touche
+ * échappement ne doivent jamais se comporter comme un `confirme=false`
+ * implicite que l'utilisateur n'a pas réellement choisi. Un futur
+ * contributeur qui ajouterait un tel raccourci doit appeler
+ * `confirmation_rappel_t` avec `confirme=false` explicitement, jamais
+ * laisser le dialogue disparaître sans invoquer le rappel (ce qui
+ * romprait la propriété « appelé exactement une fois » du haut de ce
+ * fichier). */

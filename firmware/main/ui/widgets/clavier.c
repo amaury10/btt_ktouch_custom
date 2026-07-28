@@ -34,10 +34,13 @@ static struct {
     /* Valeur copiée hors de la textarea AVANT sa destruction (voir
      * evenement_clavier()) : le rappel reçoit un pointeur vers CE tampon,
      * jamais vers lv_textarea_get_text(), qui pointerait dans un objet LVGL
-     * sur le point d'être détruit. Vit au-delà du rappel (variable statique),
-     * mais son contenu est écrasé par le clavier suivant — un appelant qui a
-     * besoin de la valeur plus tard doit la copier depuis le rappel, jamais
-     * en garder le pointeur (voir clavier_rappel_t dans clavier.h). */
+     * sur le point d'être détruit. Contrat pour l'appelant (voir
+     * clavier_rappel_t dans clavier.h) : valide UNIQUEMENT pendant l'appel du
+     * rappel, jamais au-delà — même si, en pratique, ce tampon statique
+     * survit techniquement plus longtemps (écrasé seulement par le clavier
+     * suivant), rien ne garantit cette fenêtre côté contrat public. Un
+     * appelant qui a besoin de la valeur plus tard doit la copier depuis le
+     * rappel, jamais en garder le pointeur. */
     char       valeur[CLAVIER_VALEUR_MAX];
 } g_clavier;
 
@@ -48,14 +51,36 @@ static void evenement_clavier(lv_event_t *e)
         return;
     }
 
-    /* Garde de réentrance : LV_EVENT_READY/CANCEL peuvent, selon le chemin
-     * qui les déclenche, être délivrés une seconde fois au même objet avant
-     * que la destruction asynchrone programmée plus bas n'ait réellement
-     * tourné (voir lv_keyboard_def_event_cb dans LVGL, qui renvoie le même
-     * événement à la textarea après l'avoir envoyé au clavier). Sans cette
-     * garde, un second passage relirait un `g_clavier` déjà remis à zéro et
-     * appellerait le rappel une seconde fois — exactement le défaut que la
-     * propriété 1 du brief interdit ("jamais deux"). */
+    /* Garde d'identité : ignore tout événement qui ne vient pas du clavier
+     * COURANT (g_clavier.clavier). Aucun chemin identifié aujourd'hui ne la
+     * déclenche (une fois fermé, un clavier ne reçoit plus jamais
+     * d'événement — cette fonction n'est même plus son event_cb une fois
+     * l'objet détruit), mais un rappel qui rouvre un clavier laisse
+     * l'ANCIEN objet orphelin et vivant jusqu'à ce que sa destruction
+     * asynchrone programmée plus bas s'exécute réellement ; si un événement
+     * finissait par lui être redélivré entre-temps, cette garde l'écarte
+     * plutôt que de traiter un READY/CANCEL qui ne concerne plus le clavier
+     * que g_clavier décrit désormais. */
+    if (lv_event_get_current_target(e) != g_clavier.clavier) {
+        return;
+    }
+
+    /* Garde de réentrance : défense en profondeur, pas la réponse à un
+     * chemin de délivrance double identifié aujourd'hui — les touches
+     * OK/fermer portent LV_KEYBOARD_CTRL_BUTTON_FLAGS (NO_REPEAT|CLICK_TRIG,
+     * voir lv_keyboard.c), donc un appui = un événement, et
+     * lv_keyboard_def_event_cb ne renvoie le même événement qu'à
+     * `keyboard->ta` (la textarea), un objet DIFFERENT sans rappel à nous et
+     * sans bulle vers le clavier. Elle reste nécessaire malgré ça : un test
+     * qui envoie deux fois le même événement au clavier AVANT tout pompage
+     * (voir section_clavier() dans test_clavier.c) la heurte directement, et
+     * confirmation.c porte une garde identique dont la désactivation fait
+     * planter net (SEGV, voir task-7-report.md — expérience 3) dès qu'un
+     * second clic est livré au même bouton avant que
+     * lv_msgbox_close_async() n'ait réellement tourné. Sans elle, un second
+     * passage relirait un `g_clavier` déjà remis à zéro et appellerait le
+     * rappel une seconde fois — exactement le défaut que la propriété 1 du
+     * brief interdit ("jamais deux"). */
     if (!g_clavier.ouvert) {
         return;
     }
