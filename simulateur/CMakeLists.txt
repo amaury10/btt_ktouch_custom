@@ -102,6 +102,7 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_gcode.c
+    ${KLIPPER_DIR}/klipper_paliers.c
 )
 target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${KLIPPER_DIR} ${ESP_ERR_SHIM_DIR} ${CJSON_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl cjson ${SDL2_LIBRARIES} m)
