@@ -224,3 +224,29 @@ bool rpc_lire_reponse(const char *json, size_t longueur, bool *succes,
  * KLIPPER_MACROS_MAX, une limite de compte, pas de longueur de nom) ; une
  * macro ainsi ignorée est silencieuse au niveau protocole. */
 bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur);
+
+/* Taille de tampon suffisante pour toute méthode rendue par
+ * rpc_methode_commande() ci-dessous : la plus longue
+ * ("printer.emergency_stop", 23 octets) plus marge, jusqu'à l'octet nul —
+ * même marge que MOONRAKER_CHEMIN_COMMANDE_MAX (moonraker_parse.h). */
+#define RPC_METHODE_COMMANDE_MAX 32
+
+/* Traduit une action commune (BACKEND_ACTION_PAUSE/REPRENDRE/ANNULER/URGENCE,
+ * voir core/backend.h) en méthode JSON-RPC Moonraker -- des POINTS, jamais
+ * de '/' (même piège que rpc_construire_abonnement() ci-dessus : Moonraker
+ * dérive ses méthodes par ".".join(...), aucun alias HTTP-like). Pendant de
+ * moonraker_chemin_commande() (moonraker_parse.h, chemins REST du sondage
+ * HTTP) pour le transport WebSocket : mêmes QUATRE actions connues, une
+ * méthode JSON-RPC plutôt qu'un chemin, copiée dans `methode` (qui doit
+ * faire au moins RPC_METHODE_COMMANDE_MAX octets). Utilisée par
+ * `backend_moonraker_commande()` (tâche 5) quand le WS est en ligne, avec
+ * `rpc_construire_requete()` pour bâtir la requête complète -- ces quatre
+ * actions ne prennent jamais de paramètres (voir backend.h), donc toujours
+ * appelée avec `params_json = NULL`.
+ *
+ * Rend false SANS TOUCHER `methode` si `action` est NULL, si `methode` est
+ * NULL, si `taille` vaut 0, ou si `action` ne correspond à aucune des
+ * quatre actions connues (`BACKEND_ACTION_MACRO` y compris -- son support
+ * WS est laissé à la tâche 6, voir docs/superpowers/plans/2026-07-28-jalon-3a-transport-ws-etat-v2.md) --
+ * même contrat que moonraker_chemin_commande(). */
+bool rpc_methode_commande(const char *action, char *methode, size_t taille);

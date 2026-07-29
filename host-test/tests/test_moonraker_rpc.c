@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "backend.h"
 #include "moonraker_rpc.h"
 #include "petit_test.h"
 
@@ -800,6 +801,57 @@ static void section_lire_macros(void)
     }
 }
 
+/* --- rpc_methode_commande (tache 5) -------------------------------------- */
+
+static void section_methode_commande(void)
+{
+    char methode[RPC_METHODE_COMMANDE_MAX];
+
+    /* Les quatre actions connues -- meme couverture que
+     * section_moonraker_chemin_commande() dans test_commandes.c pour le
+     * pendant HTTP, methodes JSON-RPC (points) au lieu de chemins REST. */
+    memset(methode, 0, sizeof(methode));
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_PAUSE, methode, sizeof(methode)) == true);
+    VERIFIER_TEXTE(methode, "printer.print.pause");
+
+    memset(methode, 0, sizeof(methode));
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_REPRENDRE, methode, sizeof(methode)) == true);
+    VERIFIER_TEXTE(methode, "printer.print.resume");
+
+    memset(methode, 0, sizeof(methode));
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_ANNULER, methode, sizeof(methode)) == true);
+    VERIFIER_TEXTE(methode, "printer.print.cancel");
+
+    memset(methode, 0, sizeof(methode));
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_URGENCE, methode, sizeof(methode)) == true);
+    VERIFIER_TEXTE(methode, "printer.emergency_stop");
+
+    /* Jamais un '/' -- meme piege que rpc_construire_abonnement(), voir son
+     * commentaire de tete. */
+    VERIFIER(strchr(methode, '/') == NULL);
+
+    /* Action inconnue (BACKEND_ACTION_MACRO inclus -- support WS laisse a la
+     * tache 6) : false, `methode` intact. */
+    snprintf(methode, sizeof(methode), "sentinelle");
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_MACRO, methode, sizeof(methode)) == false);
+    VERIFIER_TEXTE(methode, "sentinelle");
+
+    snprintf(methode, sizeof(methode), "sentinelle");
+    VERIFIER(rpc_methode_commande("action_inexistante", methode, sizeof(methode)) == false);
+    VERIFIER_TEXTE(methode, "sentinelle");
+
+    /* action/methode NULL, taille nulle : false, jamais un dereferencement. */
+    VERIFIER(rpc_methode_commande(NULL, methode, sizeof(methode)) == false);
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_PAUSE, NULL, sizeof(methode)) == false);
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_PAUSE, methode, 0) == false);
+
+    /* Tampon trop court : false, jamais une methode tronquee rendue comme
+     * valide -- "printer.print.pause" fait 20 caracteres, 8 octets tronquent
+     * a coup sur. */
+    char court[8];
+    VERIFIER(rpc_methode_commande(BACKEND_ACTION_PAUSE, court, sizeof(court)) == false);
+}
+
 void suite_moonraker_rpc(void)
 {
     printf("suite : protocole moonraker (JSON-RPC / WebSocket)\n");
@@ -810,4 +862,5 @@ void suite_moonraker_rpc(void)
     section_fusionner_instantane();
     section_lire_reponse();
     section_lire_macros();
+    section_methode_commande();
 }

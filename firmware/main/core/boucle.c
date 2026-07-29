@@ -19,8 +19,15 @@ static const char *TAG = "boucle";
  * requête HTTP qui traîne jusqu'à MOONRAKER_DELAI_MS — retarde d'autant le
  * suivant plutôt que d'enchaîner sans pause pour rattraper le retard. Sur un
  * réseau qui va déjà mal, enchaîner les requêtes sans respirer est la
- * dernière chose à faire. */
-#define BOUCLE_PERIODE_MS 1000u
+ * dernière chose à faire.
+ *
+ * Jalon 3a, tâche 5 : cette période n'est plus fixe -- elle est relue à
+ * CHAQUE cycle via boucle_cycle_periode_ms() (core/boucle_cycle.h/.c, la
+ * décision PURE et testée sur PC), qui rend BOUCLE_PERIODE_MS_DEFAUT
+ * (toujours 1000 ms, inchangé) pour un backend sans `periode_ms` -- c'est
+ * le chemin du jouet du 2b et de backend_factice.c (critère 8). Le backend
+ * Moonraker (backend_moonraker.c) y répond 250 quand son WS est en ligne,
+ * 1000 en repli HTTP. */
 
 /* Profondeur de la file de commandes, imposée par le brief : appuyer sur
  * pause/reprendre/annuler/urgence en rafale (un utilisateur qui martèle un
@@ -214,7 +221,15 @@ static void boucle_tache(void *parametre)
                          (unsigned)tas_libre);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(BOUCLE_PERIODE_MS));
+        /* `etat_store_lire()` rend le tampon "avant" (le dernier publié,
+         * jamais celui du cycle en cours) : lu depuis CETTE MÊME tâche,
+         * jamais concurrent avec l'unique instant où il change de pointeur
+         * (etat_store_valider() ci-dessus, sous le même mutex) -- aucun
+         * verrou supplémentaire nécessaire ici, contrairement à
+         * boucle_etat_copier()/boucle_instantane() qui servent un appelant
+         * d'une autre tâche. */
+        uint32_t periode_ms = boucle_cycle_periode_ms(g_desc, (void *)etat_store_lire(&g_store));
+        vTaskDelay(pdMS_TO_TICKS(periode_ms));
     }
 }
 

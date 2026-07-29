@@ -115,6 +115,7 @@ add_executable(tests
     tests/test_moonraker_parse.c
     tests/test_moonraker_rpc.c
     tests/test_fixtures_moonraker.c
+    tests/test_moonraker_boite.c
     tests/test_etat_store.c
     tests/test_liaison.c
     tests/test_backend_factice.c
@@ -133,6 +134,7 @@ add_executable(tests
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
+    ${KLIPPER_DIR}/moonraker_boite.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c

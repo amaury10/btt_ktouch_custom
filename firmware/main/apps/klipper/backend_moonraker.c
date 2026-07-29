@@ -10,6 +10,8 @@
 #include "journal.h"
 #include "liaison.h"
 #include "moonraker_parse.h"
+#include "moonraker_rpc.h"
+#include "moonraker_ws.h"
 
 /* Étiquette de journalisation : convention reprise du reste du firmware
  * (voir app_main.c, backend_factice.c), pour que /log reste lisible par
@@ -92,6 +94,30 @@ static char g_tampon_reponse[MOONRAKER_TAMPON_OCTETS];
  * suffit. */
 static backend_hote_t g_hote;
 static bool           g_actif = false;
+
+/* Jalon 3a, tache 5 : derniere image WS complete connue, portee ICI en
+ * statique -- exactement comme g_progression_scenario1 dans
+ * backend_factice.c (voir son commentaire) : `etat` recu par rafraichir()
+ * pointe TOUJOURS vers un tampon fraichement remis a zero par le socle
+ * (contrat backend.h), donc y relire quoi que ce soit rendrait toujours 0.
+ * Sert a publier un cycle de succes meme quand la boite n'a RIEN de neuf a
+ * drainer (le WS pousse par evenement, pas a chaque cycle de la boucle a
+ * 250 ms) -- sans cette retention, la plupart des cycles echoueraient faute
+ * de nouveaute et griseraient l'ecran a tort (voir backend_moonraker_rafraichir()
+ * plus bas). `g_dernier_etat_ws_valide` reste false tant qu'aucun premier
+ * depot n'a jamais ete draine depuis le demarrage (ou une reconnexion) --
+ * dans cette fenetre tres courte, il n'y a rien d'honnete a publier. */
+static etat_klipper_t g_dernier_etat_ws;
+static bool           g_dernier_etat_ws_valide = false;
+
+/* Delai borne d'une commande RPC corrolee sur le WS (moonraker_ws_commande()) :
+ * du meme ordre que MOONRAKER_DELAI_TOTAL_MS ci-dessous pour le chemin HTTP --
+ * assez long pour un aller-retour Moonraker charge, assez court pour qu'un
+ * bouton reste explicable (Command failed) plutot que fige indefiniment.
+ * Sondee par petites tranches par moonraker_ws_commande() elle-meme (voir
+ * son commentaire de tete dans moonraker_ws.c) : cette valeur ne bloque que
+ * boucle_traiter_commandes() (core/boucle.c), jamais la tache WS. */
+#define MOONRAKER_WS_COMMANDE_TIMEOUT_MS 5000u
 
 /* Client HTTP créé UNE SEULE FOIS par demarrer() et réutilisé à chaque appel
  * de rafraichir()/commande(), libéré par arreter(). L'appeler depuis
@@ -466,6 +492,23 @@ static esp_err_t backend_moonraker_demarrer(void *etat, const backend_hote_t *ho
     g_liaison_journal_prete = false;
     g_dernier_journal_echec_us = 0;
 
+    /* Jalon 3a, tache 5 : plus aucune image WS valide tant que le nouveau
+     * client (demarre juste en dessous) n'a pas fourni son premier depot --
+     * memes valeurs qu'a froid, voir le commentaire de declaration. */
+    memset(&g_dernier_etat_ws, 0, sizeof(g_dernier_etat_ws));
+    g_dernier_etat_ws_valide = false;
+
+    /* Le WS demarre EN PLUS du client HTTP ci-dessus, jamais a sa place : le
+     * HTTP reste le repli tant que le WS n'est pas en ligne (spec §4). Un
+     * echec de demarrage du WS n'est PAS fatal a ce backend -- il degrade
+     * simplement en HTTP pur des le premier cycle, exactement comme un WS
+     * qui se deconnecterait plus tard ; seul un journal le signale. */
+    esp_err_t erreur_ws = moonraker_ws_demarrer(hote);
+    if (erreur_ws != ESP_OK) {
+        JOURNAL_ALERTE(TAG, "demarrage du client WS impossible (%s) ; repli HTTP jusqu'a une prochaine tentative",
+                       esp_err_to_name(erreur_ws));
+    }
+
     JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u)", hote->adresse, (unsigned)hote->port);
     return ESP_OK;
 }
@@ -476,6 +519,42 @@ static esp_err_t backend_moonraker_rafraichir(void *etat)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (moonraker_ws_en_ligne()) {
+        /* Draine la boite ; rien de neuf ⇒ garde l'image retenue (voir le
+         * commentaire de g_dernier_etat_ws) plutot que d'echouer le cycle --
+         * un cycle sans nouveaute n'est PAS un cycle en panne, le WS pousse
+         * par evenement (Moonraker peut tres bien n'avoir rien a dire
+         * pendant plusieurs cycles a 250 ms d'affilee, ex. machine au
+         * repos). Echouer ici a chaque fois griserait l'ecran a tort. */
+        etat_klipper_t nouveau;
+        if (moonraker_ws_drainer(&nouveau)) {
+            g_dernier_etat_ws = nouveau;
+            g_dernier_etat_ws_valide = true;
+        }
+
+        if (!g_dernier_etat_ws_valide) {
+            /* Fenetre tres courte juste apres demarrer()/une reconnexion :
+             * aucune image n'a encore ete deposee (meme pas l'instantane
+             * initial de l'abonnement). Rien d'honnete a publier -- le
+             * cycle echoue, l'ecran reste sur son dernier etat connu
+             * (grise par la liaison), jamais un tampon vide presente comme
+             * reel. */
+            return ESP_FAIL;
+        }
+
+        memcpy((etat_klipper_t *)etat, &g_dernier_etat_ws, sizeof(etat_klipper_t));
+
+        /* La liaison : WS connecte ET Klippy pret ⇒ succes de cycle ; WS
+         * connecte mais Klippy down ⇒ echec -- MEME distinction que le
+         * chemin HTTP ci-dessous (un statut HTTP inexploitable ou un
+         * webhooks.state "shutdown" y font deja echouer le cycle, voir
+         * moonraker_parse_status()). Jamais de repli HTTP dans ce cas
+         * precis : l'echec doit rester visible, pas masque par un second
+         * transport qui interrogerait la meme machine en panne. */
+        return moonraker_ws_klippy_pret() ? ESP_OK : ESP_FAIL;
+    }
+
+    /* WS hors ligne : repli HTTP existant, INCHANGE depuis le jalon 2a. */
     size_t longueur = 0;
     esp_err_t erreur = moonraker_requete(HTTP_METHOD_GET, MOONRAKER_CHEMIN_INTERROGATION, &longueur);
     if (erreur != ESP_OK) {
@@ -493,6 +572,7 @@ static void backend_moonraker_arreter(void *etat)
 {
     (void)etat;
     g_actif = false;
+    moonraker_ws_arreter();
     if (g_client != NULL) {
         esp_http_client_cleanup(g_client);
         g_client = NULL;
@@ -504,7 +584,6 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                                              const char *arguments_json)
 {
     (void)etat;
-    (void)arguments_json; /* aucune des quatre actions ci-dessous ne prend de corps */
 
     if (!g_actif) {
         /* Meme garde que backend_moonraker_rafraichir() : g_client n'existe
@@ -514,6 +593,42 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
          * appel a esp_http_client_set_url(NULL, ...). */
         return ESP_ERR_INVALID_STATE;
     }
+
+    if (moonraker_ws_en_ligne()) {
+        /* Jalon 3a, tache 5 : RPC corrolee plutot qu'un POST -- le resultat
+         * REEL de Klipper (accepte/refuse par le protocole JSON-RPC) revient
+         * ici, pas juste "HTTP 200" (spec §4). `arguments_json` n'est PAS
+         * utilise : les quatre actions connues de rpc_methode_commande()
+         * n'en prennent jamais (voir backend.h) -- BACKEND_ACTION_MACRO,
+         * seule action qui en prendrait un jour, est refusee ci-dessous
+         * comme inconnue par rpc_methode_commande() (support WS laisse a la
+         * tache 6). */
+        (void)arguments_json;
+
+        char methode[RPC_METHODE_COMMANDE_MAX];
+        if (!rpc_methode_commande(action, methode, sizeof(methode))) {
+            JOURNAL_ALERTE(TAG, "commande inconnue %s", action);
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+
+        bool succes = false;
+        char erreur[128];
+        erreur[0] = '\0';
+        esp_err_t erreur_ws = moonraker_ws_commande(methode, NULL, MOONRAKER_WS_COMMANDE_TIMEOUT_MS,
+                                                      &succes, erreur, sizeof(erreur));
+        if (erreur_ws != ESP_OK) {
+            JOURNAL_ALERTE(TAG, "commande WS %s en echec (%s)", action, esp_err_to_name(erreur_ws));
+            return erreur_ws;
+        }
+        if (!succes) {
+            JOURNAL_ALERTE(TAG, "commande %s refusee par Moonraker (%s)", action, erreur);
+            return ESP_FAIL;
+        }
+        JOURNAL_INFO(TAG, "commande %s -> WS %s", action, methode);
+        return ESP_OK;
+    }
+
+    (void)arguments_json; /* aucune des quatre actions ci-dessous ne prend de corps en HTTP non plus */
 
     /* Correspondance action -> chemin extraite en fonction pure (revue tache 9)
      * pour etre testable sans reseau, voir moonraker_chemin_commande() et
@@ -531,6 +646,18 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
     return moonraker_requete(HTTP_METHOD_POST, chemin, NULL);
 }
 
+/* Jalon 3a, tache 5 : 250 ms quand le WS est en ligne (le drain est quasi
+ * gratuit, voir spec §4), 1000 ms en repli HTTP -- INCHANGE par rapport au
+ * jalon 2a. `etat` n'est pas utilise : l'etat en ligne/hors ligne du WS est
+ * porte en statique par moonraker_ws.c (g_connecte), pas relu depuis le
+ * tampon d'etat (meme raison que g_actif ci-dessus, jamais relu depuis
+ * `etat` -- voir le contrat de backend.h sur ce champ). */
+static uint32_t backend_moonraker_periode_ms(void *etat)
+{
+    (void)etat;
+    return moonraker_ws_en_ligne() ? 250u : 1000u;
+}
+
 static const backend_desc_t g_backend_moonraker_desc = {
     .nom = "moonraker",
     .taille_etat = sizeof(etat_klipper_t),
@@ -538,6 +665,7 @@ static const backend_desc_t g_backend_moonraker_desc = {
     .rafraichir = backend_moonraker_rafraichir,
     .arreter = backend_moonraker_arreter,
     .commande = backend_moonraker_commande,
+    .periode_ms = backend_moonraker_periode_ms,
 };
 
 const backend_desc_t *backend_moonraker_desc(void)

@@ -16,9 +16,32 @@
 
 #include <stdbool.h>
 
+#include <stdint.h>
+
 #include "backend.h"
 #include "etat_store.h"
 #include "liaison.h"
+
+/* Période par défaut du socle (jalon 2a) : 1 Hz, inchangée pour un backend
+ * qui ne fournit pas `periode_ms` (ou qui rend 0, voir backend.h). Nommée
+ * ici plutôt qu'un littéral répété dans boucle.c ET dans les tests hôte,
+ * pour que les deux ne puissent jamais diverger. */
+#define BOUCLE_PERIODE_MS_DEFAUT 1000u
+
+/* Décide la période à attendre avant le PROCHAIN cycle (jalon 3a, tâche 5) :
+ * `BOUCLE_PERIODE_MS_DEFAUT` si `desc` est NULL, si `desc->periode_ms` est
+ * NULL (backend qui ne participe pas au contrat optionnel — c'est le
+ * chemin du jouet du 2b, critère 8), ou si l'appel à `desc->periode_ms()`
+ * rend 0 (un backend qui n'a pas encore d'avis, voir backend.h) ; sinon la
+ * valeur rendue par le backend, TELLE QUELLE (aucun plafond ici : c'est au
+ * backend de choisir une valeur raisonnable, pas à ce socle générique de la
+ * juger).
+ *
+ * Fonction PURE (ne lit/écrit que ses paramètres), extraite pour rester
+ * testable sur PC (voir host-test/tests/test_boucle_cycle.c) — c'est
+ * `boucle_tache()` (core/boucle.c, le shell FreeRTOS) qui reste seule
+ * responsable du `vTaskDelay()` lui-même, non portable. */
+uint32_t boucle_cycle_periode_ms(const backend_desc_t *desc, void *etat);
 
 /* Rafraîchit `*store` via `desc->rafraichir()` sur son tampon arrière
  * (remis à zéro par cette fonction avant l'appel — voir le contrat documenté

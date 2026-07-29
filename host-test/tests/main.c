@@ -10,6 +10,7 @@ void suite_contrat(void);
 void suite_moonraker_parse(void);
 void suite_moonraker_rpc(void);
 void suite_fixtures_moonraker(void);
+void suite_moonraker_boite(void);
 void suite_etat_store(void);
 void suite_liaison(void);
 void suite_backend_factice(void);
@@ -107,6 +108,11 @@ int main(void)
      * le disque, aucun etat process-wide partage) : aucune contrainte
      * d'ordre non plus. */
     suite_fixtures_moonraker();
+
+    /* Tache 5 (jalon 3a) : la boite aux lettres portable, un slot sans
+     * verrou -- independante de toute autre suite (aucun etat process-wide
+     * partage). */
+    suite_moonraker_boite();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

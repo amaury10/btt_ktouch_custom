@@ -42,6 +42,29 @@ typedef struct {
 
     /* `arguments_json` vaut NULL quand l'action n'en prend pas. */
     esp_err_t (*commande)(void *etat, const char *action, const char *arguments_json);
+
+    /* Champ OPTIONNEL (jalon 3a, tâche 5) : NULL = comportement actuel
+     * (cadence fixe du socle, voir BOUCLE_PERIODE_MS_DEFAUT dans
+     * core/boucle_cycle.h) — c'est ce qui garde le jouet du 2b (et
+     * `backend_factice.c`) compilables SANS AUCUNE MODIFICATION, un
+     * littéral `backend_desc_t` qui n'initialise pas ce champ par
+     * désignation le met à NULL par construction (critère 8 du jalon 3,
+     * vérifié mécaniquement par `test_boucle_cycle.c`).
+     *
+     * Période d'interrogation souhaitée en ms, relue par la boucle à
+     * CHAQUE cycle (la valeur peut changer d'un appel à l'autre — c'est
+     * précisément l'usage prévu : le backend Moonraker rend 250 quand le
+     * WS est en ligne, 1000 en repli HTTP, voir backend_moonraker.c). Une
+     * valeur de retour de 0 vaut aussi « défaut du socle » : un backend qui
+     * n'a pas encore d'avis (ex. avant sa toute première connexion) peut
+     * rendre 0 sans avoir à connaître la constante du socle. `etat` reçoit
+     * le même tampon qu'un lecteur (le tampon "avant" publié, jamais celui
+     * en cours de rafraîchissement) — aucun backend connu n'en a besoin
+     * aujourd'hui (l'état WS en ligne/hors ligne est porté en statique de
+     * fichier, comme g_actif dans backend_moonraker.c), mais le contrat le
+     * fournit par symétrie avec `rafraichir`/`commande` plutôt que
+     * d'inventer un cas particulier. */
+    uint32_t (*periode_ms)(void *etat);
 } backend_desc_t;
 
 /* Actions communes. Un backend qui n'en gère pas une rend ESP_ERR_NOT_SUPPORTED

@@ -1,10 +1,78 @@
 #include <stdint.h>
+#include <string.h>
 
 #include "backend_factice.h"
 #include "boucle_cycle.h"
 #include "etat_store.h"
 #include "liaison.h"
 #include "petit_test.h"
+
+/* ------------------------------------------------------------------------
+ * Tache 5 (jalon 3a) : boucle_cycle_periode_ms() -- decision PURE de cadence
+ * adaptative, extraite de boucle.c (voir backend.h pour le contrat complet
+ * du champ optionnel `periode_ms`).
+ * ------------------------------------------------------------------------ */
+
+/* Backend synthetique qui rend systematiquement 0 -- "pas encore d'avis",
+ * doit retomber sur le defaut du socle exactement comme un `periode_ms`
+ * absent (NULL). */
+static uint32_t backend_test_periode_zero(void *etat)
+{
+    (void)etat;
+    return 0;
+}
+
+/* Backend synthetique qui rend 250 ms, en comptant ses propres appels --
+ * preuve que boucle_cycle_periode_ms() consulte reellement le backend a
+ * CHAQUE appel (jamais une valeur mise en cache au premier cycle). */
+static int g_appels_periode_250 = 0;
+static uint32_t backend_test_periode_250(void *etat)
+{
+    (void)etat;
+    g_appels_periode_250++;
+    return 250;
+}
+
+static void section_periode_ms(void)
+{
+    printf("suite : boucle_cycle (periode_ms)\n");
+
+    /* desc NULL : jamais de dereferencement, defaut du socle. */
+    VERIFIER(boucle_cycle_periode_ms(NULL, NULL) == BOUCLE_PERIODE_MS_DEFAUT);
+    VERIFIER(BOUCLE_PERIODE_MS_DEFAUT == 1000u);
+
+    /* backend_factice_desc() ne renseigne pas `periode_ms` -- champ non
+     * initialise dans un litteral designe, donc NULL par construction
+     * (meme mecanisme que exemples/backend_jouet/backend_jouet.c, non
+     * touche par cette tache : c'est precisement le critere 8). La boucle
+     * doit garder 1000, inchange depuis le jalon 2a. */
+    const backend_desc_t *factice = backend_factice_desc();
+    VERIFIER(factice != NULL);
+    VERIFIER(factice->periode_ms == NULL);
+    VERIFIER(boucle_cycle_periode_ms(factice, NULL) == BOUCLE_PERIODE_MS_DEFAUT);
+
+    /* Un backend qui rend 0 (pas encore d'avis, voir backend.h) retombe
+     * aussi sur le defaut -- meme contrat que `periode_ms == NULL`. */
+    backend_desc_t desc_zero;
+    memset(&desc_zero, 0, sizeof(desc_zero));
+    desc_zero.periode_ms = backend_test_periode_zero;
+    VERIFIER(boucle_cycle_periode_ms(&desc_zero, NULL) == BOUCLE_PERIODE_MS_DEFAUT);
+
+    /* Un backend qui rend 250 : la valeur EST consultee, autant de fois que
+     * d'appels simules ci-dessous -- jamais mise en cache au premier cycle
+     * (c'est exactement ce que le backend Moonraker exploite : 250 quand le
+     * WS est en ligne, 1000 en repli HTTP, relu a chaque cycle puisque cet
+     * etat peut changer d'un cycle a l'autre). */
+    backend_desc_t desc_250;
+    memset(&desc_250, 0, sizeof(desc_250));
+    desc_250.periode_ms = backend_test_periode_250;
+
+    g_appels_periode_250 = 0;
+    for (int i = 0; i < 5; i++) {
+        VERIFIER(boucle_cycle_periode_ms(&desc_250, NULL) == 250u);
+    }
+    VERIFIER(g_appels_periode_250 == 5);
+}
 
 /* Rejoue, sur PC, l'enchaînement exact de boucle_tache() (core/boucle.c) sur
  * une douzaine de cycles : c'est le chemin qui portait CRITICAL 1 de la revue
@@ -96,4 +164,6 @@ void suite_boucle_cycle(void)
     VERIFIER(liaison_echecs_consecutifs(&liaison) == 0);
 
     etat_store_liberer(&store);
+
+    section_periode_ms();
 }

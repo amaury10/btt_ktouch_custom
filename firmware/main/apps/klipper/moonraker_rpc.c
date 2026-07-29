@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "backend.h"
 #include "moonraker_parse.h"
 
 /* ------------------------------------------------------------------------
@@ -784,5 +785,42 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur)
 
     *etat = local;
     cJSON_Delete(racine);
+    return true;
+}
+
+/* ------------------------------------------------------------------------
+ * Correspondance action -> méthode JSON-RPC (transport WebSocket)
+ * ---------------------------------------------------------------------- */
+
+bool rpc_methode_commande(const char *action, char *methode, size_t taille)
+{
+    if (action == NULL || methode == NULL || taille == 0) {
+        return false;
+    }
+
+    const char *trouve;
+    if (strcmp(action, BACKEND_ACTION_PAUSE) == 0) {
+        trouve = "printer.print.pause";
+    } else if (strcmp(action, BACKEND_ACTION_REPRENDRE) == 0) {
+        trouve = "printer.print.resume";
+    } else if (strcmp(action, BACKEND_ACTION_ANNULER) == 0) {
+        trouve = "printer.print.cancel";
+    } else if (strcmp(action, BACKEND_ACTION_URGENCE) == 0) {
+        trouve = "printer.emergency_stop";
+    } else {
+        /* Action inconnue (BACKEND_ACTION_MACRO comprise -- tâche 6, voir le
+         * commentaire de tête dans moonraker_rpc.h) : ne rien écrire dans
+         * `methode`, même politique que moonraker_chemin_commande(). */
+        return false;
+    }
+
+    /* Même garde qu'ailleurs dans ce fichier et dans moonraker_parse.c :
+     * snprintf() tronque en silence, il faut COMPARER sa valeur de retour à
+     * `taille` pour distinguer une copie complète d'une copie tronquée
+     * jamais rendue comme un succès. */
+    int ecrit = snprintf(methode, taille, "%s", trouve);
+    if (ecrit < 0 || (size_t)ecrit >= taille) {
+        return false;
+    }
     return true;
 }
