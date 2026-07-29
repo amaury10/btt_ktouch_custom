@@ -459,6 +459,22 @@ static esp_err_t backend_factice_commande(void *etat, const char *action,
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    if (strcmp(action, BACKEND_ACTION_GCODE) == 0) {
+        /* Tache 1, jalon 3b. Le script est deja construit par l'appelant
+         * (klipper_gcode.c) -- ce backend factice n'a rien a en extraire, il
+         * accepte simplement pour que le simulateur puisse "executer" un jog
+         * sans erreur. Un vrai jog changerait la position (etat_klipper_t),
+         * mais le factice n'a pas a la simuler pour ce jalon (aucun ecran ne
+         * lit encore de position courante) -- voir le rapport de la tache 1
+         * si un futur jalon en a besoin. */
+        if (arguments_json == NULL) {
+            JOURNAL_ALERTE(TAG, "commande gcode sans arguments_json");
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+        JOURNAL_INFO(TAG, "commande gcode %s", arguments_json);
+        return ESP_OK;
+    }
+
     /* Une action inconnue doit échouer fort et explicitement, pour que
      * l'interface puisse griser un bouton en connaissant la raison — jamais
      * l'ignorer en silence. */

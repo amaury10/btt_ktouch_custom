@@ -82,3 +82,9 @@ typedef struct {
  * Introduite tâche 2, jalon 3a (backend_factice.c, scénario 11 « U1 ») ; le
  * backend Moonraker (tâche 6) partage ce même symbole. */
 #define BACKEND_ACTION_MACRO      "macro"
+
+/* Jalon 3b : script gcode arbitraire construit par un écran (klipper_gcode.c)
+ * et relayé tel quel à printer.gcode.script. arguments_json = {"script":"..."}.
+ * Distinct de BACKEND_ACTION_MACRO (qui porte {"nom":...}) : ici l'appelant a
+ * déjà construit le gcode complet, le backend ne fait que le transmettre. */
+#define BACKEND_ACTION_GCODE      "gcode"

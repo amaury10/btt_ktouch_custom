@@ -132,10 +132,12 @@ add_executable(tests
     tests/test_jouet.c
     tests/test_web_macros.c
     tests/test_ecran_macros.c
+    tests/test_klipper_gcode.c
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/moonraker_boite.c
+    ${KLIPPER_DIR}/klipper_gcode.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c

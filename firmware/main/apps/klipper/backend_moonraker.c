@@ -10,6 +10,7 @@
 #include "backend.h"
 #include "etat_klipper.h"
 #include "journal.h"
+#include "klipper_gcode.h"
 #include "liaison.h"
 #include "moonraker_parse.h"
 #include "moonraker_rpc.h"
@@ -665,6 +666,77 @@ static bool moonraker_extraire_nom_macro(const char *arguments_json, char *sorti
  * (backend_factice.c, moonraker_rpc.c). */
 #define MOONRAKER_MACRO_NOM_MAX KLIPPER_MACRO_NOM_MAX
 
+/* Tache 1, jalon 3b : extrait `script` de arguments_json = {"script":"<gcode>"}
+ * -- meme structure que moonraker_extraire_nom_macro() ci-dessus, calquee
+ * comme demande par le brief de la tache : BACKEND_ACTION_GCODE en garantit
+ * la presence (voir core/backend.h), cJSON pour la meme raison (l'appelant
+ * "officiel" est klipper_gcode.c via un ecran, mais rien ne garantit qu'un
+ * futur appelant respecte la forme a la lettre). Rend false SANS TOUCHER
+ * `sortie` si `arguments_json` est NULL, illisible, si "script" est
+ * absent/pas une chaine, ou si le script ne tient pas dans `taille`. */
+static bool moonraker_extraire_champ_script(const char *arguments_json, char *sortie, size_t taille)
+{
+    if (arguments_json == NULL || sortie == NULL || taille == 0) {
+        return false;
+    }
+    cJSON *racine = cJSON_Parse(arguments_json);
+    if (racine == NULL) {
+        return false;
+    }
+    const cJSON *script = cJSON_GetObjectItemCaseSensitive(racine, "script");
+    bool ok = cJSON_IsString(script) && script->valuestring != NULL;
+    if (ok) {
+        int ecrit = snprintf(sortie, taille, "%s", script->valuestring);
+        ok = (ecrit >= 0) && ((size_t)ecrit < taille);
+    }
+    cJSON_Delete(racine);
+    return ok;
+}
+
+/* Codage pourcentage minimal (RFC 3986) pour embarquer un script gcode dans
+ * la query string du repli HTTP (voir plus bas, "?script=<script>") :
+ * contrairement a un nom de macro (alphanumerique + underscore uniquement,
+ * jamais code cote HTTP dans ce seam), un script produit par klipper_gcode.c
+ * contient couramment des espaces ("G1 X10 F3000") et, pour un jog
+ * (klipper_gcode_jog()), de VRAIS retours a la ligne (SAVE_GCODE_STATE ...
+ * \n G91 \n ...). Ni l'un ni l'autre n'est valide tel quel dans une query
+ * string -- un espace non code casse le decoupage des parametres, et un
+ * octet 0x0A brut a l'interieur d'une ligne de requete HTTP est une
+ * violation de protocole (au mieux rejetee, au pire un risque d'injection
+ * de requete). Seuls les caracteres surs tels quels dans une query string
+ * (alphanumerique + "-_.~") restent inchanges ; tout le reste devient
+ * "%XX". Rend false si `sortie` est trop court pour le resultat code
+ * (jamais de troncature silencieuse, meme regle que le reste de ce
+ * fichier). */
+static bool moonraker_url_encoder_script(const char *script, char *sortie, size_t taille)
+{
+    static const char HEX[] = "0123456789ABCDEF";
+    size_t pos = 0;
+    for (const char *p = script; *p != '\0'; p++) {
+        unsigned char c = (unsigned char)*p;
+        bool direct = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                      (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+        if (direct) {
+            if (pos + 1 >= taille) {
+                return false;
+            }
+            sortie[pos++] = (char)c;
+        } else {
+            if (pos + 3 >= taille) {
+                return false;
+            }
+            sortie[pos++] = '%';
+            sortie[pos++] = HEX[(c >> 4) & 0x0Fu];
+            sortie[pos++] = HEX[c & 0x0Fu];
+        }
+    }
+    if (pos >= taille) {
+        return false;
+    }
+    sortie[pos] = '\0';
+    return true;
+}
+
 static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                                              const char *arguments_json)
 {
@@ -683,6 +755,14 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
     char nom_macro[MOONRAKER_MACRO_NOM_MAX];
     if (est_macro && !moonraker_extraire_nom_macro(arguments_json, nom_macro, sizeof(nom_macro))) {
         JOURNAL_ALERTE(TAG, "commande macro sans nom exploitable dans arguments_json");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    /* Tache 1, jalon 3b : meme structure que est_macro/nom_macro ci-dessus. */
+    bool est_gcode = (strcmp(action, BACKEND_ACTION_GCODE) == 0);
+    char script[KLIPPER_GCODE_MAX];
+    if (est_gcode && !moonraker_extraire_champ_script(arguments_json, script, sizeof(script))) {
+        JOURNAL_ALERTE(TAG, "commande gcode sans script exploitable dans arguments_json");
         return ESP_ERR_NOT_SUPPORTED;
     }
 
@@ -728,6 +808,62 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                 return ESP_FAIL;
             }
             JOURNAL_INFO(TAG, "commande macro %s -> WS printer.gcode.script", nom_macro);
+            return ESP_OK;
+        }
+
+        if (est_gcode) {
+            /* Tache 1, jalon 3b : meme methode que la macro ci-dessus
+             * (printer.gcode.script), mais le script arrive DEJA construit
+             * (klipper_gcode.c) au lieu d'un nom a envelopper. ECART
+             * DELIBERE par rapport au chemin macro pour la construction des
+             * parametres : la macro ci-dessus batit son JSON a la main
+             * (snprintf) parce qu'un nom Klipper valide est alphanumerique +
+             * underscore, jamais d'espace ni de caractere special -- un
+             * script gcode, lui, contient couramment des espaces
+             * ("G1 X10 F3000") et, pour un jog (klipper_gcode_jog()), de
+             * VRAIS retours a la ligne (SAVE_GCODE_STATE ... \n G91 \n ...).
+             * Un octet 0x0A brut a l'interieur d'une chaine JSON viole la
+             * RFC 8259 (Python json.loads() cote Moonraker le rejetterait) :
+             * cJSON echappe correctement au lieu d'un snprintf a la main --
+             * meme raison, meme choix que gestion_etat() dans web.c pour un
+             * champ qui vient "d'ailleurs que de ce firmware" (voir son
+             * commentaire). */
+            cJSON *params_obj = cJSON_CreateObject();
+            if (params_obj == NULL) {
+                JOURNAL_ALERTE(TAG, "construction des parametres gcode impossible (memoire)");
+                return ESP_ERR_NO_MEM;
+            }
+            if (cJSON_AddStringToObject(params_obj, "script", script) == NULL) {
+                cJSON_Delete(params_obj);
+                JOURNAL_ALERTE(TAG, "construction des parametres gcode impossible (memoire)");
+                return ESP_ERR_NO_MEM;
+            }
+            char *params = cJSON_PrintUnformatted(params_obj);
+            cJSON_Delete(params_obj);
+            if (params == NULL) {
+                JOURNAL_ALERTE(TAG, "impression JSON des parametres gcode impossible");
+                return ESP_FAIL;
+            }
+            bool succes = false;
+            char erreur[128];
+            erreur[0] = '\0';
+            esp_err_t erreur_ws = moonraker_ws_commande("printer.gcode.script", params,
+                                                          MOONRAKER_WS_COMMANDE_TIMEOUT_MS, &succes, erreur,
+                                                          sizeof(erreur));
+            cJSON_free(params);
+            if (erreur_ws != ESP_OK) {
+                JOURNAL_ALERTE(TAG, "commande gcode (WS) en echec (%s)", esp_err_to_name(erreur_ws));
+                return erreur_ws;
+            }
+            /* Meme limite protocolaire que la macro ci-dessus (voir son
+             * commentaire LIMITE PROTOCOLAIRE) : `succes` capture les rejets
+             * JSON-RPC de PROTOCOLE, pas un gcode invalide accepte puis
+             * refuse par Klipper via notify_gcode_response. */
+            if (!succes) {
+                JOURNAL_ALERTE(TAG, "gcode refuse par Moonraker (%s)", erreur);
+                return ESP_FAIL;
+            }
+            JOURNAL_INFO(TAG, "commande gcode -> WS printer.gcode.script");
             return ESP_OK;
         }
 
@@ -779,6 +915,32 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
         }
         JOURNAL_INFO(TAG, "commande macro %s -> POST /%s", nom_macro, chemin);
         return moonraker_requete(HTTP_METHOD_POST, chemin, NULL);
+    }
+
+    if (est_gcode) {
+        /* Tache 1, jalon 3b : meme endpoint que la macro ci-dessus
+         * (POST /printer/gcode/script?script=...), mais ECART DELIBERE sur
+         * l'echappement : le nom de macro ci-dessus n'en a jamais besoin
+         * (alphanumerique + underscore uniquement), alors qu'un script
+         * gcode contient couramment des espaces et, pour un jog, de vrais
+         * retours a la ligne -- ni l'un ni l'autre n'est valide tel quel
+         * dans une query string ni dans une ligne de requete HTTP (voir le
+         * commentaire de moonraker_url_encoder_script() ci-dessus pour le
+         * detail). Codage pourcentage donc obligatoire ici, contrairement
+         * au reste de ce seam. */
+        char script_code[(KLIPPER_GCODE_MAX * 3) + 1];
+        if (!moonraker_url_encoder_script(script, script_code, sizeof(script_code))) {
+            JOURNAL_ALERTE(TAG, "codage URL du script gcode impossible (trop long)");
+            return ESP_FAIL;
+        }
+        char chemin_gcode[sizeof(script_code) + 32];
+        int ecrit = snprintf(chemin_gcode, sizeof(chemin_gcode), "printer/gcode/script?script=%s", script_code);
+        if (ecrit < 0 || (size_t)ecrit >= sizeof(chemin_gcode)) {
+            JOURNAL_ALERTE(TAG, "construction du chemin gcode impossible");
+            return ESP_FAIL;
+        }
+        JOURNAL_INFO(TAG, "commande gcode -> POST /%s", chemin_gcode);
+        return moonraker_requete(HTTP_METHOD_POST, chemin_gcode, NULL);
     }
 
     (void)arguments_json; /* aucune des quatre actions ci-dessous ne prend de corps en HTTP non plus */

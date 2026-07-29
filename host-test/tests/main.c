@@ -27,6 +27,7 @@ void suite_commandes(void);
 void suite_jouet(void);
 void suite_web_macros(void);
 void suite_ecran_macros(void);
+void suite_klipper_gcode(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -122,6 +123,11 @@ int main(void)
      * verrou -- independante de toute autre suite (aucun etat process-wide
      * partage). */
     suite_moonraker_boite();
+
+    /* Tache 1 (jalon 3b) : couche de commande gcode pure (jog/home/temp),
+     * fonctions pures sans aucun etat process-wide -- aucune contrainte
+     * d'ordre avec les autres suites. */
+    suite_klipper_gcode();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;
