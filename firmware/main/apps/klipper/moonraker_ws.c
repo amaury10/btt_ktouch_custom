@@ -549,17 +549,38 @@ esp_err_t moonraker_ws_commande(const char *methode, const char *params_json,
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Fix round 1 (revue tache 5, C1 CRITIQUE) : l'id doit etre genere AVANT
+     * de prendre g_verrou ci-dessous -- prochain_id() prend CE MEME verrou
+     * en interne (voir sa declaration), et xSemaphoreCreateMutex() cree un
+     * mutex NON recursif : un appel a prochain_id() alors que ce site tient
+     * deja g_verrou bloquait cette tache indefiniment sur son propre verrou
+     * (auto-interblocage, aucune assertion FreeRTOS ne le detecte sur ce
+     * chemin). Rayon d'effet du bug avant ce fix : boucle_klipper ne
+     * revenait plus jamais de la premiere commande WS (pause/reprendre/
+     * annuler/ARRET D'URGENCE compris), plus aucun rafraichissement ni
+     * liaison_echec() ; la tache WS elle-meme se bloquait a son tour sur ce
+     * meme verrou des le message suivant (traiter_data()) -- ecran fige,
+     * aucun repli (le WS reste "en ligne" du point de vue de
+     * moonraker_ws_en_ligne()), redemarrage materiel requis. Verifie apres
+     * correctif : chaque paire xSemaphoreTake(g_verrou)/xSemaphoreGive(g_verrou)
+     * de ce fichier relue une a une (liste complete dans le rapport de
+     * tache) -- prochain_id() est desormais TOUJOURS appelee hors de toute
+     * section critique tenue par ce meme fichier ; c'etait la SEULE
+     * occurrence d'un tel appel imbrique. */
+    uint32_t id = prochain_id();
+
     xSemaphoreTake(g_verrou, portMAX_DELAY);
     if (g_correlateur.en_cours) {
         xSemaphoreGive(g_verrou);
         /* Ne devrait jamais arriver : voir le commentaire de tete sur
          * l'hypothese "une seule commande a la fois" -- garde defensive
-         * plutot qu'un chemin normal. */
+         * plutot qu'un chemin normal. L'id genere ci-dessus est simplement
+         * perdu (jamais consomme) : sans consequence, rien n'exige que les
+         * id soient contigus. */
         JOURNAL_ALERTE(TAG, "commande WS deja en cours ; %s refusee", methode);
         return ESP_ERR_INVALID_STATE;
     }
 
-    uint32_t id = prochain_id();
     char tampon[MOONRAKER_WS_REQUETE_OCTETS];
     if (!rpc_construire_requete(tampon, sizeof(tampon), id, methode, params_json)) {
         xSemaphoreGive(g_verrou);
