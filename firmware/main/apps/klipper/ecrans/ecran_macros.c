@@ -117,8 +117,22 @@ bool ecran_macros_construire_arguments(const char *nom, char *sortie, size_t tai
  * position/taille (contrairement a la version accueil, fixe) : ce fichier
  * en a besoin pour la grille ET pour les deux boutons de pagination, qui
  * n'ont pas la meme taille. */
+/* Fix défaut 4 (revue live jalon 3a) : `alignement_texte` distingue les
+ * boutons de la grille (LV_TEXT_ALIGN_LEFT -- un nom de macro tronqué par
+ * LV_LABEL_LONG_DOT doit se lire depuis la gauche, "..." venant naturellement
+ * MANGER la fin, pas le début) des deux boutons de pagination
+ * (LV_TEXT_ALIGN_CENTER -- un simple "<"/">" perdu dans une étiquette bien
+ * plus large que son seul glyphe, voir BOUTON_PAGE_LARGEUR - 12 = 48 px pour
+ * un caractère, restait planté à GAUCHE de cette étiquette au lieu du centre
+ * du bouton, capture macros-pagination-avant-fix.png). lv_obj_center(label)
+ * plus bas ne centre que la BOÎTE de l'étiquette dans le bouton -- pas le
+ * texte À L'INTÉRIEUR de cette boîte quand elle est plus large que son
+ * contenu, ce qui est exactement le cas ici : sans ce style, le texte reste
+ * aligné à gauche (LV_TEXT_ALIGN_AUTO, la valeur par défaut de LVGL) dans une
+ * boîte pourtant centrée. */
 static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, lv_coord_t x, lv_coord_t y,
-                               lv_coord_t largeur, lv_coord_t hauteur, const lv_font_t *police)
+                               lv_coord_t largeur, lv_coord_t hauteur, const lv_font_t *police,
+                               lv_text_align_t alignement_texte)
 {
     lv_obj_t *bouton = lv_button_create(parent);
     lv_obj_set_size(bouton, largeur, hauteur);
@@ -140,6 +154,7 @@ static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, lv_coord_t x,
      * nom de fichier de ecran_accueil.c. Largeur explicite = celle du
      * bouton moins un peu de marge interne, requise par LV_LABEL_LONG_DOT. */
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(label, alignement_texte, 0);
     lv_obj_set_width(label, largeur - 12);
     /* Sans cet appel, le PREMIER lv_label_set_text() ci-dessous verrait une
      * largeur de contenu pas encore resolue (proche de 0) et tronquerait en
@@ -388,7 +403,8 @@ static void ecran_macros_construire(lv_obj_t *parent, void *contexte)
         lv_coord_t y = GRILLE_Y + ligne * (BOUTON_HAUTEUR + BOUTON_ECART_Y);
 
         ctx->boutons[emplacement] =
-            bouton_creer(parent, "", x, y, BOUTON_LARGEUR, BOUTON_HAUTEUR, &lv_font_montserrat_14);
+            bouton_creer(parent, "", x, y, BOUTON_LARGEUR, BOUTON_HAUTEUR, &lv_font_montserrat_14,
+                         LV_TEXT_ALIGN_LEFT);
         ctx->labels[emplacement] = lv_obj_get_child(ctx->boutons[emplacement], 0);
         lv_obj_add_flag(ctx->boutons[emplacement], LV_OBJ_FLAG_HIDDEN);
 
@@ -401,11 +417,12 @@ static void ecran_macros_construire(lv_obj_t *parent, void *contexte)
     lv_coord_t pagination_centre_x = LARGEUR_CONTENU / 2;
     ctx->bouton_precedent = bouton_creer(parent, "<", pagination_centre_x - BOUTON_PAGE_LARGEUR - 90,
                                           PAGINATION_Y, BOUTON_PAGE_LARGEUR, PAGINATION_HAUTEUR,
-                                          &lv_font_montserrat_20);
+                                          &lv_font_montserrat_20, LV_TEXT_ALIGN_CENTER);
     lv_obj_add_event_cb(ctx->bouton_precedent, bouton_precedent_cb, LV_EVENT_CLICKED, ctx);
 
     ctx->bouton_suivant = bouton_creer(parent, ">", pagination_centre_x + 90, PAGINATION_Y,
-                                        BOUTON_PAGE_LARGEUR, PAGINATION_HAUTEUR, &lv_font_montserrat_20);
+                                        BOUTON_PAGE_LARGEUR, PAGINATION_HAUTEUR, &lv_font_montserrat_20,
+                                        LV_TEXT_ALIGN_CENTER);
     lv_obj_add_event_cb(ctx->bouton_suivant, bouton_suivant_cb, LV_EVENT_CLICKED, ctx);
 
     ctx->page_label = lv_label_create(parent);
