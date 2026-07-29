@@ -23,6 +23,13 @@ static entree_pile_t pile[NAVIGATION_PROFONDEUR_MAX];
 static size_t profondeur;
 static lv_obj_t *conteneur_racine;
 
+/* Voir navigation_sequence() (navigation.h) pour le contrat complet. Partie
+ * de 0 comme g_derniere_generation dans habillage.c : un premier empilement
+ * après un navigation_init() (qui ne touche jamais ce compteur, voir plus
+ * bas) le fait passer à 1, ce qui suffit à déclencher la toute première
+ * propagation dès que habillage_pomper() a quelque chose à transmettre. */
+static uint32_t sequence;
+
 /* Détruit l'écran au sommet de la pile et décrémente `profondeur`. Ne
  * touche PAS à la visibilité de l'écran qui devient le nouveau sommet :
  * c'est aux appelants (navigation_depiler(), navigation_init()) de décider
@@ -120,6 +127,10 @@ esp_err_t navigation_empiler(const ecran_desc_t *desc)
     pile[profondeur].racine = racine;
     profondeur++;
 
+    /* Le sommet visible vient de changer (le nouvel écran, jamais celui
+     * caché juste au-dessus) : voir navigation_sequence(). */
+    sequence++;
+
     return ESP_OK;
 }
 
@@ -139,6 +150,13 @@ void navigation_depiler(void)
      * masquage fait par navigation_empiler(), et sans lui l'écran du dessous
      * resterait invisible pour toujours après ce dépilement. */
     lv_obj_clear_flag(pile[profondeur - 1].racine, LV_OBJ_FLAG_HIDDEN);
+
+    /* Le sommet visible vient de changer (l'écran redémasqué ci-dessus,
+     * qui n'a reçu aucune mise à jour depuis qu'il a été couvert -- voir
+     * navigation_mettre_a_jour(), spécification 5.4) : voir
+     * navigation_sequence(). Jamais atteint quand la garde ci-dessus a
+     * refusé le dépilement (rien n'a changé). */
+    sequence++;
 }
 
 void navigation_accueil(void)
@@ -151,11 +169,21 @@ void navigation_accueil(void)
      * n'est jamais rendu, mais du travail quand même. Même schéma que
      * navigation_init() : détruire d'abord tout ce qui doit disparaître,
      * ne redémasquer qu'une seule fois à la fin. */
+    bool sommet_a_change = profondeur > 1;
     while (profondeur > 1) {
         detruire_sommet();
     }
     if (profondeur > 0) {
         lv_obj_clear_flag(pile[profondeur - 1].racine, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Une seule incrémentation même si plusieurs écrans intermédiaires ont
+     * été détruits ci-dessus : un seul changement de sommet visible a eu
+     * lieu (du sommet d'origine directement au fond) -- voir
+     * navigation_sequence(). Rien à faire si la pile ne contenait déjà
+     * qu'un seul écran (ou aucun) : le sommet n'a pas bougé. */
+    if (sommet_a_change) {
+        sequence++;
     }
 }
 
@@ -184,4 +212,9 @@ const char *navigation_id_courant(void)
 size_t navigation_profondeur(void)
 {
     return profondeur;
+}
+
+uint32_t navigation_sequence(void)
+{
+    return sequence;
 }

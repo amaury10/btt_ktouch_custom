@@ -594,6 +594,79 @@ static void section_file_pleine(void)
     free(brut);
 }
 
+/* ------------------------------------------------------------------------
+ * Section 7 (defaut 1, revue live jalon 3a) : un ecran empile PENDANT une
+ * periode calme (aucun nouveau cycle de la boucle entre l'empilement et le
+ * pompage suivant, donc generation ET liaison INCHANGEES) doit quand meme
+ * recevoir un premier mettre_a_jour -- PAS seulement quand generation ou
+ * liaison changent.
+ *
+ * Root cause confirmee (pas re-derivee ici) : habillage_pomper()
+ * (ui/habillage.c) ne relayait navigation_mettre_a_jour() que si
+ * `generation != g_derniere_generation || liaison != g_derniere_liaison`.
+ * Un ecran fraichement empile (navigation_empiler(), ui/navigation.c) voit
+ * son `construire` tourner avec un contexte vide, mais son PREMIER
+ * `mettre_a_jour` n'arrivait qu'au prochain changement reel de generation ou
+ * de liaison -- qui peut ne jamais survenir pendant une periode calme (sur
+ * vkp, les temperatures sont constantes : generation avance a peine). Tout
+ * ecran empile pendant une telle periode reste donc vide (ex. ECRAN_MACROS,
+ * qui affichait "No macros" malgre nb_macros>0) jusqu'a ce que quelque chose
+ * d'AUTRE bouge dans l'etat applicatif. */
+
+typedef struct { int maj; } trace_ecran_calme_t;
+static trace_ecran_calme_t g_trace_ecran_calme;
+
+static void ecran_calme_maj(const void *etat, bool donnees_perimees, void *ctx)
+{
+    (void)etat;
+    (void)donnees_perimees;
+    (void)ctx;
+    g_trace_ecran_calme.maj++;
+}
+
+static const ecran_desc_t ECRAN_JOUET_CALME = {
+    .id = "calme", .titre = "Calme", .taille_contexte = 0,
+    .construire = NULL, .mettre_a_jour = ecran_calme_maj, .detruire = NULL,
+};
+
+static void section_ecran_pousse_pendant_periode_calme(void)
+{
+    printf("suite : commandes (ecran pousse pendant periode calme -> maj immediate)\n");
+
+    /* Meme restauration que les sections precedentes (navigation_init() sur
+     * lv_screen_active() directement) : ce test n'a besoin que de la pile de
+     * navigation, pas du reste de l'habillage. */
+    navigation_init(lv_screen_active());
+    memset(&g_trace_ecran_calme, 0, sizeof(g_trace_ecran_calme));
+
+    /* Amorce : aligne les tampons "dernier generation/liaison" statiques de
+     * habillage.c sur l'etat courant AVANT d'empiler l'ecran jouet -- SANS
+     * source_etat_sim_cycle() ici, donc sans toucher la generation. La pile
+     * est vide a cet instant (navigation_mettre_a_jour() ne fait rien sur
+     * profondeur==0), cette pompe n'a donc aucun effet sur
+     * ECRAN_JOUET_CALME lui-meme. */
+    habillage_pomper();
+
+    VERIFIER(navigation_empiler(&ECRAN_JOUET_CALME) == ESP_OK);
+    /* construire == NULL : la preuve isole mettre_a_jour, sans effet de bord
+     * possible d'une construction. */
+
+    /* generation ET liaison INCHANGEES depuis l'amorce ci-dessus (aucun
+     * source_etat_sim_cycle() entre les deux pompages) : sous le code casse,
+     * habillage_pomper() sautait entierement le bloc de propagation et
+     * ECRAN_JOUET_CALME.mettre_a_jour ne tournait jamais -- RED reellement
+     * observe en ecrivant ce test (g_trace_ecran_calme.maj restait a 0 ici). */
+    habillage_pomper();
+    VERIFIER(g_trace_ecran_calme.maj >= 1);
+
+    /* Pas de nouveau pompage entre-temps : la garde de redessin (generation
+     * ET liaison toujours inchangees) ne doit pas re-notifier une SECONDE
+     * fois pour la MEME cause -- seul le changement de sommet de pile doit
+     * forcer une propagation, pas chaque pompage qui suit indefiniment. */
+    habillage_pomper();
+    VERIFIER(g_trace_ecran_calme.maj == 1);
+}
+
 void suite_commandes(void)
 {
     /* Garde d'ordonnancement (revue finale jalon 2b) : section_echec_asynchrone()
@@ -617,4 +690,5 @@ void suite_commandes(void)
     section_echec_asynchrone();
     section_echec_urgence_priorite();
     section_file_pleine();
+    section_ecran_pousse_pendant_periode_calme();
 }

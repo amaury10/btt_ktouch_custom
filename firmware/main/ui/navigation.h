@@ -14,6 +14,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "lvgl.h"
@@ -81,3 +82,21 @@ const char *navigation_id_courant(void);
 /* Nombre d'écrans actuellement empilés (0 avant le premier
  * navigation_empiler()). */
 size_t navigation_profondeur(void);
+
+/* Compteur monotone, jamais remis à zéro, incrémenté à chaque changement
+ * RÉUSSI de l'écran visible au sommet de la pile (navigation_empiler() qui
+ * réussit, navigation_depiler() ou navigation_accueil() qui dépilent
+ * réellement quelque chose) — jamais sur une tentative refusée ou un
+ * dépilement qui ne change rien (garde « dernier écran », voir
+ * navigation_depiler()).
+ *
+ * Signal « la pile a changé » consommé par habillage_pomper() (voir son
+ * commentaire dans ui/habillage.c) : un écran qui vient tout juste de
+ * devenir le sommet a été construit avec un contexte vide (construire() ne
+ * reçoit jamais l'état applicatif, voir ecran.h) et a besoin d'un premier
+ * mettre_a_jour au prochain pompage MÊME SI l'état applicatif lui-même n'a
+ * pas changé entre-temps (ex. température constante sur une imprimante au
+ * repos) — sans ce signal, un écran fraîchement empilé pendant une période
+ * calme reste vide jusqu'au prochain changement réel de generation/liaison,
+ * qui peut ne jamais survenir. */
+uint32_t navigation_sequence(void);

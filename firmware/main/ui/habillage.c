@@ -56,6 +56,13 @@ static lv_timer_t *g_bandeau_timer;
 static uint32_t       g_derniere_generation;
 static liaison_etat_t g_derniere_liaison = LIAISON_CONNEXION;
 
+/* Dernière valeur de navigation_sequence() vue par habillage_pomper() (voir
+ * son commentaire dans navigation.h). Part de 0 comme g_derniere_generation
+ * ci-dessus, pour la même raison : navigation_sequence() vaut aussi 0 avant
+ * tout premier navigation_empiler(), donc partir de 0 ici ne déclenche rien
+ * en trop tant qu'aucun écran n'a encore été empilé. */
+static uint32_t g_derniere_sequence;
+
 /* Tampon de lecture de l'état applicatif, relu à chaque habillage_pomper().
  * Concret (etat_klipper_t), pas void* : ui_etat_instantane() (voir
  * source_etat.h) exige un `dest`/`taille` correspondant EXACTEMENT à la
@@ -365,7 +372,23 @@ void habillage_pomper(void)
         return;
     }
 
-    if (generation != g_derniere_generation || liaison != g_derniere_liaison) {
+    /* navigation_sequence() ajoutée à la garde (défaut 1, revue live jalon
+     * 3a) : un écran qui vient d'être empilé (navigation_empiler(),
+     * ui/navigation.c) a été construit avec un contexte vide -- construire()
+     * ne reçoit jamais l'état applicatif, voir ecran.h -- et n'a donc encore
+     * RIEN reçu de mettre_a_jour. Sans cette condition, generation/liaison
+     * seules pouvaient rester inchangées indéfiniment pendant une période
+     * calme (température constante, ex. vkp), laissant cet écran vide
+     * jusqu'à ce que quelque chose d'AUTRE bouge dans l'état applicatif --
+     * qui peut ne jamais arriver. Ne remplace PAS la garde de generation/
+     * liaison (optimisation de redessin toujours utile hors changement de
+     * pile) : s'y AJOUTE. g_etat est déjà à jour ici (ui_etat_instantane()
+     * ci-dessus, avant cette garde), donc la propager sur un simple
+     * changement de sommet de pile, sans changement de generation/liaison,
+     * transmet bien l'état courant réel -- jamais périmé. */
+    uint32_t sequence = navigation_sequence();
+    if (generation != g_derniere_generation || liaison != g_derniere_liaison ||
+        sequence != g_derniere_sequence) {
         /* Calculé une seule fois ici, à partir de la SEULE liaison (jamais
          * du contenu de g_etat) : c'est le seul appel réel de
          * habillage_donnees_perimees() de tout le module, et le seul point
@@ -378,6 +401,7 @@ void habillage_pomper(void)
         navigation_mettre_a_jour(&g_etat, perimees);
         g_derniere_generation = generation;
         g_derniere_liaison = liaison;
+        g_derniere_sequence = sequence;
     }
 }
 
