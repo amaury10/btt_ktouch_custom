@@ -32,6 +32,21 @@ static void section_depot_puis_drain(void)
 
     /* Le drain consomme : la boite redevient vide. */
     VERIFIER(boite_a_du_neuf(&b) == false);
+
+    /* Fix round 1 (revue tache 5, M4) : le drain ne doit JAMAIS effacer
+     * `b.etat` lui-meme -- seul `neuf` bascule (voir le contrat de
+     * boite_drainer() dans moonraker_boite.h). C'est l'invariant dont
+     * moonraker_ws.c (traiter_message_complet(), ESP-only, hors de ce
+     * harnais) depend directement : il relit `g_boite.etat` comme base
+     * cumulative pour fusionner CHAQUE notify_status_update partiel, meme
+     * quand la boite a deja ete drainee entre-temps -- une boite qui
+     * remettrait `etat` a zero apres un drain ferait fusionner tout
+     * notify_status_update ulterieur sur du zero au lieu du dernier etat
+     * reellement connu. Un mutant qui remettrait `b->etat` a zero apres la
+     * copie passerait le reste de cette suite (rien ailleurs n'inspecte
+     * `b.etat` directement, seulement ce que `boite_drainer()` RENVOIE) --
+     * cette assertion-ci est la seule a l'attraper. */
+    VERIFIER(memcmp(&b.etat, &depose, sizeof(b.etat)) == 0);
 }
 
 static void section_deux_depots_un_seul_drain(void)

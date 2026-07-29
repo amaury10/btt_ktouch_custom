@@ -72,7 +72,12 @@ static bool   g_tampon_deborde = false;
 
 /* Délai de l'opération d'envoi elle-même (mise en file d'attente par
  * esp_websocket_client, PAS le temps d'attendre une réponse -- voir
- * MOONRAKER_WS_TIMEOUT_COMMANDE_DEFAUT_MS plus bas pour ça). */
+ * MOONRAKER_WS_COMMANDE_TIMEOUT_MS dans backend_moonraker.c pour ça, seul
+ * appelant de moonraker_ws_commande() : ce fichier-ci ne fixe pas lui-même
+ * de délai par défaut, le `timeout_ms` de moonraker_ws_commande() est
+ * toujours fourni par l'appelant). Fix round 1 (revue tache 5, cosmetique) :
+ * ce commentaire renvoyait vers un nom de constante qui n'a jamais existe
+ * (MOONRAKER_WS_TIMEOUT_COMMANDE_DEFAUT_MS). */
 #define MOONRAKER_WS_ENVOI_DELAI_MS 2000u
 
 /* Granularité du sondage du corrélateur par moonraker_ws_commande() -- voir
@@ -113,6 +118,30 @@ static uint32_t g_backoff_ms             = MOONRAKER_WS_BACKOFF_INITIAL_MS;
 static bool     g_reconnexion_armee      = false;
 static uint32_t g_compteur_reconnexions  = 0;
 static int64_t  g_dernier_journal_reco_us = 0;
+
+/* Fix round 1 (revue tache 5, M1) : compteur + horodatage de throttle pour
+ * journaliser_debordement(), meme structure que g_compteur_reconnexions/
+ * g_dernier_journal_reco_us juste au-dessus -- voir son commentaire. */
+static uint32_t g_compteur_debordements       = 0;
+static int64_t  g_dernier_journal_debordement_us = 0;
+
+/* Fix round 1 (revue tache 5, M3) : meme throttle que g_compteur_debordements
+ * ci-dessus, pour une trame WS fragmentee au niveau protocole (fin=0) --
+ * voir traiter_data() et son commentaire de tete pour ce que ce cas precis
+ * signifie et pourquoi il est refuse plutot que recolle. */
+static uint32_t g_compteur_fragmentations_ws       = 0;
+static int64_t  g_dernier_journal_fragmentation_us = 0;
+
+/* Fix round 1 (revue tache 5, M2) : vrai tant que ce module est cense
+ * tourner -- distinct de g_connecte (qui dit si la CONNEXION est
+ * actuellement etablie) : g_ws_demarre reste true pendant une coupure/
+ * reconnexion, et ne passe a false QUE dans moonraker_ws_arreter(). Protege
+ * par g_verrou : ecrit depuis boucle_klipper (demarrer()/arreter()), LU
+ * depuis la tache esp_timer (minuterie_reconnexion_cb()) -- c'est
+ * exactement la course entre l'arret du backend et une reconnexion deja
+ * armee que ce drapeau neutralise, voir minuterie_reconnexion_cb() et
+ * moonraker_ws_arreter(). */
+static bool g_ws_demarre = false;
 
 /* Générateur d'id JSON-RPC : UN SEUL compteur pour tout ce module (identify,
  * abonnement, commandes) -- jamais deux compteurs qui pourraient produire un
@@ -169,14 +198,29 @@ static void construire_url(char *tampon, size_t taille, const backend_hote_t *ho
 
 static void journaliser_debordement(void)
 {
-    /* Un seul événement notable par débordement réel (pas de sous-throttle
-     * supplémentaire ici) : contrairement aux échecs réseau répétitifs de
-     * backend_moonraker.c, un message qui dépasse 4 Kio est rarissime en
-     * pratique (voir son propre commentaire sur ce même budget) -- s'il
-     * devait se reproduire en rafale, ce serait le symptôme d'un problème
-     * bien plus grave que ce que throttler masquerait utilement. */
-    JOURNAL_ALERTE(TAG, "message WS au-dela de %u octets ; ignore",
-                   (unsigned)sizeof(g_tampon_msg) - 1u);
+    /* Fix round 1 (revue tache 5, M1) : throttlé -- l'ancien commentaire
+     * ("un débordement isolé est rarissime, une rafale serait déjà le
+     * symptôme d'un problème pire") avait le raisonnement à l'envers : une
+     * rafale est justement le cas où /log (16 Kio, seul canal de diagnostic
+     * de cet appareil) a le PLUS besoin de survivre, pas le moins -- et le
+     * risque n'est pas théorique : la fixture réelle la plus grosse de la
+     * tâche 4 (host-test/fixtures/moonraker) culmine déjà à 3062 octets sur
+     * 4096, un serveur qui pousserait un peu plus (beaucoup de macros, une
+     * position à 8 extrudeurs) franchirait ce seuil à chaque
+     * notify_status_update, potentiellement plusieurs fois par seconde --
+     * exactement le débit qui rasait déjà le netlog dans
+     * moonraker_journal_echec_pret() (backend_moonraker.c). Même politique
+     * ici : premier événement journalisé, puis au plus une ligne par minute
+     * tant que ça continue. */
+    g_compteur_debordements++;
+    int64_t maintenant = esp_timer_get_time();
+    bool premier = (g_compteur_debordements == 1);
+    bool intervalle_ecoule = (maintenant - g_dernier_journal_debordement_us) >= MOONRAKER_WS_JOURNAL_INTERVALLE_US;
+    if (premier || intervalle_ecoule) {
+        g_dernier_journal_debordement_us = maintenant;
+        JOURNAL_ALERTE(TAG, "message WS au-dela de %u octets ; ignore (occurrences cumulees : %u)",
+                       (unsigned)sizeof(g_tampon_msg) - 1u, (unsigned)g_compteur_debordements);
+    }
 }
 
 static void journaliser_reconnexion(void)
@@ -188,6 +232,23 @@ static void journaliser_reconnexion(void)
         g_dernier_journal_reco_us = maintenant;
         JOURNAL_ALERTE(TAG, "reconnexion WS #%u (prochain backoff %u ms)",
                        (unsigned)g_compteur_reconnexions, (unsigned)g_backoff_ms);
+    }
+}
+
+static void journaliser_fragmentation_ws(void)
+{
+    /* Meme politique de throttle que journaliser_debordement() (fix round 1,
+     * M1/M3) : premier evenement, puis au plus une ligne par minute. */
+    g_compteur_fragmentations_ws++;
+    int64_t maintenant = esp_timer_get_time();
+    bool premier = (g_compteur_fragmentations_ws == 1);
+    bool intervalle_ecoule = (maintenant - g_dernier_journal_fragmentation_us) >= MOONRAKER_WS_JOURNAL_INTERVALLE_US;
+    if (premier || intervalle_ecoule) {
+        g_dernier_journal_fragmentation_us = maintenant;
+        JOURNAL_ALERTE(TAG,
+            "trame WS fragmentee au niveau protocole (fin=0), non recollee (non supportee) ; "
+            "message ignore (occurrences cumulees : %u)",
+            (unsigned)g_compteur_fragmentations_ws);
     }
 }
 
@@ -299,27 +360,51 @@ static void traiter_message_complet(const char *json, size_t longueur)
     }
 }
 
-/* Réassemble les trames fragmentées dans le tampon statique borné, puis
- * dispatch le message complet sous verrou. `data->payload_offset`/
- * `data->payload_len`/`data->data_len` sont les champs qu'esp_websocket_client
- * fournit précisément pour ça : un message qui dépasse la taille du tampon
- * interne de la bibliothèque (`buffer_size`, indépendant de notre propre
- * tampon ici) arrive en PLUSIEURS événements WEBSOCKET_EVENT_DATA, chacun
- * portant un `data_ptr`/`data_len` pour SA part, `payload_offset` pour la
- * position de cette part dans le message logique complet, et `payload_len`
- * pour la taille TOTALE de ce message logique (constante sur tous les
- * événements d'un même message). */
+/* Réassemble un message TEXTE arrivé en plusieurs événements
+ * WEBSOCKET_EVENT_DATA dans le tampon statique borné, puis dispatch le
+ * message complet sous verrou.
+ *
+ * Fix round 1 (revue tache 5, M3) : commentaire d'origine corrigé après
+ * relecture de transport_ws.c (esp_websocket_client) -- CE qui est
+ * effectivement géré ci-dessous, et CE qui ne l'est PAS :
+ *   - GÉRÉ : le DÉCOUPAGE PAR LA BIBLIOTHÈQUE d'une SEULE trame WS plus
+ *     grande que son `buffer_size` interne (indépendant de notre propre
+ *     tampon ici) -- plusieurs événements DATA pour la MÊME trame, même
+ *     `op_code`/`fin`, `payload_offset` croissant, `payload_len` constant
+ *     (taille totale de CETTE trame). `data->payload_offset`/`payload_len`/
+ *     `data_len` sont exactement les champs prévus pour recoller ce
+ *     découpage-là, ce que le code ci-dessous fait.
+ *   - PAS GÉRÉ (YAGNI tant que non observé) : la FRAGMENTATION AU NIVEAU
+ *     PROTOCOLE WS (RFC 6455 -- un message logique envoyé en plusieurs
+ *     TRAMES, la première `op_code=TEXTE` avec `fin=0`, les suivantes
+ *     `op_code=CONTINUATION`). La bibliothèque ne recolle PAS ces trames
+ *     pour nous : chacune arrive avec son PROPRE `payload_offset` reparti à
+ *     0 et son PROPRE `payload_len` borné à CETTE SEULE trame. Sans le
+ *     contrôle sur `data->fin` ci-dessous, la première trame (TEXTE, fin=0)
+ *     serait dispatchée TRONQUÉE dès qu'elle atteint SA PROPRE fin, et la
+ *     trame de continuation qui suit serait silencieusement perdue (déjà
+ *     rejetée par le test `op_code == WS_TRANSPORT_OPCODES_TEXT`, qui exclut
+ *     `WS_TRANSPORT_OPCODES_CONT`) -- un JSON tronqué dispatché comme s'il
+ *     était complet. Moonraker/Tornado n'ont JAMAIS été observés fragmenter
+ *     ainsi (vérifié contre les fixtures réelles de la tâche 4) : latent,
+ *     jamais rencontré en pratique. Le contrôle ci-dessous REFUSE une telle
+ *     trame plutôt que de la dispatcher à moitié -- une vraie reassemblage
+ *     multi-trames RFC 6455 reste volontairement absente (YAGNI jusqu'à
+ *     preuve qu'un serveur réel fragmente ainsi). */
 static void traiter_data(const esp_websocket_event_data_t *data)
 {
     if (data->payload_offset == 0) {
-        /* Premier (ou seul) fragment d'un nouveau message logique : reinitialise
-         * le tampon de reassemblage, memorise le type de trame -- Moonraker ne
-         * pousse jamais que du JSON en trame TEXTE ; une trame binaire ou de
-         * controle (ping/pong/close, deja geree en interne par la bibliotheque)
-         * n'a rien a faire ici. */
+        /* Premiere partie (ou totalite) d'une trame : reinitialise le tampon
+         * de reassemblage. `g_tampon_texte` n'accepte QUE les trames TEXTE
+         * ET complètes en un seul envoi WS (`fin != 0`) -- voir le
+         * commentaire de tete ci-dessus pour ce que ce deuxieme critere
+         * exclut precisement. */
         g_tampon_len = 0;
         g_tampon_deborde = false;
-        g_tampon_texte = (data->op_code == WS_TRANSPORT_OPCODES_TEXT);
+        g_tampon_texte = (data->op_code == WS_TRANSPORT_OPCODES_TEXT) && (data->fin != 0);
+        if (data->op_code == WS_TRANSPORT_OPCODES_TEXT && data->fin == 0) {
+            journaliser_fragmentation_ws();
+        }
     }
 
     if (!g_tampon_texte || data->data_len <= 0) {
@@ -359,10 +444,46 @@ static void traiter_data(const esp_websocket_event_data_t *data)
 /* Callback de la minuterie de reconnexion (esp_timer, tourne dans la tache
  * esp_timer, PAS la tache WS -- sans consequence ici, ce callback ne touche
  * que l'etat de reconnexion et esp_websocket_client_start(), jamais
- * etat_store_*, boucle_*, ni LVGL). */
+ * etat_store_*, boucle_*, ni LVGL).
+ *
+ * Fix round 1 (revue tache 5, M2) : cette minuterie peut se declencher APRES
+ * que moonraker_ws_arreter() a deja detruit g_client (elle a ete armee AVANT
+ * l'appel a arreter(), esp_timer_stop() n'annule que les armements FUTURS,
+ * pas un declenchement deja en cours d'ordonnancement) -- lire g_client sans
+ * verrou a ce moment-la serait un use-after-free, et rappeler
+ * esp_websocket_client_start(NULL) sans le detecter re-armerait cette
+ * minuterie indefiniment sur un backend deja arrete (3f, qui cycle les
+ * backends d'un profil a l'autre, EXERCERA ce chemin). g_ws_demarre (mis a
+ * false sous verrou par moonraker_ws_arreter() AVANT que g_client ne soit
+ * touche, voir plus bas) est la garde : verifiee ici sous le MEME verrou, et
+ * g_client lu SOUS CE VERROU aussi -- jamais apres l'avoir relache. La
+ * portee du verrou reste volontairement COURTE (jamais tenue pendant
+ * l'appel bloquant a esp_websocket_client_start() lui-meme, qui pourrait
+ * prendre un temps non borne) : voir moonraker_ws_arreter() pour la moitie
+ * symetrique de cette synchronisation. Fenetre residuelle assumee et
+ * documentee (pas prouvee nulle) : entre la lecture de g_client sous verrou
+ * ici et l'appel a esp_websocket_client_start() juste apres, une
+ * moonraker_ws_arreter() concurrente pourrait deja avoir commence a detruire
+ * CE MEME handle -- inevitable sans tenir le verrou pendant tout l'appel
+ * bloquant, ce qui risquerait a son tour un interblocage avec la tache WS
+ * elle-meme (voir moonraker_ws_arreter()). Le cas reel vise ici (3f, un
+ * arret qui n'est PAS simultane a la microseconde pres avec le reveil de
+ * cette minuterie) est ferme ; une course a la microseconde entre les deux
+ * ne l'est pas et n'a pas de solution sans lock plus intrusif. */
 static void minuterie_reconnexion_cb(void *arg)
 {
     (void)arg;
+
+    xSemaphoreTake(g_verrou, portMAX_DELAY);
+    if (!g_ws_demarre || g_client == NULL) {
+        /* moonraker_ws_arreter() est passee entre l'armement de cette
+         * minuterie et son declenchement : rien a reconnecter, et surtout
+         * NE PAS se re-armer -- sans ce retour immediat, un backend arrete
+         * verrait cette minuterie se redeclencher pour toujours. */
+        g_reconnexion_armee = false;
+        xSemaphoreGive(g_verrou);
+        return;
+    }
     g_reconnexion_armee = false;
     g_compteur_reconnexions++;
     journaliser_reconnexion();
@@ -373,13 +494,23 @@ static void minuterie_reconnexion_cb(void *arg)
      * deja la valeur doublee -- c'est la progression exponentielle attendue
      * (1 s -> 2 -> 4 -> ... plafonnee 30 s). */
     g_backoff_ms = backoff_suivant(g_backoff_ms);
+    esp_websocket_client_handle_t client = g_client;
+    xSemaphoreGive(g_verrou);
 
-    esp_err_t erreur = esp_websocket_client_start(g_client);
+    esp_err_t erreur = esp_websocket_client_start(client);
     if (erreur != ESP_OK) {
         JOURNAL_ALERTE(TAG, "relance du client WS impossible (%s) ; nouvelle tentative programmee",
                        esp_err_to_name(erreur));
-        g_reconnexion_armee = true;
-        esp_timer_start_once(g_minuterie_reconnexion, (uint64_t)g_backoff_ms * 1000ULL);
+        xSemaphoreTake(g_verrou, portMAX_DELAY);
+        if (g_ws_demarre) {
+            /* Re-verifie sous verrou : un arret aurait pu survenir PENDANT
+             * l'appel (non bloquant en principe, mais rien ne l'exige) a
+             * esp_websocket_client_start() ci-dessus -- meme garde qu'a
+             * l'entree de ce callback, jamais un re-armement inconditionnel. */
+            g_reconnexion_armee = true;
+            esp_timer_start_once(g_minuterie_reconnexion, (uint64_t)g_backoff_ms * 1000ULL);
+        }
+        xSemaphoreGive(g_verrou);
     }
 }
 
@@ -427,6 +558,53 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
     }
 }
 
+/* Arret interne partage entre moonraker_ws_arreter() (API publique) et la
+ * garde defensive de moonraker_ws_demarrer() (rappele sans arreter()
+ * intermediaire) -- fix round 1 (revue tache 5, M2) : UNE SEULE
+ * implementation de la sequence "sans risque" (arreter la minuterie, geler
+ * g_ws_demarre puis detacher g_client SOUS VERROU avant de les toucher hors
+ * verrou), jamais deux copies qui pourraient diverger, l'une corrigee et
+ * l'autre non (c'etait exactement le defaut avant ce round : la garde de
+ * demarrer() faisait un stop()/destroy() direct, sans jamais passer par
+ * cette synchronisation).
+ *
+ * Le verrou n'est JAMAIS tenu pendant esp_websocket_client_stop()/destroy()
+ * eux-memes (potentiellement bloquants, la tache WS elle-meme peut avoir
+ * besoin de ce meme verrou dans traiter_data() pour progresser jusqu'a son
+ * point d'arret -- le tenir ici risquerait un interblocage symetrique a
+ * celui de C1). Le detachement de g_client (snapshot + mise a NULL) SOUS
+ * verrou, lui, ferme la fenetre "callback utilise un handle deja detruit"
+ * decrite dans minuterie_reconnexion_cb() -- pas la fenetre plus etroite
+ * documentee dans ce meme commentaire (lecture sous verrou puis appel a
+ * esp_websocket_client_start() hors verrou juste apres), assumee. */
+static void ws_teardown(void)
+{
+    if (g_minuterie_reconnexion != NULL) {
+        esp_timer_stop(g_minuterie_reconnexion); /* sans effet si deja arretee ; empeche tout FUTUR armement */
+    }
+
+    if (g_verrou == NULL) {
+        /* demarrer() n'a jamais ete appelee (ou a echoue avant de creer le
+         * verrou) : rien n'a jamais ete mis en route, rien a detacher. */
+        g_connecte = false;
+        return;
+    }
+
+    esp_websocket_client_handle_t client_a_detruire = NULL;
+    xSemaphoreTake(g_verrou, portMAX_DELAY);
+    g_ws_demarre = false;
+    g_reconnexion_armee = false;
+    client_a_detruire = g_client;
+    g_client = NULL; /* plus aucun lecteur (minuterie_reconnexion_cb(), commande()) ne verra ce handle */
+    xSemaphoreGive(g_verrou);
+
+    if (client_a_detruire != NULL) {
+        esp_websocket_client_stop(client_a_detruire);
+        esp_websocket_client_destroy(client_a_detruire);
+    }
+    g_connecte = false;
+}
+
 /* ------------------------------------------------------------------------
  * API publique -- voir moonraker_ws.h
  * ------------------------------------------------------------------------ */
@@ -457,12 +635,9 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
 
     /* Au cas ou demarrer() serait rappele sans arreter() intermediaire (meme
      * garde defensive que backend_moonraker_demarrer()) : ne pas fuir un
-     * client deja cree. */
-    if (g_client != NULL) {
-        esp_websocket_client_stop(g_client);
-        esp_websocket_client_destroy(g_client);
-        g_client = NULL;
-    }
+     * client deja cree -- ws_teardown() ci-dessus, jamais un stop()/destroy()
+     * direct (voir son commentaire : c'etait la moitie non corrigee de M2). */
+    ws_teardown();
 
     g_hote = *hote;
     memset(&g_boite, 0, sizeof(g_boite));
@@ -473,6 +648,10 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_reconnexion_armee = false;
     g_compteur_reconnexions = 0;
     g_dernier_journal_reco_us = 0;
+    g_compteur_debordements = 0;
+    g_dernier_journal_debordement_us = 0;
+    g_compteur_fragmentations_ws = 0;
+    g_dernier_journal_fragmentation_us = 0;
     g_id_abonnement = 0;
     g_id_suivant = 1;
     g_tampon_len = 0;
@@ -501,22 +680,25 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
         return erreur;
     }
 
+    /* Publie g_client comme "en service" -- fix round 1 (revue tache 5, M2) :
+     * SOUS le meme verrou que minuterie_reconnexion_cb()/ws_teardown()
+     * relisent/ecrivent g_ws_demarre et g_client, pour que la barriere
+     * memoire du mutex garantisse qu'un lecteur qui voit g_ws_demarre==true
+     * voit aussi le g_client entierement initialise ci-dessus (jamais un
+     * fragment de son ecriture, meme sans verrou explicite pendant la mise
+     * en place elle-meme : aucun lecteur concurrent ne peut exister tant que
+     * ce drapeau reste false). */
+    xSemaphoreTake(g_verrou, portMAX_DELAY);
+    g_ws_demarre = true;
+    xSemaphoreGive(g_verrou);
+
     JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u url=%s)", hote->adresse, (unsigned)hote->port, url);
     return ESP_OK;
 }
 
 void moonraker_ws_arreter(void)
 {
-    if (g_minuterie_reconnexion != NULL) {
-        esp_timer_stop(g_minuterie_reconnexion); /* sans effet si deja arretee */
-    }
-    g_reconnexion_armee = false;
-    if (g_client != NULL) {
-        esp_websocket_client_stop(g_client);
-        esp_websocket_client_destroy(g_client);
-        g_client = NULL;
-    }
-    g_connecte = false;
+    ws_teardown(); /* voir son commentaire : sequence partagee avec la garde de moonraker_ws_demarrer() */
     JOURNAL_INFO(TAG, "arret");
 }
 
@@ -552,21 +734,14 @@ esp_err_t moonraker_ws_commande(const char *methode, const char *params_json,
     /* Fix round 1 (revue tache 5, C1 CRITIQUE) : l'id doit etre genere AVANT
      * de prendre g_verrou ci-dessous -- prochain_id() prend CE MEME verrou
      * en interne (voir sa declaration), et xSemaphoreCreateMutex() cree un
-     * mutex NON recursif : un appel a prochain_id() alors que ce site tient
-     * deja g_verrou bloquait cette tache indefiniment sur son propre verrou
-     * (auto-interblocage, aucune assertion FreeRTOS ne le detecte sur ce
-     * chemin). Rayon d'effet du bug avant ce fix : boucle_klipper ne
-     * revenait plus jamais de la premiere commande WS (pause/reprendre/
-     * annuler/ARRET D'URGENCE compris), plus aucun rafraichissement ni
-     * liaison_echec() ; la tache WS elle-meme se bloquait a son tour sur ce
-     * meme verrou des le message suivant (traiter_data()) -- ecran fige,
-     * aucun repli (le WS reste "en ligne" du point de vue de
-     * moonraker_ws_en_ligne()), redemarrage materiel requis. Verifie apres
-     * correctif : chaque paire xSemaphoreTake(g_verrou)/xSemaphoreGive(g_verrou)
-     * de ce fichier relue une a une (liste complete dans le rapport de
-     * tache) -- prochain_id() est desormais TOUJOURS appelee hors de toute
-     * section critique tenue par ce meme fichier ; c'etait la SEULE
-     * occurrence d'un tel appel imbrique. */
+     * mutex NON recursif (voir sa prise a la ligne suivante) : un appel a
+     * prochain_id() alors que ce site tient deja g_verrou aurait bloque
+     * cette tache indefiniment sur son propre verrou (auto-interblocage,
+     * aucune assertion FreeRTOS ne le detecte sur ce chemin). Verifie
+     * apres correctif : chaque paire xSemaphoreTake(g_verrou)/xSemaphoreGive(g_verrou)
+     * de ce fichier relue une a une (voir le rapport de tache pour la liste
+     * complete) -- prochain_id() est desormais TOUJOURS appelee hors de
+     * toute section critique tenue par ce meme fichier. */
     uint32_t id = prochain_id();
 
     xSemaphoreTake(g_verrou, portMAX_DELAY);
@@ -622,6 +797,24 @@ esp_err_t moonraker_ws_commande(const char *methode, const char *params_json,
             return ESP_OK;
         }
         xSemaphoreGive(g_verrou);
+
+        /* Fix round 1 (revue tache 5, L2) : une deconnexion PENDANT
+         * l'attente n'obtiendra plus jamais de reponse corrélée (la tache WS
+         * va ré-identifier/ré-abonner a la reconnexion, avec de NOUVEAUX id,
+         * jamais celui-ci) -- attendre quand meme le timeout_ms complet
+         * (jusqu'a MOONRAKER_WS_COMMANDE_TIMEOUT_MS, voir backend_moonraker.c)
+         * ferait patienter l'utilisateur pour rien sur un signal deja
+         * disponible. Sort au tick de sondage suivant (<= MOONRAKER_WS_SONDAGE_MS,
+         * 20 ms) avec un code honnete -- ESP_ERR_INVALID_STATE, pas
+         * ESP_ERR_TIMEOUT, pour ne pas laisser croire que Moonraker n'a
+         * simplement pas eu le temps de repondre. */
+        if (!g_connecte) {
+            xSemaphoreTake(g_verrou, portMAX_DELAY);
+            g_correlateur.en_cours = false;
+            xSemaphoreGive(g_verrou);
+            JOURNAL_ALERTE(TAG, "commande WS %s : deconnecte pendant l'attente de la reponse", methode);
+            return ESP_ERR_INVALID_STATE;
+        }
 
         if (((esp_timer_get_time() - debut_us) / 1000) >= timeout_ms) {
             break;

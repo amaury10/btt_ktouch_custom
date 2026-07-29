@@ -110,6 +110,21 @@ static bool           g_actif = false;
 static etat_klipper_t g_dernier_etat_ws;
 static bool           g_dernier_etat_ws_valide = false;
 
+/* Revue tache 5, fix round 1 (L4) : dernier compteur de reconnexions WS VU
+ * par rafraichir() -- sert a detecter qu'une reconnexion a eu lieu DEPUIS le
+ * cycle precedent, meme si `moonraker_ws_en_ligne()` est deja revenu a true
+ * au moment ou ce cycle tourne (le compteur, lui, avance AVANT que
+ * WEBSOCKET_EVENT_CONNECTED ne remette g_connecte a true -- voir
+ * minuterie_reconnexion_cb() dans moonraker_ws.c -- donc il est deja a jour
+ * des le premier cycle qui suit une reconnexion). Sans ce controle,
+ * g_dernier_etat_ws (potentiellement vieux de plusieurs secondes, datant
+ * d'AVANT la coupure) survivrait tel quel a une reconnexion et serait
+ * republie comme si de rien n'etait des le premier cycle ou WS redevient en
+ * ligne -- violation de spec §7 ("jamais l'etat de l'ancienne connexion
+ * presente comme celui de la nouvelle", ecrit pour le parc de machines de
+ * 3f mais valable ici a l'identique pour une simple coupure/reprise). */
+static uint32_t g_dernier_compteur_reconnexions_ws = 0;
+
 /* Delai borne d'une commande RPC corrolee sur le WS (moonraker_ws_commande()) :
  * du meme ordre que MOONRAKER_DELAI_TOTAL_MS ci-dessous pour le chemin HTTP --
  * assez long pour un aller-retour Moonraker charge, assez court pour qu'un
@@ -497,16 +512,32 @@ static esp_err_t backend_moonraker_demarrer(void *etat, const backend_hote_t *ho
      * memes valeurs qu'a froid, voir le commentaire de declaration. */
     memset(&g_dernier_etat_ws, 0, sizeof(g_dernier_etat_ws));
     g_dernier_etat_ws_valide = false;
+    g_dernier_compteur_reconnexions_ws = 0;
 
     /* Le WS demarre EN PLUS du client HTTP ci-dessus, jamais a sa place : le
      * HTTP reste le repli tant que le WS n'est pas en ligne (spec §4). Un
      * echec de demarrage du WS n'est PAS fatal a ce backend -- il degrade
-     * simplement en HTTP pur des le premier cycle, exactement comme un WS
-     * qui se deconnecterait plus tard ; seul un journal le signale. */
+     * simplement en HTTP pur, exactement comme un WS qui se deconnecterait
+     * plus tard.
+     *
+     * Fix round 1 (revue tache 5, L3) : CE journal ne doit PAS promettre une
+     * nouvelle tentative qui n'existe pas -- moonraker_ws_demarrer() echoue
+     * seulement sur un defaut d'ALLOCATION locale (mutex, minuterie
+     * esp_timer, esp_websocket_client_init()), jamais sur une simple
+     * indisponibilite reseau (qui, elle, est geree APRES un demarrage
+     * reussi par le backoff de reconnexion de moonraker_ws.c -- voir
+     * minuterie_reconnexion_cb()) : aucun mecanisme de ce fichier ne
+     * rappelle moonraker_ws_demarrer() plus tard si CET appel-la echoue. Le
+     * repli HTTP, lui, reste bien reel et permanent (moonraker_ws_en_ligne()
+     * restera false pour toute la duree de vie de ce backend) -- c'est la
+     * seule promesse honnete que ce message peut tenir tant qu'aucune
+     * retentative differee n'est implementee. */
     esp_err_t erreur_ws = moonraker_ws_demarrer(hote);
     if (erreur_ws != ESP_OK) {
-        JOURNAL_ALERTE(TAG, "demarrage du client WS impossible (%s) ; repli HTTP jusqu'a une prochaine tentative",
-                       esp_err_to_name(erreur_ws));
+        JOURNAL_ALERTE(TAG,
+            "demarrage du client WS impossible (%s) ; repli HTTP permanent pour ce backend (aucune "
+            "nouvelle tentative programmee)",
+            esp_err_to_name(erreur_ws));
     }
 
     JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u)", hote->adresse, (unsigned)hote->port);
@@ -520,6 +551,21 @@ static esp_err_t backend_moonraker_rafraichir(void *etat)
     }
 
     if (moonraker_ws_en_ligne()) {
+        /* Fix round 1 (revue tache 5, L1+L4) : une reconnexion depuis le
+         * dernier cycle invalide l'image retenue AVANT toute autre chose --
+         * voir le commentaire de g_dernier_compteur_reconnexions_ws. Place
+         * ICI, avant le drain qui suit : si un depot frais (le nouvel
+         * instantane de l'abonnement, renvoye a CHAQUE reconnexion) est deja
+         * disponible ce meme cycle, il revalide immediatement ; sinon ce
+         * cycle echoue honnetement (voir le bloc !g_dernier_etat_ws_valide
+         * plus bas) plutot que de republier une image datant d'avant la
+         * coupure. */
+        uint32_t compteur_reco = moonraker_ws_compteur_reconnexions();
+        if (compteur_reco != g_dernier_compteur_reconnexions_ws) {
+            g_dernier_compteur_reconnexions_ws = compteur_reco;
+            g_dernier_etat_ws_valide = false;
+        }
+
         /* Draine la boite ; rien de neuf ⇒ garde l'image retenue (voir le
          * commentaire de g_dernier_etat_ws) plutot que d'echouer le cycle --
          * un cycle sans nouveaute n'est PAS un cycle en panne, le WS pousse
