@@ -39,6 +39,7 @@ void suite_ecran_accueil(void)
     VERIFIER(ctx->bouton_pause != NULL);
     VERIFIER(ctx->bouton_annuler != NULL);
     VERIFIER(ctx->bouton_urgence != NULL);
+    VERIFIER(ctx->bouton_macros != NULL);
 
     /* --- etat entierement a zero : rien ne doit planter ; temps restant a 0
      * encode "inconnu" (voir KLIPPER_TEMPS_RESTANT_MAX_S dans
@@ -51,6 +52,20 @@ void suite_ecran_accueil(void)
     VERIFIER_TEXTE(lv_label_get_text(ctx->fichier), "");
     VERIFIER_TEXTE(lv_label_get_text(ctx->progression.etiquette), "0.0%");
     VERIFIER_TEXTE(lv_label_get_text(ctx->temps), "--");
+    /* Tache 6 (jalon 3a) : "jamais un bouton mort" -- nb_macros=0 (etat a
+     * zero) garde le bouton Macros masque. */
+    VERIFIER(lv_obj_has_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN));
+
+    /* --- nb_macros > 0 : le bouton Macros apparait ; retour a 0, il
+     * redisparait -- reversible, re-evalue a chaque appel comme le reste du
+     * grisage (pas un etat "decouvert une fois puis fige"). */
+    snprintf(etat.macros[0], sizeof(etat.macros[0]), "HOME_ALL");
+    etat.nb_macros = 1;
+    VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx), true));
+    VERIFIER(!lv_obj_has_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN));
+    etat.nb_macros = 0;
+    VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx), true));
+    VERIFIER(lv_obj_has_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN));
 
     /* --- progression a 100% */
     etat.progression = 1.0f;

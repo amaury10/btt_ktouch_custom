@@ -246,7 +246,11 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur);
  *
  * Rend false SANS TOUCHER `methode` si `action` est NULL, si `methode` est
  * NULL, si `taille` vaut 0, ou si `action` ne correspond à aucune des
- * quatre actions connues (`BACKEND_ACTION_MACRO` y compris -- son support
- * WS est laissé à la tâche 6, voir docs/superpowers/plans/2026-07-28-jalon-3a-transport-ws-etat-v2.md) --
- * même contrat que moonraker_chemin_commande(). */
+ * quatre actions connues (`BACKEND_ACTION_MACRO` y compris -- volontairement
+ * REJETÉE ici, comme les trois autres actions inconnues : seule action du
+ * registre à prendre des paramètres, elle ne rentre pas dans ce contrat "une
+ * action -> une méthode sans argument". Tâche 6 : `backend_moonraker_commande()`
+ * la traite À PART, avant d'appeler cette fonction, avec ses propres
+ * paramètres `{"script":"<nom>"}` -- voir backend_moonraker.c) -- même
+ * contrat que moonraker_chemin_commande(). */
 bool rpc_methode_commande(const char *action, char *methode, size_t taille);

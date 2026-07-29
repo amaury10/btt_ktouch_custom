@@ -84,6 +84,7 @@ add_executable(ktouch-sim
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
     ${ECRANS_DIR}/ecran_configuration.c
+    ${ECRANS_DIR}/ecran_macros.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c
 )

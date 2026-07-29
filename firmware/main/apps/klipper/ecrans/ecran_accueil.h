@@ -38,6 +38,11 @@ typedef struct {
     lv_obj_t      *label_pause;      /* enfant direct de bouton_pause, voir ci-dessus */
     lv_obj_t      *bouton_annuler;   /* passe par confirmation.h avant d'envoyer */
     lv_obj_t      *bouton_urgence;   /* passe par confirmation.h avant d'envoyer */
+    /* Tache 6 (jalon 3a) : navigue vers ECRAN_MACROS -- visible SEULEMENT si
+     * `nb_macros > 0` (mis a jour a chaque mettre_a_jour(), voir
+     * ecran_accueil.c) : « jamais un bouton mort » (meme principe que le
+     * bouton Imprimer de la spec, differe tant que 3d n'est pas livre). */
+    lv_obj_t      *bouton_macros;
     /* Deux valeurs mémorisées par mettre_a_jour(), relues par les rappels de
      * clic (voir ecran_accueil.c) : quelle action Pause doit envoyer, et si
      * les trois boutons doivent ignorer un clic tant que les données sont

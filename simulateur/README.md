@@ -155,6 +155,27 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
   fait à l'instant zéro : tout vaut zéro, l'écran est grisé (liaison encore
   `LIAISON_CONNEXION`). Sans effet en mode fenêtre (qui avance d'un cycle par
   seconde écoulée, en continu).
+- `--ecran macros` (tâche 6, jalon 3a) : empile `ECRAN_MACROS` (voir
+  `firmware/main/apps/klipper/ecrans/ecran_macros.h`) par-dessus l'écran
+  d'accueil déjà construit, à la place de rester sur l'accueil seul. Toute
+  autre valeur (ou l'absence de l'option) retombe sur l'accueil seul, même
+  politique défensive que `--app`. Jamais combiné à `--scenario 7`/`8`
+  (configuration) dans les captures prévues — un seul écran empilé
+  par-dessus l'accueil à la fois.
+- `--macro <nom>` (tâche 6, mode capture uniquement) : le pendant, en
+  l'absence de tactile simulé, d'un tap réel sur un bouton de la grille de
+  `ECRAN_MACROS` — construit `{"nom":"<nom>"}` avec la même fonction pure
+  que ce bouton et empile `BACKEND_ACTION_MACRO` avant le premier cycle de
+  `--cycles`, avec la même bannière synchrone que le tap réel poserait
+  ("Macro launched: `<nom>`" ou "Command failed: `<nom>`"). Utile avec
+  `--scenario 11` (« U1 ») : un nom connu (ex. `LOAD_FILAMENT`) démontre le
+  succès, `MACRO_ECHEC` (sentinelle qui échoue toujours) démontre l'échec
+  ASYNCHRONE remonté par le seam générique existant ("Command failed:
+  macro", sans le nom — voir le commentaire de `bouton_macro_cb()` dans
+  `ecran_macros.c` pour pourquoi ce seam ne peut porter que le nom de
+  l'action, jamais ses arguments). Comme `--scenario 9`, laisse de côté le
+  bandeau "host connected" (voir plus bas) pour que la bannière survive
+  jusqu'à la capture.
 - `--echec` : remplace `backend_factice` par un backend jouet local à
   `simulateur/main.c` qui échoue systématiquement (`ESP_FAIL` à chaque
   rafraîchissement). Sert à faire progresser `liaison_t` vers `DEGRADEE` (3

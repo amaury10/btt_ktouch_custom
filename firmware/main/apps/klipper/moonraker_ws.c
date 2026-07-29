@@ -156,6 +156,32 @@ static uint32_t g_id_suivant = 1;
  * nécessaire, jamais touché depuis une autre tâche. */
 static uint32_t g_id_abonnement = 0;
 
+/* Trouvaille A (revue taches 4/5, jalon 3a) : rpc_lire_macros() (tache 3)
+ * n'avait JAMAIS d'appelant -- sur un vrai Moonraker, etat->macros[] restait
+ * vide pour toujours. Meme convention que g_id_abonnement juste au-dessus :
+ * id de la requete printer.objects.list EN COURS, mis a jour a CHAQUE
+ * (re)connexion (envoyer_identify_et_abonnement()) ET a chaque
+ * notify_klippy_ready (Klippy peut redemarrer avec une config differente
+ * SANS que le WS ne se deconnecte -- spec §5 : "remplie a la connexion...
+ * et sur notify_klippy_ready"), lu uniquement depuis la tache WS -- aucun
+ * verrou necessaire, meme raison que g_id_abonnement. */
+static uint32_t g_id_macros = 0;
+
+/* Drapeau "une requete macros doit partir des que g_verrou sera relache" --
+ * voir son unique lecteur/ecrivain sous verrou (traiter_message_complet(),
+ * cas RPC_MSG_KLIPPY_READY) et son unique consommateur HORS verrou
+ * (traiter_data(), juste apres xSemaphoreGive()). Necessaire car
+ * envoyer_requete_macros() appelle prochain_id(), qui prend g_verrou en
+ * interne (voir sa declaration) -- l'appeler DEPUIS traiter_message_complet()
+ * (deja sous CE MEME verrou, non recursif) auto-interblocerait la tache WS,
+ * EXACTEMENT le bug C1 CRITIQUE deja corrige une fois pour
+ * moonraker_ws_commande() (fix round 1, revue tache 5) -- ce drapeau est ce
+ * qui evite de le reintroduire ici. Pas de verrou dedie : lu et ecrit
+ * uniquement depuis la tache WS elle-meme (traiter_data()/
+ * traiter_message_complet() ne tournent jamais que la, en sequence, jamais
+ * en concurrence l'une de l'autre). */
+static bool g_macros_a_demander = false;
+
 /* Corrélateur "un coup à la fois" pour moonraker_ws_commande() -- voir le
  * commentaire de tête pour le mécanisme complet. Protégé par g_verrou. */
 typedef struct {
@@ -267,10 +293,36 @@ static const char *const MOONRAKER_WS_IDENTIFY_PARAMS =
     "{\"client_name\":\"ktouch\",\"version\":\"0.1\",\"type\":\"other\","
     "\"url\":\"https://github.com/bigtreetech/K-Touch\"}";
 
-/* À WEBSOCKET_EVENT_CONNECTED : identify PUIS abonnement (critère 2 -- à
- * CHAQUE reconnexion, jamais seulement la première). Appelée depuis la
- * tâche WS elle-même (le gestionnaire d'événement) : g_id_abonnement n'a
- * donc besoin d'aucun verrou (voir son commentaire de déclaration). */
+/* Trouvaille A (revue taches 4/5, jalon 3a) : requete `printer.objects.list`
+ * (jamais de params) -- source choisie parmi les deux formes que
+ * rpc_lire_macros() reconnait (voir moonraker_rpc.h) : plus legere qu'un
+ * dump complet de `configfile`, qui porterait aussi tout le contenu de
+ * printer.cfg pour ne finalement en tirer que les noms de section
+ * "gcode_macro ...". Appelee a CHAQUE (re)connexion (voir
+ * envoyer_identify_et_abonnement() ci-dessous, appelee elle-meme a CHAQUE
+ * WEBSOCKET_EVENT_CONNECTED -- "la souscription est liee a la connexion")
+ * et depuis le cas RPC_MSG_KLIPPY_READY de traiter_message_complet() (via
+ * g_macros_a_demander, voir son commentaire de declaration) -- jamais
+ * appelee sous g_verrou directement : prochain_id() ci-dessous prend ce
+ * meme verrou en interne. */
+static void envoyer_requete_macros(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "printer.objects.list", NULL)) {
+        g_id_macros = id;
+        esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                        pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de printer.objects.list impossible");
+    }
+}
+
+/* À WEBSOCKET_EVENT_CONNECTED : identify PUIS abonnement PUIS macros
+ * (critère 2 -- à CHAQUE reconnexion, jamais seulement la première).
+ * Appelée depuis la tâche WS elle-même (le gestionnaire d'événement) :
+ * g_id_abonnement/g_id_macros n'ont donc besoin d'aucun verrou (voir leurs
+ * commentaires de déclaration). */
 static void envoyer_identify_et_abonnement(void)
 {
     char tampon[MOONRAKER_WS_REQUETE_OCTETS];
@@ -292,6 +344,8 @@ static void envoyer_identify_et_abonnement(void)
     } else {
         JOURNAL_ERREUR(TAG, "construction de l'abonnement impossible");
     }
+
+    envoyer_requete_macros();
 }
 
 /* Traite un message JSON-RPC COMPLET (déjà réassemblé) -- appelée SOUS
@@ -323,6 +377,17 @@ static void traiter_message_complet(const char *json, size_t longueur)
             if (rpc_fusionner_instantane(&copie, json, longueur)) {
                 boite_deposer(&g_boite, &copie);
             }
+        } else if (id == g_id_macros && g_id_macros != 0) {
+            /* Trouvaille A : reponse a printer.objects.list -- rpc_lire_macros()
+             * (tache 3) enfin appelee. Meme base cumulative que les deux cas
+             * ci-dessus (fusion PARTIELLE du reste de l'etat ; rpc_lire_macros()
+             * lui-meme REMPLACE entierement macros[]/nb_macros/macros_tronquees,
+             * voir son commentaire dans moonraker_rpc.h -- c'est un instantane
+             * complet, pas une fusion champ par champ). */
+            etat_klipper_t copie = g_boite.etat;
+            if (rpc_lire_macros(&copie, json, longueur)) {
+                boite_deposer(&g_boite, &copie);
+            }
         } else if (g_correlateur.en_cours && id == g_correlateur.id) {
             bool succes = false;
             char erreur[sizeof(g_correlateur.erreur_texte)];
@@ -344,6 +409,21 @@ static void traiter_message_complet(const char *json, size_t longueur)
         break;
     case RPC_MSG_KLIPPY_READY:
         g_klippy_pret = true;
+        /* Trouvaille A : Klippy peut redemarrer (FIRMWARE_RESTART, config
+         * modifiee) SANS que le WS ne se deconnecte -- notify_klippy_ready
+         * arrive alors SEUL, jamais precede d'un nouveau
+         * WEBSOCKET_EVENT_CONNECTED (qui, lui, redemanderait deja les macros
+         * via envoyer_identify_et_abonnement()). Sans ce second point
+         * d'entree, une liste de macros changee par le redemarrage resterait
+         * celle d'avant pour toujours. NE PAS appeler envoyer_requete_macros()
+         * directement ICI : cette fonction appelle prochain_id(), qui prend
+         * g_verrou en interne -- CE cas tourne deja SOUS g_verrou (voir le
+         * commentaire de tete de cette fonction), l'appeler ici
+         * auto-interbloquerait la tache WS (meme bug que le C1 CRITIQUE deja
+         * corrige pour moonraker_ws_commande(), fix round 1 revue tache 5).
+         * Le drapeau ci-dessous est consomme par traiter_data() UNE FOIS
+         * g_verrou relache. */
+        g_macros_a_demander = true;
         break;
     case RPC_MSG_KLIPPY_DECONNECTE:
         g_klippy_pret = false;
@@ -438,6 +518,16 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         traiter_message_complet(g_tampon_msg, g_tampon_len);
         xSemaphoreGive(g_verrou);
         g_tampon_len = 0;
+
+        /* Trouvaille A : consomme HORS verrou le drapeau pose par le cas
+         * RPC_MSG_KLIPPY_READY de traiter_message_complet() -- voir le
+         * commentaire de g_macros_a_demander pour pourquoi
+         * envoyer_requete_macros() ne peut jamais etre appelee alors que
+         * g_verrou est encore tenu. */
+        if (g_macros_a_demander) {
+            g_macros_a_demander = false;
+            envoyer_requete_macros();
+        }
     }
 }
 
@@ -653,6 +743,8 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_compteur_fragmentations_ws = 0;
     g_dernier_journal_fragmentation_us = 0;
     g_id_abonnement = 0;
+    g_id_macros = 0;
+    g_macros_a_demander = false;
     g_id_suivant = 1;
     g_tampon_len = 0;
     g_tampon_deborde = false;

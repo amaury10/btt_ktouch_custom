@@ -3,9 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "esp_http_client.h"
 #include "esp_timer.h"
 
+#include "backend.h"
 #include "etat_klipper.h"
 #include "journal.h"
 #include "liaison.h"
@@ -626,6 +628,43 @@ static void backend_moonraker_arreter(void *etat)
     JOURNAL_INFO(TAG, "arret");
 }
 
+/* Tache 6 : extrait `nom` de `arguments_json = {"nom":"<macro>"}` --
+ * BACKEND_ACTION_MACRO en garantit la presence (voir core/backend.h), au
+ * contraire des quatre actions communes qui n'en prennent jamais. cJSON ici
+ * (pas le strstr borne de backend_factice.c) : CE backend-ci EST le vrai
+ * consommateur d'un JSON dont la forme lui vient en dernier ressort de
+ * l'ecran (ecran_macros.c, deja construit avec
+ * ecran_macros_construire_arguments()) -- mais rien ne garantit qu'un futur
+ * appelant respecte cette forme a la lettre, et cJSON tolere les variations
+ * (espaces, ordre des cles) qu'un strstr borne ne tolererait pas. Rend false
+ * SANS TOUCHER `sortie` si `arguments_json` est NULL, illisible, si "nom"
+ * est absent/pas une chaine, ou si le nom ne tient pas dans `taille`. */
+static bool moonraker_extraire_nom_macro(const char *arguments_json, char *sortie, size_t taille)
+{
+    if (arguments_json == NULL || sortie == NULL || taille == 0) {
+        return false;
+    }
+    cJSON *racine = cJSON_Parse(arguments_json);
+    if (racine == NULL) {
+        return false;
+    }
+    const cJSON *nom = cJSON_GetObjectItemCaseSensitive(racine, "nom");
+    bool ok = cJSON_IsString(nom) && nom->valuestring != NULL;
+    if (ok) {
+        int ecrit = snprintf(sortie, taille, "%s", nom->valuestring);
+        ok = (ecrit >= 0) && ((size_t)ecrit < taille);
+    }
+    cJSON_Delete(racine);
+    return ok;
+}
+
+/* Taille de tampon suffisante pour le nom d'une macro (voir
+ * KLIPPER_MACRO_NOM_MAX, etat_klipper.h) -- ce backend n'a pas de contrat
+ * direct avec l'etat ici (arguments_json vient de l'ecran, pas de l'etat),
+ * mais c'est la meme borne que partout ailleurs dans ce seam
+ * (backend_factice.c, moonraker_rpc.c). */
+#define MOONRAKER_MACRO_NOM_MAX KLIPPER_MACRO_NOM_MAX
+
 static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                                              const char *arguments_json)
 {
@@ -640,15 +679,63 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
         return ESP_ERR_INVALID_STATE;
     }
 
+    bool est_macro = (strcmp(action, BACKEND_ACTION_MACRO) == 0);
+    char nom_macro[MOONRAKER_MACRO_NOM_MAX];
+    if (est_macro && !moonraker_extraire_nom_macro(arguments_json, nom_macro, sizeof(nom_macro))) {
+        JOURNAL_ALERTE(TAG, "commande macro sans nom exploitable dans arguments_json");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     if (moonraker_ws_en_ligne()) {
+        /* Jalon 3a, tache 6 : BACKEND_ACTION_MACRO -> printer.gcode.script
+         * {"script":"<nom>"} -- rpc_methode_commande() (tache 5) refuse
+         * volontairement cette action (voir son commentaire dans
+         * moonraker_rpc.h, "support WS laisse a la tache 6") car elle seule,
+         * parmi les actions communes, prend des parametres : elle est donc
+         * traitee a part ici, AVANT la table des quatre actions sans
+         * parametre ci-dessous. */
+        if (est_macro) {
+            char params[MOONRAKER_MACRO_NOM_MAX + 16];
+            int ecrit = snprintf(params, sizeof(params), "{\"script\":\"%s\"}", nom_macro);
+            if (ecrit < 0 || (size_t)ecrit >= sizeof(params)) {
+                JOURNAL_ALERTE(TAG, "construction des parametres macro impossible pour %s", nom_macro);
+                return ESP_FAIL;
+            }
+            bool succes = false;
+            char erreur[128];
+            erreur[0] = '\0';
+            esp_err_t erreur_ws = moonraker_ws_commande("printer.gcode.script", params,
+                                                          MOONRAKER_WS_COMMANDE_TIMEOUT_MS, &succes, erreur,
+                                                          sizeof(erreur));
+            if (erreur_ws != ESP_OK) {
+                JOURNAL_ALERTE(TAG, "commande macro %s (WS) en echec (%s)", nom_macro,
+                               esp_err_to_name(erreur_ws));
+                return erreur_ws;
+            }
+            /* LIMITE PROTOCOLAIRE (voir moonraker_rpc.h, pres de
+             * rpc_lire_reponse/RPC_MSG_AUTRE, verifiee tache 4 contre un
+             * vrai Klipper) : `succes` est quasi TOUJOURS true ici, y
+             * compris pour une macro totalement inconnue -- Klipper repond
+             * {"result":"ok"} dans les deux cas pour printer.gcode.script,
+             * l'echec REEL n'arrivant que via notify_gcode_response
+             * (RPC_MSG_AUTRE, non interprete par ce seam aujourd'hui, voir
+             * le rapport de la tache 6). Ce test reste neanmoins le bon --
+             * il capture les rejets JSON-RPC de PROTOCOLE (parametres
+             * invalides, Klippy down), qui, eux, rendent bien
+             * succes=false. */
+            if (!succes) {
+                JOURNAL_ALERTE(TAG, "macro %s refusee par Moonraker (%s)", nom_macro, erreur);
+                return ESP_FAIL;
+            }
+            JOURNAL_INFO(TAG, "commande macro %s -> WS printer.gcode.script", nom_macro);
+            return ESP_OK;
+        }
+
         /* Jalon 3a, tache 5 : RPC corrolee plutot qu'un POST -- le resultat
          * REEL de Klipper (accepte/refuse par le protocole JSON-RPC) revient
          * ici, pas juste "HTTP 200" (spec §4). `arguments_json` n'est PAS
          * utilise : les quatre actions connues de rpc_methode_commande()
-         * n'en prennent jamais (voir backend.h) -- BACKEND_ACTION_MACRO,
-         * seule action qui en prendrait un jour, est refusee ci-dessous
-         * comme inconnue par rpc_methode_commande() (support WS laisse a la
-         * tache 6). */
+         * n'en prennent jamais (voir backend.h). */
         (void)arguments_json;
 
         char methode[RPC_METHODE_COMMANDE_MAX];
@@ -672,6 +759,26 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
         }
         JOURNAL_INFO(TAG, "commande %s -> WS %s", action, methode);
         return ESP_OK;
+    }
+
+    if (est_macro) {
+        /* Repli HTTP (spec §4) : POST /printer/gcode/script?script=<nom> --
+         * l'endpoint REST documente de Moonraker pour printer.gcode.script,
+         * meme convention "?script=" que Fluidd/Mainsail/KlipperScreen. Nom
+         * de macro NON echappe dans la requete de la query string (meme
+         * choix que le reste de ce seam -- factice_extraire_nom_macro() dans
+         * backend_factice.c, rpc_lire_macros() dans moonraker_rpc.c -- ni
+         * l'un ni l'autre n'echappe non plus) : un nom Klipper valide
+         * ("gcode_macro NOM") est alphanumerique + underscore, jamais
+         * d'espace ni de caractere reserve URL. */
+        char chemin[MOONRAKER_MACRO_NOM_MAX + 32];
+        int ecrit = snprintf(chemin, sizeof(chemin), "printer/gcode/script?script=%s", nom_macro);
+        if (ecrit < 0 || (size_t)ecrit >= sizeof(chemin)) {
+            JOURNAL_ALERTE(TAG, "construction du chemin macro impossible pour %s", nom_macro);
+            return ESP_FAIL;
+        }
+        JOURNAL_INFO(TAG, "commande macro %s -> POST /%s", nom_macro, chemin);
+        return moonraker_requete(HTTP_METHOD_POST, chemin, NULL);
     }
 
     (void)arguments_json; /* aucune des quatre actions ci-dessous ne prend de corps en HTTP non plus */

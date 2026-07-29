@@ -26,6 +26,7 @@ void suite_ecran_configuration(void);
 void suite_commandes(void);
 void suite_jouet(void);
 void suite_web_macros(void);
+void suite_ecran_macros(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -98,6 +99,14 @@ int main(void)
      * verifie source_etat_sim_est_demarre() a son entree (voir
      * source_etat_sim.h). */
     suite_jouet();
+
+    /* Tache 6 (jalon 3a) : l'ecran macros. DOIT rester APRES suite_commandes()
+     * -- son dernier groupe (trace du seam) reutilise a la fois l'habillage
+     * (construit par suite_ecran_configuration()) et la boucle simulee
+     * (demarree par suite_commandes()), deux singletons process-wide. Meme
+     * garde d'ordre que les autres : suite_ecran_macros() verifie elle-meme
+     * les deux avant de s'appuyer dessus (voir son commentaire de tete). */
+    suite_ecran_macros();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

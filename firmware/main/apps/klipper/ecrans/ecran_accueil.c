@@ -13,11 +13,14 @@
 
 #include "backend.h"
 #include "confirmation.h"
+#include "ecran_macros.h"
 #include "etat_klipper.h"
 #include "habillage.h"
+#include "navigation.h"
 #include "source_etat.h"
 
 #define LARGEUR_CONTENU 800
+#define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
 
 #define MARGE          20
 #define TUILE_LARGEUR 380
@@ -40,6 +43,16 @@
 #define BOUTON_LARGEUR 230
 #define BOUTON_HAUTEUR  70
 #define BOUTON_ECART    35
+
+/* Tache 6 (jalon 3a) : bouton "Macros" -- une NOUVELLE rangee sous les trois
+ * boutons de commande existants, jamais insere DANS cette rangee (les trois
+ * boutons s'y partagent deja tout LARGEUR_CONTENU a l'octet pres, voir le
+ * _Static_assert plus bas -- y ajouter un quatrieme aurait force a retoucher
+ * une geometrie deja revue au jalon 2b). Pleine largeur, pour la doleance
+ * n1 du projet : ce n'est pas un bouton parmi d'autres. */
+#define MACROS_BOUTON_Y       (BOUTONS_Y + BOUTON_HAUTEUR + 20)
+#define MACROS_BOUTON_HAUTEUR 60
+#define MACROS_BOUTON_LARGEUR (LARGEUR_CONTENU - 2 * MARGE)
 
 #define COULEUR_FOND             0x10161D
 #define COULEUR_TEXTE_SECONDAIRE 0xC9D1D9
@@ -66,6 +79,8 @@ _Static_assert(MARGE + 2 * TUILE_LARGEUR + MARGE <= LARGEUR_CONTENU,
                 "les deux tuiles + marges debordent de la largeur du contenu");
 _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_CONTENU,
                 "les trois boutons + marges/ecarts debordent de la largeur du contenu");
+_Static_assert(MACROS_BOUTON_Y + MACROS_BOUTON_HAUTEUR <= HAUTEUR_CONTENU,
+                "le bouton Macros deborde de la hauteur du contenu");
 
 /* Construit le bouton lui-même (taille, position, couleur, libellé initial) ;
  * ne pose AUCUN lv_obj_add_event_cb() -- c'est le travail de l'appelant, dans
@@ -252,6 +267,21 @@ static void bouton_urgence_cb(lv_event_t *e)
                          "E-STOP", true, rappel_confirmation_urgence, ctx);
 }
 
+/* Tache 6 (jalon 3a) : navigue vers ECRAN_MACROS -- une navigation, pas une
+ * commande (contrairement aux trois boutons ci-dessus), donc aucun passage
+ * par ui_commander()/executer_commande() ici. Pas de garde sur
+ * ctx->donnees_perimees non plus (contrairement aux trois autres) : la
+ * navigation elle-meme reste sure hors ligne, et ECRAN_MACROS grise
+ * integralement son propre contenu des l'arrivee (voir ecran_macros.c) --
+ * le seul risque d'un bouton "actif" pendant une liaison perimee serait de
+ * naviguer vers une liste de macros elle-meme deja grisee, jamais une
+ * commande envoyee a tort. */
+static void bouton_macros_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_MACROS);
+}
+
 static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
 {
     ecran_accueil_ctx_t *ctx = contexte;
@@ -315,6 +345,16 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
     ctx->bouton_urgence = bouton_creer(parent, "E-STOP", COULEUR_BOUTON_URGENCE,
                                         MARGE + 2 * (BOUTON_LARGEUR + BOUTON_ECART));
     lv_obj_add_event_cb(ctx->bouton_urgence, bouton_urgence_cb, LV_EVENT_CLICKED, ctx);
+
+    /* Tache 6 : bouton_creer() pose sa position sur BOUTONS_Y en dur --
+     * repositionne/redimensionne explicitement ici pour la nouvelle rangee,
+     * plutot que d'ajouter un parametre position a une fonction partagee par
+     * trois boutons qui, eux, n'en ont jamais besoin. */
+    ctx->bouton_macros = bouton_creer(parent, "Macros", COULEUR_BOUTON, MARGE);
+    lv_obj_set_size(ctx->bouton_macros, MACROS_BOUTON_LARGEUR, MACROS_BOUTON_HAUTEUR);
+    lv_obj_set_pos(ctx->bouton_macros, MARGE, MACROS_BOUTON_Y);
+    lv_obj_add_event_cb(ctx->bouton_macros, bouton_macros_cb, LV_EVENT_CLICKED, ctx);
+    lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN); /* visible seulement si nb_macros > 0, voir mettre_a_jour() */
 }
 
 static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
@@ -390,6 +430,18 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
     bouton_definir_desactive(ctx->bouton_pause, donnees_perimees);
     bouton_definir_desactive(ctx->bouton_annuler, donnees_perimees);
     bouton_definir_desactive(ctx->bouton_urgence, donnees_perimees);
+
+    /* Tache 6 : "jamais un bouton mort" (spec §3b, meme regle deja retenue
+     * pour le futur bouton Imprimer) -- visible SEULEMENT si la machine a
+     * annonce au moins une macro. Re-evalue a CHAQUE appel (systematique,
+     * meme discipline que le grisage ci-dessus) : une machine qui perd ses
+     * macros (redemarrage Klipper avec une config differente, par exemple)
+     * ne doit pas laisser ce bouton visible sur la foi d'un etat perime. */
+    if (e->nb_macros > 0) {
+        lv_obj_clear_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 const ecran_desc_t ECRAN_ACCUEIL = {

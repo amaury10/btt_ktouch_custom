@@ -61,6 +61,7 @@
 #include "ecran_accueil.h"
 #include "ecran_configuration.h"
 #include "ecran_jouet.h"
+#include "ecran_macros.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
@@ -210,6 +211,13 @@ int main(int argc, char **argv)
     int scenario = 0;
     bool echec = false;
     app_t app = APP_ACCUEIL;
+    /* Tache 6 (jalon 3a) : empile ECRAN_MACROS par-dessus ECRAN_ACCUEIL
+     * (--ecran macros), et lance eventuellement une macro nommee avant la
+     * capture (--macro <nom>) -- le pendant, en mode capture, d'un tap reel
+     * sur un bouton de la grille (rien ne simule le tactile en mode capture,
+     * voir le commentaire de tete de ce fichier). */
+    bool ecran_macros_demande = false;
+    const char *macro_a_lancer = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--capture") == 0 && i + 1 < argc) {
@@ -227,6 +235,13 @@ int main(int argc, char **argv)
              * --scenario pour un numero inconnu. */
             const char *valeur = argv[++i];
             app = (strcmp(valeur, "jouet") == 0) ? APP_JOUET : APP_ACCUEIL;
+        } else if (strcmp(argv[i], "--ecran") == 0 && i + 1 < argc) {
+            /* Seule valeur reconnue : "macros" -- toute autre retombe sur
+             * l'accueil seul, meme politique defensive que --app. */
+            const char *valeur = argv[++i];
+            ecran_macros_demande = (strcmp(valeur, "macros") == 0);
+        } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
+            macro_a_lancer = argv[++i];
         }
     }
 
@@ -260,6 +275,12 @@ int main(int argc, char **argv)
         ecran_config = (scenario == 7 || scenario == 8);
         if (ecran_config) {
             navigation_empiler(&ECRAN_CONFIGURATION);
+        } else if (ecran_macros_demande) {
+            /* Tache 6 : --ecran macros, jamais combine aux scenarios 7/8
+             * (configuration) dans les captures prevues -- un seul ecran
+             * empile par-dessus l'accueil a la fois, meme regle que
+             * ci-dessus. */
+            navigation_empiler(&ECRAN_MACROS);
         }
     }
 
@@ -307,6 +328,43 @@ int main(int argc, char **argv)
         }
     }
 
+    /* --macro <nom> (tache 6, mode capture uniquement) : le pendant, en
+     * l'absence de tactile simule, du tap qu'un doigt reel enverrait sur un
+     * bouton de ECRAN_MACROS -- construit `{"nom":"<nom>"}` avec la MEME
+     * fonction pure que ce bouton (ecran_macros_construire_arguments(), voir
+     * ecran_macros.h) et empile la commande AVANT la boucle de cycles
+     * ci-dessous, meme schema que --scenario 9 juste au-dessus : le premier
+     * source_etat_sim_cycle() l'execute (succes ou MACRO_ECHEC selon le nom
+     * choisi), et habillage_pomper() du meme tour remonte le resultat au
+     * bandeau -- captures scenario 11 (« macro lancee -> notification
+     * succes » et « MACRO_ECHEC -> bandeau rouge »), voir README §Options. */
+    if (app == APP_ACCUEIL && macro_a_lancer != NULL) {
+        char args[ECRAN_MACROS_ARGUMENTS_MAX];
+        if (ecran_macros_construire_arguments(macro_a_lancer, args, sizeof(args))) {
+            esp_err_t erreur_commande = ui_commander(BACKEND_ACTION_MACRO, args);
+            /* Reprend EXACTEMENT le texte que bouton_macro_cb() (ecran_macros.c)
+             * poste au tap reel : cette option EST le pendant de ce tap en
+             * l'absence de tactile simule (voir le commentaire ci-dessus),
+             * elle doit donc produire la MEME banniere synchrone -- pas
+             * seulement empiler la commande en silence. L'echec ASYNCHRONE
+             * eventuel (MACRO_ECHEC), lui, arrive plus tard via le seam
+             * generique existant (habillage_pomper() dans la boucle de
+             * cycles ci-dessous) et remplace celle-ci normalement. */
+            char texte[64];
+            if (erreur_commande != ESP_OK) {
+                fprintf(stderr, "--macro : ui_commander a refuse la commande (code %d)\n",
+                        (int)erreur_commande);
+                snprintf(texte, sizeof(texte), "Command failed: %s", macro_a_lancer);
+                habillage_notifier(texte, true);
+            } else {
+                snprintf(texte, sizeof(texte), "Macro launched: %s", macro_a_lancer);
+                habillage_notifier(texte, false);
+            }
+        } else {
+            fprintf(stderr, "--macro : nom de macro trop long (%s)\n", macro_a_lancer);
+        }
+    }
+
     if (chemin_capture != NULL) {
         /* --cycles fait avancer la boucle simulée d'autant de "secondes"
          * avant la capture : un cycle = un rafraîchissement du backend +
@@ -331,12 +389,14 @@ int main(int argc, char **argv)
                 jouet_pomper();
             }
         }
-        /* scenario 9 exclu : la boucle ci-dessus a deja fait remonter, via
-         * habillage_pomper(), le bandeau d'echec de commande que ce scenario
-         * existe pour capturer -- un "host connected" ecrirait par-dessus
-         * (habillage_notifier() REMPLACE, jamais n'empile, voir son
-         * commentaire dans habillage.h) avant meme la capture. */
-        if (cycles > 0 && !(app == APP_ACCUEIL && scenario == 9)) {
+        /* scenario 9 exclu, --macro exclu (tache 6) : la boucle ci-dessus a
+         * deja fait remonter, via habillage_pomper(), le bandeau que ce
+         * scenario -- ou cette option -- existe pour capturer -- un "host
+         * connected" ecrirait par-dessus (habillage_notifier() REMPLACE,
+         * jamais n'empile, voir son commentaire dans habillage.h) avant
+         * meme la capture. */
+        if (cycles > 0 && !(app == APP_ACCUEIL && scenario == 9) &&
+            !(app == APP_ACCUEIL && macro_a_lancer != NULL)) {
             habillage_notifier(echec ? "connection lost" : "host connected", echec);
         }
 

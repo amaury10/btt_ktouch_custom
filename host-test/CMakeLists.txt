@@ -131,6 +131,7 @@ add_executable(tests
     tests/test_commandes.c
     tests/test_jouet.c
     tests/test_web_macros.c
+    tests/test_ecran_macros.c
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
@@ -149,6 +150,7 @@ add_executable(tests
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
     ${ECRANS_DIR}/ecran_configuration.c
+    ${ECRANS_DIR}/ecran_macros.c
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c
     ${SIM_DIR}/source_reglages_sim.c
