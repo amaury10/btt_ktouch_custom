@@ -15,6 +15,31 @@ static const char *TAG = "confirmation";
  * seconde teinte qui laisserait croire à un sens différent. */
 #define COULEUR_ROUGE_DESTRUCTIF 0xE74C3C
 
+/* Fix défaut 3 (revue live jalon 3a) : lv_msgbox_create() (LVGL 9.2,
+ * lv_msgbox.c) donne à la boîte une largeur FIXE de LV_DPI_DEF*2 (260 px ici,
+ * LV_DPI_DEF=130 -- voir simulateur/lv_conf.h), jamais dimensionnée à son
+ * contenu -- contrairement à sa hauteur (LV_SIZE_CONTENT). Le pied de page
+ * (lv_msgbox_add_footer_button(), même fichier LVGL) pose un flex ROW
+ * SPACE_EVENLY sur ses deux boutons, chacun LV_SIZE_CONTENT (large de son
+ * seul libellé + padding) : à 260 px, "Keep printing" + "Cancel print" n'a
+ * plus AUCUN espace à distribuer entre les deux boutons -- ils se touchent
+ * bord à bord, coins arrondis confondus ("se marchent dessus", capture
+ * confirmation-avant-fix.png). Largeur minimale posée ICI sur le CONTENEUR,
+ * pas un hack sur chaque libellé de bouton (les boutons doivent rester
+ * dimensionnés à leur propre contenu) : assez large pour que les paires de
+ * libellés réellement utilisées par ce projet ("Keep printing"/"Cancel
+ * print", "Cancel"/"E-STOP") tiennent côte à côte avec une marge confortable,
+ * tout en restant nettement plus étroite que l'écran (800 px) pour qu'un
+ * dialogue reste visuellement une boîte, pas une pleine page. */
+#define LARGEUR_MIN_BOITE 440
+
+/* Écart horizontal explicite entre les deux boutons du pied, EN PLUS de la
+ * largeur minimale ci-dessus : SPACE_EVENLY seul dégénère à un écart nul dès
+ * que le contenu des boutons approche la largeur disponible (voir plus
+ * haut) -- ce pad_column garantit un espace visible même si une future
+ * traduction ou un libellé plus long grignote à nouveau toute la place. */
+#define ECART_BOUTONS_PIED 20
+
 static struct {
     bool      ouvert;
     lv_obj_t *mbox;
@@ -93,6 +118,12 @@ void confirmation_ouvrir_ex(const char *titre, const char *message,
      * main pour son propre plein écran. */
     g_confirmation.mbox = lv_msgbox_create(NULL);
 
+    /* Largeur minimale explicite (voir LARGEUR_MIN_BOITE ci-dessus) : posée
+     * AVANT lv_obj_center() plus bas, pour que le centrage tienne compte de
+     * la largeur finale, pas de la largeur par défaut de 260 px que LVGL
+     * remplacerait sinon silencieusement. */
+    lv_obj_set_width(g_confirmation.mbox, LARGEUR_MIN_BOITE);
+
     /* Le thème par défaut de LVGL peint le fond automatique de la modale en
      * gris clair à 50% d'opacité (theme->styles.msgbox_backdrop_bg, voir
      * lv_theme_default.c: style_set_bg_color(..., lv_palette_main(GREY)) —
@@ -118,6 +149,13 @@ void confirmation_ouvrir_ex(const char *titre, const char *message,
     lv_obj_t *bouton_action =
         lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_action != NULL ? libelle_action : "");
     lv_obj_add_event_cb(bouton_action, bouton_action_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Écart explicite entre les deux boutons (voir ECART_BOUTONS_PIED
+     * ci-dessus) : le pied existe forcément à ce stade, le premier appel à
+     * lv_msgbox_add_footer_button() ci-dessus vient de le créer (voir
+     * lv_msgbox.c) -- bouton_annuler est son propre parent, pas besoin de
+     * lv_msgbox_get_footer(). */
+    lv_obj_set_style_pad_column(lv_obj_get_parent(bouton_annuler), ECART_BOUTONS_PIED, 0);
 
     if (destructif) {
         lv_obj_set_style_bg_color(bouton_action, lv_color_hex(COULEUR_ROUGE_DESTRUCTIF), 0);
