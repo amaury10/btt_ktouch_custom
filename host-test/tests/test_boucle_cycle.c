@@ -87,6 +87,14 @@ void suite_boucle_cycle(void)
 {
     printf("suite : boucle_cycle\n");
 
+    /* Point de départ déterministe : cette suite compare la progression du
+     * scénario 1 entre cycles, or ce compteur est fichier-statique et
+     * s'accumule d'une suite à l'autre (revue finale jalon 3a — sans ce
+     * reset, exercer le scénario 1 assez de fois avant cette suite faisait
+     * boucler la progression au-delà de 1.0 et rendait le test dépendant de
+     * l'ordre d'enregistrement). */
+    backend_factice_reinit();
+
     const backend_desc_t *d = backend_factice_desc();
     VERIFIER(d != NULL);
     if (d == NULL) {

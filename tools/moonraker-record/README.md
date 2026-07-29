@@ -4,7 +4,7 @@
 `docs/dev/klipper-simule.md` pour monter le Klipper à MCU simulé
 `virtual-klipper-printer` en local) et journalise chaque message
 JSON-RPC échangé sur `/websocket`, un objet JSON par ligne, dans un
-fichier `.jsonl` rejouable par `host-test/tests/test_moonraker_rpc.c`.
+fichier `.jsonl` rejouable par `host-test/tests/test_fixtures_moonraker.c`.
 
 Ce script n'implémente AUCUNE règle de protocole lui-même : la requête
 d'abonnement qu'il envoie est recopiée à l'octet près depuis

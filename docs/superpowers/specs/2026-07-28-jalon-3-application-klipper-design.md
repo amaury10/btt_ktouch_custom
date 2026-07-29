@@ -73,10 +73,18 @@ Le socle invisible, terminé par une preuve visible :
 3. **Le contrat backend ne change pas** (voir §4) — c'est ce qui protège le
    fork astro et le critère « zéro ligne dans core/ ».
 4. **Preuve de bout en bout** : un écran minimal liste les macros remontées
-   dans l'état, un tap envoie `printer.gcode.script {script: "<macro>"}`, le
-   résultat (succès ou erreur Klipper) revient en notification. Vérifiable sur
-   simulateur (backend factice « U1 » multi-têtes avec macros synthétiques),
-   puis sur les deux machines réelles dès qu'elles sont joignables.
+   dans l'état, un tap envoie `printer.gcode.script {script: "<macro>"}`, et
+   une notification confirme l'ENVOI (« Macro sent: … »). Vérité protocolaire
+   découverte à l'enregistrement des fixtures (tâche 4, contre un vrai
+   Klipper) : `printer.gcode.script` rend `{"result":"ok"}` même pour une
+   macro inconnue — l'échec réel n'arrive qu'en asynchrone via
+   `notify_gcode_response`, que le socle classe `RPC_MSG_AUTRE` et
+   n'interprète pas dans ce jalon. La notification confirme donc l'envoi, pas
+   le succès d'exécution Klipper (interpréter `notify_gcode_response` est
+   consigné comme suite). L'échec SYNCHRONE (file pleine, boucle non
+   démarrée), lui, est bien signalé. Vérifiable sur simulateur (backend
+   factice « U1 » multi-têtes avec macros synthétiques), puis sur les deux
+   machines réelles dès qu'elles sont joignables.
 
 ### 3b — Accueil Idle
 
@@ -110,7 +118,7 @@ L'écran d'impression du 2b gagne le pilotage en cours :
 
 ### 3d — Fichiers + miniatures
 
-- liste `server.files/list` (racine gcodes), tri nom/date/taille, dossiers,
+- liste `server.files.list` (racine gcodes), tri nom/date/taille, dossiers,
   pagination (listes potentiellement longues — chargement paresseux par page,
   le widget arrive avec cet écran conformément au principe d'extraction) ;
 - **miniatures** : Moonraker sert les vignettes PNG embarquées par les
@@ -172,7 +180,10 @@ imprimantes. Modèle retenu — celui de KlipperScreen : **une imprimante active
 ## 4. Architecture : comment le push entre dans un socle fait pour le pull
 
 Le contrat `backend_desc_t` (demarrer/rafraichir/arreter/commande) **ne change
-pas**. Le WS ne remplace pas la boucle : il la nourrit.
+pas de forme incompatible** : le seul ajout est un champ OPTIONNEL
+`periode_ms` (NULL = cadence par défaut du socle), qui ne casse aucun backend
+existant — le jouet du 2b compile inchangé (critère 8). Le WS ne remplace pas
+la boucle : il la nourrit.
 
 - Le client WS tourne dans sa propre tâche (celle d'`esp_websocket_client`) et
   ne touche **jamais** ni l'état partagé ni LVGL : il dépose les
@@ -306,8 +317,10 @@ le jalon 2c), fork astro (jalon dédié).
 
 ## 10. Critères de succès
 
-1. Sur simulateur, scénario U1 : les macros s'affichent, un tap en lance une,
-   le résultat revient en notification. (La doléance n°1 est levée.)
+1. Sur simulateur, scénario U1 : les macros s'affichent (les `_préfixées`
+   filtrées), un tap en lance une, une notification confirme l'ENVOI
+   (« Macro sent: … » — pas le succès d'exécution Klipper, voir §3a.4). (La
+   doléance n°1 est levée.)
 2. Le WS se connecte, s'abonne, pousse l'état ; on coupe le WS ⇒ repli HTTP
    sans autre dégradation que la latence ; il revient ⇒ ré-abonnement seul.
 3. Accueil Idle : jog, homing, consignes manuelles et macros fonctionnent sur

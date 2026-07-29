@@ -97,6 +97,13 @@ typedef struct {
     void      (*arreter)(void *etat);
 
     esp_err_t (*commande)(void *etat, const char *action, const char *arguments_json);
+
+    /* Ajout jalon 3a (optionnel) : cadence d'interrogation souhaitée en ms.
+     * NULL ⇒ la boucle garde son défaut. Un backend peut l'accélérer quand un
+     * transport poussé (WebSocket) rend le drainage quasi gratuit. Champ
+     * additif, à sémantique NULL = comportement d'origine : n'invalide aucun
+     * backend antérieur (le jouet du 2b compile inchangé). */
+    uint32_t  (*periode_ms)(void *etat);
 } backend_desc_t;
 ```
 

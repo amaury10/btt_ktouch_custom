@@ -27,8 +27,8 @@ cd ~/virtual-klipper-printer
 docker compose up -d
 ```
 
-Cloné hors du dépôt K-Touch (dans `~/`, jamais sous `E:\Dev\BTT KTouch
-Custom`) : ce n'est pas du code de ce projet, seulement un outil de
+Cloné hors du dépôt K-Touch (dans `~/`, jamais à l'intérieur de la racine
+du dépôt) : ce n'est pas du code de ce projet, seulement un outil de
 développement local.
 
 Vérifier que Moonraker répond ET que Klippy est prêt (`klippy_connected`

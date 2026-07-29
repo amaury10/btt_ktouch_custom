@@ -18,7 +18,7 @@
 - **Jamais de mise à jour optimiste.** Le résultat d'une commande vient de la réponse RPC corrélée ou du prochain état, jamais d'une anticipation locale.
 - Invariants hérités : NVS partagée jamais effacée, aucun `ESP_ERROR_CHECK` nouveau, ordre de boot intact, pas d'identifiants ni de chemins locaux dans les fichiers suivis, commentaires français, textes UI anglais (ASCII), `-Wall -Wextra -Werror`.
 - Harnais : `VERIFIER(condition)` un argument, libellés en commentaire. Suite actuelle : **639 vérifications, 0 échec** — chaque tâche finit plus haut et vert.
-- Commandes : suite hôte `wsl -d Debian -- "/mnt/e/Dev/BTT KTouch Custom/host-test/run.sh"` (PowerShell, jamais Git Bash) ; build ESP `. "<chemin-vers-esp-idf>\export.ps1"; idf.py -C firmware build` (même invocation) ; le chemin ESP-IDF réel ne s'écrit jamais dans un fichier suivi.
+- Commandes : suite hôte `wsl -d Debian -- "<racine-du-depot>/host-test/run.sh"` (PowerShell, jamais Git Bash) ; build ESP `. "<chemin-vers-esp-idf>\export.ps1"; idf.py -C firmware build` (même invocation) ; le chemin ESP-IDF réel ne s'écrit jamais dans un fichier suivi.
 
 ## Une note sur la forme de ce plan
 
@@ -227,7 +227,7 @@ bool rpc_fusionner_status(etat_klipper_t *etat, const char *json, size_t longueu
 bool rpc_lire_reponse(const char *json, size_t longueur, bool *succes,
                       char *erreur_texte, size_t taille_erreur);
 
-/* Extrait la liste des macros depuis une reponse printer.objects/list ou
+/* Extrait la liste des macros depuis une reponse printer.objects.list ou
  * configfile (les `_prefixees` NE sont PAS filtrees ici : c'est un choix
  * d'affichage, pas de protocole — l'UI filtrera). Tronque a
  * KLIPPER_MACROS_MAX avec macros_tronquees. */
@@ -424,7 +424,7 @@ typedef struct {
 ```bash
 git diff --stat jalon-2b-simulateur..HEAD -- exemples/
 # attendu : vide — le jouet n'a pas bougé
-wsl -d Debian -- bash "/mnt/e/Dev/BTT KTouch Custom/simulateur/run.sh" --app jouet --capture <abs>/jouet-3a.png --cycles 5
+wsl -d Debian -- bash "<racine-du-depot>/simulateur/run.sh" --app jouet --capture <abs>/jouet-3a.png --cycles 5
 # attendu : identique au 2b — le contrat n'a pas casse le fork
 ```
 

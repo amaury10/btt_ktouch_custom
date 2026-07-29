@@ -40,3 +40,9 @@ void backend_factice_scenario(int numero);
  * fait naturellement emprunter ce chemin. `false` restaure le comportement
  * normal (toutes les actions connues réussissent). */
 void backend_factice_commande_echoue(bool echoue);
+
+/* Remet à zéro l'état inter-appels processus (progression du scénario 1,
+ * outil actif du scénario U1). Sans effet utile sur cible ; dans le harnais
+ * hôte, une suite qui veut un point de départ déterministe l'appelle avant de
+ * dérouler ses scénarios (revue finale jalon 3a). */
+void backend_factice_reinit(void);

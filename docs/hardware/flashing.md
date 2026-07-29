@@ -179,21 +179,23 @@ lecture réelle de la machine. Une fois qu'un premier cycle a réussi,
 `generation` avance à chaque nouveau relevé validé (voir `boucle_generation()`
 dans `firmware/main/core/boucle.h`) et `etat` cesse d'être `null`.
 
-**Zéro honnête, indépendamment de `generation`.** Certains champs de `etat`
-(v2, jalon 3a) ne sont pas encore renseignés par le seul GET HTTP
-Moonraker actuellement branché : `position`, `vitesse_pct`, `flux_pct`,
-`babystep_z_um`, `macros`/`nb_macros`/`macros_tronquees`. Tant que la
-souscription WebSocket qui les remplira n'est pas câblée (tâches à venir de
-ce même jalon), ces champs valent `0`/`[]`/`false` — pas parce que la
-machine vaut authentiquement zéro sur ces grandeurs, mais parce que rien ne
-les a encore mesurées. Même prudence que pour `generation` : un client qui
-lit `"vitesse_pct":0` ne doit pas l'afficher comme « vitesse à l'arrêt »
-tant qu'il n'a pas d'autre moyen de distinguer « jamais reçu » de
-« mesuré à zéro » sur ce champ précis (voir le commentaire de chaque champ
-dans `firmware/main/core/etat_klipper.h`, qui documente ce que sa valeur
-zéro signifie). `extrudeurs`/`plateau`, eux, portent directement leur
-propre drapeau `presente` : c'est le signal explicite à lire pour eux,
-plutôt qu'une convention implicite sur la valeur zéro.
+**Zéro honnête, indépendamment de `generation`.** Les champs riches de `etat`
+(v2, jalon 3a — `position`, `vitesse_pct`, `flux_pct`, `babystep_z_um`, la
+liste des macros) sont remplis par la **souscription WebSocket** quand elle
+est en ligne (`printer.objects.subscribe` pour l'état, `printer.objects.list`
+pour les macros — voir `moonraker_ws.c` et `backend_moonraker.c`) ; en repli
+HTTP, seuls les champs que le GET connaît sont mis à jour et les autres
+restent à `0`/`[]`/`false`. Un champ à zéro peut donc signifier « jamais
+reçu » plutôt que « mesuré à zéro » : un client qui lit `"vitesse_pct":0` ne
+doit pas l'afficher comme « vitesse à l'arrêt » sans autre moyen de
+distinguer les deux (voir le commentaire de chaque champ dans
+`firmware/main/core/etat_klipper.h`, qui documente ce que sa valeur zéro
+signifie). Pour les chauffeurs, `/state` n'émet un extrudeur dans le tableau
+`extrudeurs` que s'il est présent (la présence est signalée par
+l'**inclusion dans le tableau**, chaque entrée portant `index`/`actuelle`/
+`consigne`) ; seul `plateau` porte un drapeau `presente` explicite. Le
+tableau `macros` est une liste de noms, accompagnée du seul booléen
+`macros_tronquees` (`/state` n'émet pas de champ `nb_macros`).
 
 **`generation` n'est PAS un signal de vivacité de la boucle.** Il n'avance
 QUE lorsque le contenu de l'état change réellement d'un cycle à l'autre

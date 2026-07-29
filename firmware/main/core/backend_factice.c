@@ -177,6 +177,20 @@ void backend_factice_commande_echoue(bool echoue)
     g_commande_echoue = echoue;
 }
 
+void backend_factice_reinit(void)
+{
+    /* Remet à zéro l'état inter-appels PROCESSUS de ce backend (revue finale
+     * jalon 3a) : g_progression_scenario1 et g_outil_actif_u1 sont
+     * fichier-statiques et s'accumulent d'une exécution de scénario à l'autre.
+     * Sur cible ça n'a aucune importance (un seul démarrage) ; dans le
+     * harnais hôte, une suite qui exerce le scénario 1 assez de fois avant
+     * test_boucle_cycle.c peut faire boucler la progression au-delà de 1.0 et
+     * rendre un test dépendant de l'ordre. Une suite qui veut un point de
+     * départ propre appelle ceci d'abord. */
+    g_progression_scenario1 = 0.0f;
+    g_outil_actif_u1 = 0;
+}
+
 static esp_err_t backend_factice_demarrer(void *etat, const backend_hote_t *hote)
 {
     etat_klipper_t *e = (etat_klipper_t *)etat;
