@@ -23,7 +23,15 @@
 #define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
 
 #define MARGE          20
-#define TUILE_LARGEUR 380
+/* Rangée symétrique : marge gauche + tuile + écart + tuile + marge droite,
+ * les TROIS occurrences de MARGE (voir le _Static_assert plus bas). Fix
+ * défaut 2 (revue live jalon 3a) : 380 pilait exactement le bord droit de
+ * l'écran (MARGE + 380 + MARGE + 380 = 800, sans marge droite -- la tuile
+ * Bed touchait le boîtier), passé inaperçu parce que l'ancien
+ * _Static_assert ne comptait que DEUX MARGE au lieu de trois et laissait
+ * donc passer une marge droite nulle sans jamais le signaler. 370 restitue
+ * une marge droite de 20 px, identique à la marge gauche. */
+#define TUILE_LARGEUR 370
 #define TUILE_HAUTEUR 140
 #define TUILE_Y        16
 
@@ -75,8 +83,17 @@
  * personne ne le remarque avant une capture (revue tâche 6, fix round 1,
  * M-asserts). Vérifié une fois ici, à la compilation, pour les deux
  * rangées dont la largeur est la somme de plusieurs constantes. */
-_Static_assert(MARGE + 2 * TUILE_LARGEUR + MARGE <= LARGEUR_CONTENU,
-                "les deux tuiles + marges debordent de la largeur du contenu");
+/* Égalité stricte, pas juste "<=" (fix défaut 2, revue live jalon 3a) : une
+ * inégalité laisse passer une marge droite nulle (ou négative, débordement
+ * silencieux) sans jamais le signaler -- exactement le défaut qui a laissé
+ * Bed toucher le bord droit de l'écran pendant tout le jalon précédent.
+ * Trois occurrences de MARGE (gauche, écart entre tuiles, droite) : une
+ * régression future de TUILE_LARGEUR vers 380 (2 tuiles + 2 MARGE pilent
+ * déjà les 800px, sans laisser de place à une troisième MARGE) fait échouer
+ * cette assertion à la compilation plutôt que de laisser un pixel sortir du
+ * cadre sans que personne ne le remarque avant une capture. */
+_Static_assert(3 * MARGE + 2 * TUILE_LARGEUR == LARGEUR_CONTENU,
+                "la rangee de tuiles n'est plus symetrique (marge gauche != marge droite)");
 _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_CONTENU,
                 "les trois boutons + marges/ecarts debordent de la largeur du contenu");
 _Static_assert(MACROS_BOUTON_Y + MACROS_BOUTON_HAUTEUR <= HAUTEUR_CONTENU,
