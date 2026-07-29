@@ -83,7 +83,17 @@ typedef enum {
                                 * notify_status_update cessent d'arriver —
                                 * même signal côté appelant, qui doit cesser
                                 * de faire confiance à l'état poussé. */
-    RPC_MSG_AUTRE,            /* notification reconnue comme telle mais ignorée */
+    RPC_MSG_AUTRE,            /* notification reconnue comme telle mais ignorée.
+                               * ATTENTION (fixtures tâche 4, vérifié contre un
+                               * VRAI Klipper) : notify_gcode_response tombe ici,
+                               * or c'est LE canal par lequel Klipper signale
+                               * l'échec d'une macro inconnue — la réponse RPC
+                               * corrélée de printer.gcode.script, elle, rend
+                               * {"result":"ok"} dans les deux cas (voir
+                               * rpc_lire_reponse ci-dessous et
+                               * docs/dev/klipper-simule.md). L'écran macros
+                               * (tâche 6) ne peut PAS détecter un échec par la
+                               * seule réponse corrélée. */
     RPC_MSG_INVALIDE,         /* JSON illisible, ou ni réponse ni notification */
 } rpc_message_type_t;
 
@@ -160,7 +170,19 @@ bool rpc_fusionner_status(etat_klipper_t *etat, const char *json, size_t longueu
 bool rpc_fusionner_instantane(etat_klipper_t *etat, const char *json, size_t longueur);
 
 /* Extrait résultat/erreur d'une réponse JSON-RPC déjà corrélée par
- * l'appelant (voir rpc_classifier ci-dessus pour l'id). Rend false si le
+ * l'appelant (voir rpc_classifier ci-dessus pour l'id).
+ *
+ * LIMITE PROTOCOLAIRE VÉRIFIÉE (fixtures tâche 4, contre un vrai Klipper —
+ * host-test/fixtures/moonraker/macro-inexistante.jsonl) : pour
+ * printer.gcode.script, une macro/commande INCONNUE rend quand même
+ * {"result":"ok"} — indiscernable d'un succès par cette fonction. Le texte
+ * d'erreur réel ("// Unknown command:...") arrive séparément, de façon
+ * asynchrone, via la notification notify_gcode_response (classée
+ * RPC_MSG_AUTRE aujourd'hui). Un appelant qui veut détecter l'échec d'une
+ * macro doit interpréter ce canal-là ; cette fonction ne détecte que les
+ * erreurs JSON-RPC (méthode inconnue, paramètres invalides, Klippy down).
+ *
+ * Rend false si le
  * JSON est illisible ou ne contient ni "result" ni une erreur EXPLOITABLE.
  * Sinon rend true et `*succes` indique lequel des deux prévaut : false
  * seulement si "error" est un OBJET JSON réel (pas juste une clé présente

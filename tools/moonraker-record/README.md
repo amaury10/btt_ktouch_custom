@@ -49,9 +49,12 @@ python3 enregistrer.py macro-ko \
 
 - `idle` : identify + abonnement, puis ~30 s d'écoute passive.
 - `chauffe` : identify + abonnement, puis
-  `SET_HEATER_TEMPERATURE HEATER=extruder TARGET=60`, capture jusqu'à
-  confirmer une vraie montée de température (pas nécessairement 60°C
-  atteint — juste au-dessus de l'ambiante). **Le fichier se termine
+  `SET_HEATER_TEMPERATURE HEATER=extruder TARGET=60`, capture jusqu'à voir
+  la CONSIGNE (`target=60`) poussée par un notify_status_update. La
+  température, elle, ne monte jamais : le MCU simulé de
+  virtual-klipper-printer n'a pas de modèle thermique (ADC statique, voir
+  docs/dev/klipper-simule.md) — c'est la consigne qui est vérifiée, pas une
+  montée. **Le fichier se termine
   consigne=60** : le script éteint le chauffage APRÈS avoir fermé
   l'enregistrement (connexion séparée, non journalisée) pour ne pas
   laisser le simulateur en chauffe sans polluer le fixture.
