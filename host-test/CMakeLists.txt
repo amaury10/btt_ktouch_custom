@@ -126,6 +126,8 @@ add_executable(tests
     tests/test_habillage.c
     tests/test_widgets.c
     tests/test_ecran_accueil.c
+    tests/test_ecran_accueil_idle.c
+    tests/test_accueil_choix.c
     tests/test_clavier.c
     tests/test_ecran_configuration.c
     tests/test_commandes.c
@@ -140,6 +142,7 @@ add_executable(tests
     ${KLIPPER_DIR}/moonraker_boite.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c
+    ${KLIPPER_DIR}/accueil_choix.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c
@@ -153,6 +156,7 @@ add_executable(tests
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
+    ${ECRANS_DIR}/ecran_accueil_idle.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${SIM_DIR}/source_etat_sim.c

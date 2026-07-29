@@ -53,12 +53,14 @@
 #include "afficheur.h"
 #include "lvgl.h"
 
+#include "accueil_choix.h"
 #include "backend.h"
 #include "backend_factice.h"
 #include "backend_jouet.h"
 #include "clavier.h"
 #include "confirmation.h"
 #include "ecran_accueil.h"
+#include "ecran_accueil_idle.h"
 #include "ecran_configuration.h"
 #include "ecran_jouet.h"
 #include "ecran_macros.h"
@@ -273,35 +275,13 @@ int main(int argc, char **argv)
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
 
-    bool ecran_config = false;
-    if (app == APP_JOUET) {
-        /* Tache 11 : ECRAN_JOUET seul, jamais empile avec ECRAN_ACCUEIL --
-         * les deux applications ne partagent aucun ecran. */
-        navigation_empiler(&ECRAN_JOUET);
-    } else {
-        /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
-         * ECRAN_ACCUEIL (jamais seul), exactement la topologie que app_main.c
-         * construit sur un appareil jamais configuré (reglages_configures()
-         * faux) -- voir README §Options pour la numérotation complète. Empiler
-         * ECRAN_CONFIGURATION seul (comme ce fichier le faisait avant la revue de
-         * la tâche 8, round 1, Q1) rendrait son bouton Save un cul-de-sac :
-         * navigation_accueil() est un no-op à profondeur 1, Save n'aurait donc
-         * aucun endroit où revenir. Ces deux numéros ne correspondent à aucun
-         * scénario du backend factice (voir backend_factice_scenario() plus bas,
-         * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
-        navigation_empiler(&ECRAN_ACCUEIL);
-        ecran_config = (scenario == 7 || scenario == 8);
-        if (ecran_config) {
-            navigation_empiler(&ECRAN_CONFIGURATION);
-        } else if (ecran_macros_demande) {
-            /* Tache 6 : --ecran macros, jamais combine aux scenarios 7/8
-             * (configuration) dans les captures prevues -- un seul ecran
-             * empile par-dessus l'accueil a la fois, meme regle que
-             * ci-dessus. */
-            navigation_empiler(&ECRAN_MACROS);
-        }
-    }
-
+    /* Tache 3 (jalon 3b) : choix du backend et demarrage de la boucle
+     * simulee DEPLACES ICI, avant l'empilement de tout ecran d'accueil --
+     * la topologie precedente empilait ECRAN_ACCUEIL avant meme de choisir
+     * un backend. accueil_choix.h (accueil_impression_actif()) a besoin
+     * d'un premier etat REEL pour trancher entre ECRAN_ACCUEIL (impression)
+     * et ECRAN_ACCUEIL_IDLE (repos) ; seul le backend, une fois demarre,
+     * peut le fournir -- voir le commentaire du cycle d'amorce plus bas. */
     const backend_desc_t *backend;
     if (app == APP_JOUET) {
         backend = echec ? &BACKEND_JOUET_ECHEC_DESC : backend_jouet_desc();
@@ -330,6 +310,88 @@ int main(int argc, char **argv)
     }
     if (!source_etat_sim_demarrer(backend)) {
         fprintf(stderr, "echec du demarrage de la boucle simulee\n");
+    }
+
+    /* Tache 3 (jalon 3b) : un premier cycle "d'amorce", pour que l'etat lu
+     * juste apres ne soit plus celui, entierement nul, que demarrer() vient
+     * d'ecrire -- sans lui, accueil_impression_actif() trancherait TOUJOURS
+     * pour l'accueil idle, y compris avec --scenario 1 (impression), ce qui
+     * ne prouverait jamais ECRAN_ACCUEIL depuis ce fichier. Sautee dans
+     * exactement un cas : capture avec --cycles 0, ou l'appelant demande
+     * explicitement l'etat BRUT d'avant tout cycle (voir la branche
+     * `cycles == 0` plus bas) -- l'etat y est alors entierement nul, ce qui
+     * fait deja trancher accueil_impression_actif() pour l'accueil idle, un
+     * choix honnete pour "avant que la machine n'ait rien rapporte", sans
+     * avoir besoin de ce cycle. Jamais pour --app jouet, qui n'a qu'un seul
+     * ecran (ECRAN_JOUET) et aucune distinction idle/impression a trancher.
+     * Compte comme le premier des `cycles` demandes par --cycles (voir la
+     * boucle de capture plus bas, qui n'en refait que cycles-1) : le
+     * contrat existant de cette option ("avance la boucle simulee d'autant
+     * de secondes") reste exact, jamais cycles+1. */
+    bool amorce_faite = false;
+    if (app == APP_ACCUEIL && !(chemin_capture != NULL && cycles == 0)) {
+        source_etat_sim_cycle();
+        amorce_faite = true;
+    }
+
+    bool ecran_config = false;
+    if (app == APP_JOUET) {
+        /* Tache 11 : ECRAN_JOUET seul, jamais empile avec un accueil
+         * Klipper -- les deux applications ne partagent aucun ecran. */
+        navigation_empiler(&ECRAN_JOUET);
+    } else {
+        /* Tache 3 (jalon 3b) : le choix idle/impression, calcule sur l'etat
+         * que le cycle d'amorce ci-dessus vient de rendre disponible (ou
+         * sur l'etat nul de depart si cette amorce a ete sautee, voir son
+         * commentaire) -- accueil_impression_actif() est le MEME helper pur
+         * qu'appellera un futur app_main.c pour la bascule vivante (differee,
+         * voir task-3-brief.md), exerce ici pour de vrai des le demarrage :
+         * un `--scenario 1` demarre donc sur ECRAN_ACCUEIL, un `--scenario 0`
+         * (ou tout scenario "repos", 10/11/12) sur ECRAN_ACCUEIL_IDLE, ce qui
+         * prouve les DEUX ecrans et le helper de choix depuis ce seul
+         * fichier. ui_etat_instantane() rendant faux (boucle pas demarree,
+         * echec de source_etat_sim_demarrer() ci-dessus) retombe sur
+         * l'accueil idle -- le choix le plus sur, meme politique que
+         * app_main.c (voir son commentaire). */
+        etat_klipper_t etat_amorce;
+        uint32_t generation_amorce = 0;
+        liaison_etat_t liaison_amorce = LIAISON_CONNEXION;
+        bool impression = false;
+        if (ui_etat_instantane(&etat_amorce, sizeof(etat_amorce), &generation_amorce, &liaison_amorce)) {
+            impression = accueil_impression_actif(&etat_amorce);
+        }
+        navigation_empiler(impression ? &ECRAN_ACCUEIL : &ECRAN_ACCUEIL_IDLE);
+
+        /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
+         * l'accueil (jamais seul), exactement la topologie que app_main.c
+         * construit sur un appareil jamais configuré (reglages_configures()
+         * faux) -- voir README §Options pour la numérotation complète. Empiler
+         * ECRAN_CONFIGURATION seul (comme ce fichier le faisait avant la revue de
+         * la tâche 8, round 1, Q1) rendrait son bouton Save un cul-de-sac :
+         * navigation_accueil() est un no-op à profondeur 1, Save n'aurait donc
+         * aucun endroit où revenir. Ces deux numéros ne correspondent à aucun
+         * scénario du backend factice (voir backend_factice_scenario() plus bas,
+         * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
+        ecran_config = (scenario == 7 || scenario == 8);
+        if (ecran_config) {
+            navigation_empiler(&ECRAN_CONFIGURATION);
+        } else if (ecran_macros_demande) {
+            /* Tache 6 : --ecran macros, jamais combine aux scenarios 7/8
+             * (configuration) dans les captures prevues -- un seul ecran
+             * empile par-dessus l'accueil a la fois, meme regle que
+             * ci-dessus. */
+            navigation_empiler(&ECRAN_MACROS);
+        }
+    }
+
+    if (amorce_faite) {
+        /* Rend visible l'etat que le cycle d'amorce ci-dessus vient de
+         * produire, sur l'ecran qui vient d'etre empile -- sans cet appel,
+         * un --cycles 1 ne pomperait jamais (la boucle de capture plus bas
+         * ne referait alors AUCUN cycle supplementaire, voir son
+         * commentaire), laissant l'ecran dans son etat juste-construit
+         * (vide) au moment de la capture. */
+        habillage_pomper();
     }
 
     /* --scenario 9 (tache 9, mode capture uniquement, --app accueil
@@ -405,8 +467,13 @@ int main(int argc, char **argv)
          * avant la capture : un cycle = un rafraîchissement du backend +
          * validation du magasin d'état, exactement ce que ferait
          * boucle_tache() une fois par seconde sur cible (voir
-         * source_etat_sim.c). */
-        for (int i = 0; i < cycles; i++) {
+         * source_etat_sim.c). Tache 3 (jalon 3b) : `cycles_restants`, pas
+         * `cycles` -- le cycle d'amorce plus haut (`amorce_faite`) en a deja
+         * execute un pour choisir l'ecran d'accueil ; en refaire `cycles`
+         * ici avancerait la boucle de cycles+1 secondes au lieu des
+         * `cycles` demandees (voir le commentaire de l'amorce). */
+        int cycles_restants = cycles - (amorce_faite ? 1 : 0);
+        for (int i = 0; i < cycles_restants; i++) {
             source_etat_sim_cycle();
             habillage_pomper();
             if (app == APP_JOUET) {

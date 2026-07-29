@@ -26,7 +26,7 @@
 #include "backend_factice.h"
 #include "backend_moonraker.h"
 #include "boucle.h"
-#include "ecran_accueil.h"
+#include "ecran_accueil_idle.h"
 #include "ecran_configuration.h"
 #include "habillage.h"
 #include "journal.h"
@@ -436,33 +436,49 @@ void app_main(void)
              * build_test_pattern() ci-dessus — le même verrou protège donc
              * cette construction-ci sans rien inventer.
              *
-             * ECRAN_ACCUEIL est TOUJOURS empilé en premier, jamais seulement
-             * ECRAN_CONFIGURATION seul (corrigé revue tâche 8, round 1,
-             * Q1 IMPORTANT) : navigation_accueil() (bouton Save de l'écran de
-             * configuration) est un `while (profondeur > 1)`, un no-op à
-             * profondeur 1 -- avec ECRAN_CONFIGURATION seul en fond de pile,
-             * Save n'aurait donc LITTÉRALEMENT aucun endroit où revenir : la
-             * bannière "Settings saved" s'affiche, l'écran ne bouge pas, et
-             * le bouton retour reste cacher (profondeur == 1). Reproduit et
-             * confirmé par la revue avec la vraie topologie de ce fichier.
-             * Empiler l'accueil D'ABORD puis, si l'appareil n'est pas encore
-             * configuré, ECRAN_CONFIGURATION PAR-DESSUS lui donne un sens
-             * réel à Save (retour à l'accueil, déjà construit et grisé
-             * puisque la boucle ne démarre pas tant que l'hôte n'est pas
-             * configuré) et fait apparaître le bouton retour (profondeur > 1)
-             * pour qui veut jeter un œil à l'accueil en cours de
-             * configuration sans valider quoi que ce soit. */
+             * Un écran d'accueil est TOUJOURS empilé en premier, jamais
+             * seulement ECRAN_CONFIGURATION seul (corrigé revue tâche 8,
+             * round 1, Q1 IMPORTANT) : navigation_accueil() (bouton Save de
+             * l'écran de configuration) est un `while (profondeur > 1)`, un
+             * no-op à profondeur 1 -- avec ECRAN_CONFIGURATION seul en fond
+             * de pile, Save n'aurait donc LITTÉRALEMENT aucun endroit où
+             * revenir : la bannière "Settings saved" s'affiche, l'écran ne
+             * bouge pas, et le bouton retour reste caché (profondeur == 1).
+             * Reproduit et confirmé par la revue avec la vraie topologie de
+             * ce fichier. Empiler l'accueil D'ABORD puis, si l'appareil
+             * n'est pas encore configuré, ECRAN_CONFIGURATION PAR-DESSUS lui
+             * donne un sens réel à Save (retour à l'accueil, déjà construit
+             * et grisé puisque la boucle ne démarre pas tant que l'hôte
+             * n'est pas configuré) et fait apparaître le bouton retour
+             * (profondeur > 1) pour qui veut jeter un œil à l'accueil en
+             * cours de configuration sans valider quoi que ce soit.
+             *
+             * Tâche 3 (jalon 3b) : ECRAN_ACCUEIL_IDLE plutôt que
+             * ECRAN_ACCUEIL (impression) ici -- au tout premier démarrage la
+             * boucle applicative vient tout juste de naître (boucle_init()
+             * ci-dessous n'a pas encore tourné un seul cycle), l'état réel
+             * de la machine (impression en cours ou non) n'est donc pas
+             * encore connu et accueil_choix.h ne peut pas encore trancher.
+             * Le repos est l'état de démarrage le plus courant ET le plus
+             * sûr (aucun contrôle dangereux -- Cancel, E-STOP -- proposé
+             * hors ligne, contrairement à l'accueil impression) : il sert
+             * donc de défaut fixe, jamais recalculé ici. La bascule VIVANTE
+             * idle<->impression une fois la première donnée reçue est
+             * différée à la fin du plan 3b (voir task-3-brief.md) --
+             * accueil_choix.h existe déjà et est exercé par le simulateur
+             * (simulateur/main.c), mais rien ne l'appelle encore depuis
+             * cette boucle applicative. */
             habillage_construire(lv_screen_active());
-            esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL);
+            esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_IDLE);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
                                esp_err_to_name(erreur_accueil));
             }
             /* Second empilement CONDITIONNÉ à la réussite du premier (revue
              * tâche 8, round 2, minor) : les deux appels ne sont pas
-             * indépendants. Sans cette garde, un ECRAN_ACCUEIL refusé (à
-             * cause d'un NO_MEM au tout premier démarrage, par exemple —
-             * son contexte est le plus gros des deux écrans) suivi d'un
+             * indépendants. Sans cette garde, un accueil refusé (à cause
+             * d'un NO_MEM au tout premier démarrage, par exemple — son
+             * contexte est le plus gros des deux écrans) suivi d'un
              * ECRAN_CONFIGURATION plus petit qui, lui, réussirait, recrée
              * EXACTEMENT le cul-de-sac Q1 corrigé plus haut : configuration
              * seule à profondeur 1, sous un profil de panne différent (échec

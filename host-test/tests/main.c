@@ -21,6 +21,8 @@ void suite_navigation(void);
 void suite_habillage(void);
 void suite_widgets(void);
 void suite_ecran_accueil(void);
+void suite_ecran_accueil_idle(void);
+void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
 void suite_commandes(void);
@@ -82,6 +84,7 @@ int main(void)
     suite_habillage();
     suite_widgets();
     suite_ecran_accueil();
+    suite_ecran_accueil_idle();
     suite_clavier();
     suite_ecran_configuration();
     /* Doit rester APRES suite_ecran_configuration() : sa derniere section
@@ -134,6 +137,11 @@ int main(void)
      * pure sans aucun etat process-wide -- aucune contrainte d'ordre avec les
      * autres suites. */
     suite_klipper_paliers();
+
+    /* Tache 3 (jalon 3b) : helper pur de choix d'accueil au demarrage,
+     * fonction pure sans aucun etat process-wide -- aucune contrainte
+     * d'ordre avec les autres suites. */
+    suite_accueil_choix();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

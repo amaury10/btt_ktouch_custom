@@ -95,6 +95,7 @@ add_executable(ktouch-sim
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
+    ${ECRANS_DIR}/ecran_accueil_idle.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${EXEMPLES_DIR}/backend_jouet.c
@@ -103,6 +104,7 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c
+    ${KLIPPER_DIR}/accueil_choix.c
 )
 target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${KLIPPER_DIR} ${ESP_ERR_SHIM_DIR} ${CJSON_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl cjson ${SDL2_LIBRARIES} m)
