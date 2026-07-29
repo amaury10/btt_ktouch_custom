@@ -11,7 +11,7 @@
  *      finale du jalon 2b -- voir pomper_transitions_style() ci-dessous).
  *   5. Trace du seam : tap -> ui_commander(BACKEND_ACTION_MACRO, "{\"nom\":..}")
  *      avec le NOM RÉELLEMENT AFFICHÉ sur le bouton, notification "Macro
- *      launched" en succès synchrone, "Command failed: <nom>" en échec
+ *      sent" en succès synchrone, "Command failed: <nom>" en échec
  *      SYNCHRONE (file pleine), et la bannière générique existante
  *      ("Command failed: macro", sans nom -- voir le commentaire de
  *      bouton_macro_cb() dans ecran_macros.c) sur l'échec ASYNCHRONE que
@@ -195,6 +195,49 @@ static void groupe_filtrage_et_etats(void)
     }
     free(e);
 
+    /* --- fix round 1 (revue tache 6, L2) : le clamp de nb_macros a
+     * KLIPPER_MACROS_MAX (ecran_macros.c, "meme borne defensive que
+     * web_nb_macros_serialisables()") est PORTEUR -- sans lui, un
+     * nb_macros=200 (un producteur hostile ou bogue, exactement le meme
+     * defaut nomme par la lecon de web_macros.h a la tache 1) ecrirait
+     * jusqu'a 200 entrees dans ctx->macros_filtrees[48], debordant de 152
+     * emplacements le tableau fixe -- et, une fois les 48 premiers
+     * emplacements remplis, du tampon ALLOUE (calloc, voir
+     * construire_ecran()) lui-meme, un heap-buffer-overflow qu'ASan attrape.
+     * Le test precedent (nb_macros = KLIPPER_MACROS_MAX pile) ne pouvait PAS
+     * exercer ce clamp : sans lui, il ne fait jamais rien puisque la
+     * boucle s'arrete deja a 48 par construction du memset. CE test-ci
+     * envoie explicitement nb_macros AU-DELA de la borne. RED observe en
+     * ecrivant ce test : retirer temporairement le clamp
+     * (`if (nb_macros_source > KLIPPER_MACROS_MAX) { nb_macros_source =
+     * KLIPPER_MACROS_MAX; }`) dans ecran_macros.c fait planter ce bloc sous
+     * ASan (heap-buffer-overflow, ecriture) -- voir le rapport de tache pour
+     * la trace complete. Noms simples ('A'..'Z' cycliques, PAS l'octet 0x41
+     * uniforme du bloc precedent) : le but ici est le COMPTE, pas
+     * l'absence d'octet nul, et un nom repete partout confondrait le
+     * defaut de comptage avec une deduplication qui n'existe pas. */
+    etat_klipper_t *e2 = malloc(sizeof(*e2));
+    VERIFIER(e2 != NULL);
+    memset(e2, 0, sizeof(*e2));
+    /* `e2->macros[]` ne fait QUE KLIPPER_MACROS_MAX emplacements (c'est la
+     * structure REELLE, voir etat_klipper.h) -- nb_macros=200 modelise
+     * exactement ce que macros_tronquees existe pour signaler : un
+     * producteur qui ANNONCE en connaitre davantage que ce que la structure
+     * peut porter. Seuls les KLIPPER_MACROS_MAX emplacements REELLEMENT
+     * alloues sont remplis (un nom lisible different par emplacement,
+     * jamais vide/'_' pour que chacun compte comme filtre) ; les indices
+     * au-dela restent a zero (jamais lus : la boucle de ecran_macros.c
+     * s'arrete a e2->nb_macros, mais le clamp doit l'empecher de depasser
+     * KLIPPER_MACROS_MAX AVANT d'atteindre un indice hors du tableau reel). */
+    for (uint8_t i = 0; i < KLIPPER_MACROS_MAX; i++) {
+        snprintf(e2->macros[i], KLIPPER_MACRO_NOM_MAX, "SURNOMBRE_%02u", (unsigned)i);
+    }
+    e2->nb_macros = 200;
+    e2->macros_tronquees = true; /* honnete : e2 pretend en connaitre plus que KLIPPER_MACROS_MAX */
+    VERIFIER((ECRAN_MACROS.mettre_a_jour(e2, false, ctx), true)); /* ne doit jamais planter (ASan) */
+    VERIFIER(ctx->nb_filtrees <= KLIPPER_MACROS_MAX);
+    free(e2);
+
     lv_obj_delete(parent);
     free(brut);
 }
@@ -355,20 +398,15 @@ static void groupe_trace_seam(void)
     lv_obj_t *bandeau_texte = lv_obj_get_child(bandeau, 0);
     VERIFIER(bandeau_texte != NULL);
 
-    /* Hygiene : test_jouet.c (section_bouton_reset_ui_commander()) empile
-     * "reset" contre backend_factice_desc() (deja le backend actif de la
-     * boucle simulee, partagee par TOUT le harnais) -- inconnue de ce
-     * backend, cette commande echoue de facon ASYNCHRONE et laisse le sceau
-     * a un seul emplacement de ui_commande_echec() (source_etat_sim.c)
-     * ARME, jamais consomme par ce fichier-la (qui ne regarde jamais le
-     * bandeau). Sans ce pompage a vide ICI, le TOUT PREMIER
-     * habillage_pomper() de ce groupe -- plus bas, apres le tap sur
-     * LOAD_FILAMENT -- consommerait ce sceau PERIME ("Command failed:
-     * reset") et l'attribuerait a tort a l'action de CE groupe. Purement une
-     * question d'hygiene inter-suites (RED reellement observe en ecrivant ce
-     * test) : aucune commande de CE groupe n'a encore ete envoyee a cet
-     * instant. */
-    habillage_pomper();
+    /* Fix round 1 (revue tache 6, M2 MEDIUM) : le pompage a vide qui vivait
+     * ICI (pour absorber un sceau "reset" laisse arme par test_jouet.c) a
+     * ete retire -- le nettoyage se fait desormais A LA SOURCE
+     * (source_etat_sim_reset_echec(), appelee par test_jouet.c lui-meme,
+     * voir son commentaire). Un band-aid cote consommateur cassait
+     * silencieusement des qu'un troisieme fichier s'intercalait entre les
+     * deux, ou continuait de tourner pour rien si le producteur cessait un
+     * jour de fuir : corriger au point de PRODUCTION rend cette suite-ci
+     * independante de ce que d'autres suites laissent trainer. */
 
     lv_obj_t *parent;
     ecran_macros_ctx_t *ctx;
@@ -389,24 +427,25 @@ static void groupe_trace_seam(void)
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[2]), "MACRO_ECHEC");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "LOAD_FILAMENT");
 
-    /* --- succes synchrone (acceptee en file) : "Macro launched: <nom>",
-     * PAS "succeeded" -- voir le commentaire de bouton_macro_cb() dans
-     * ecran_macros.c pour pourquoi ce mot precis est le seul honnete ici. */
+    /* --- succes synchrone (acceptee en file) : "Macro sent: <nom>",
+     * PAS "launched"/"succeeded" (fix round 1, revue tache 6, N1) -- voir le
+     * commentaire de bouton_macro_cb() dans ecran_macros.c pour pourquoi ce
+     * mot precis est le seul honnete ici. */
     size_t avant = source_etat_sim_file_taille();
     lv_obj_send_event(ctx->boutons[4], LV_EVENT_CLICKED, NULL); /* LOAD_FILAMENT */
     VERIFIER(source_etat_sim_file_taille() == avant + 1);
     VERIFIER(!lv_obj_has_flag(bandeau, LV_OBJ_FLAG_HIDDEN));
-    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Macro launched: LOAD_FILAMENT");
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Macro sent: LOAD_FILAMENT");
     VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bandeau, 0), lv_color_hex(0x1B2430))); /* info, pas erreur */
 
     /* Execution reelle : LOAD_FILAMENT est connue, reussit -- aucune
      * bannerie generique ne doit ecraser celle deja affichee. */
     source_etat_sim_cycle();
     habillage_pomper();
-    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Macro launched: LOAD_FILAMENT");
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Macro sent: LOAD_FILAMENT");
 
     /* --- echec ASYNCHRONE (MACRO_ECHEC, backend_factice.c) : accepte en
-     * file (banniere "launched" d'abord), puis l'execution reelle echoue
+     * file (banniere "sent" d'abord), puis l'execution reelle echoue
      * -- remplace par la banniere GENERIQUE existante ("Command failed:
      * macro", SANS le nom -- le seam ne porte que le nom de l'ACTION,
      * jamais ses arguments, voir ui_commande_echec() dans source_etat.h).
@@ -417,7 +456,7 @@ static void groupe_trace_seam(void)
     avant = source_etat_sim_file_taille();
     lv_obj_send_event(ctx->boutons[2], LV_EVENT_CLICKED, NULL); /* MACRO_ECHEC */
     VERIFIER(source_etat_sim_file_taille() == avant + 1);
-    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Macro launched: MACRO_ECHEC");
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Macro sent: MACRO_ECHEC");
 
     source_etat_sim_cycle(); /* execute -> commande() rend ESP_FAIL (sentinelle) */
     habillage_pomper();      /* remonte l'echec ASYNCHRONE au bandeau */

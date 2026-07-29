@@ -257,3 +257,9 @@ bool source_etat_sim_est_demarre(void)
 {
     return g_demarre;
 }
+
+void source_etat_sim_reset_echec(void)
+{
+    g_echec_action[0] = '\0';
+    g_echec_en_attente = false;
+}

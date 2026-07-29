@@ -311,8 +311,26 @@ static void envoyer_requete_macros(void)
     uint32_t id = prochain_id();
     if (rpc_construire_requete(tampon, sizeof(tampon), id, "printer.objects.list", NULL)) {
         g_id_macros = id;
-        esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
-                                        pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        /* Fix round 1 (revue tache 6, M1 MEDIUM) : le resultat de l'envoi
+         * DOIT etre verifie -- esp_websocket_client_send_text() rend -1 sur
+         * un timeout de tx_lock, une erreur de transport, ou un client pas
+         * (plus) connecte (voir esp_websocket_client_commande() plus bas
+         * dans ce fichier, qui fait deja ce controle pour les commandes
+         * RPC). Sans lui, un envoi qui echoue laisse g_id_macros arme sur un
+         * id dont la requete n'est JAMAIS partie : aucune reponse
+         * n'arrivera jamais, aucune nouvelle tentative n'est programmee, et
+         * -- sans ce JOURNAL_ALERTE -- rien ne le signale sur /log, le seul
+         * canal de diagnostic d'un appareil sans port serie. Consequence
+         * concrete que ce jalon existe pour eliminer : un timeout de
+         * tx_lock transitoire au moment de la connexion => `etat.macros[]`
+         * reste vide pour toujours => le bouton Macros de l'accueil
+         * n'apparait jamais => macros inutilisables, potentiellement des
+         * jours, sans la moindre trace. */
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de printer.objects.list echoue (id=%u)", (unsigned)id);
+        }
     } else {
         JOURNAL_ERREUR(TAG, "construction de printer.objects.list impossible");
     }
@@ -327,11 +345,24 @@ static void envoyer_identify_et_abonnement(void)
 {
     char tampon[MOONRAKER_WS_REQUETE_OCTETS];
 
+    /* Fix round 1 (revue tache 6, M1 MEDIUM) : memes controles que
+     * envoyer_requete_macros() ci-dessus sur les deux envois qui suivent --
+     * un identify qui echoue silencieusement laisse Moonraker ignorer toute
+     * la session (aucun accuse de reception attendu de toute facon, voir le
+     * commentaire du cas RPC_MSG_REPONSE dans traiter_message_complet()),
+     * et un abonnement qui echoue silencieusement se voit deja comme un flux
+     * mort (aucun notify_status_update n'arrive jamais) -- mais NI L'UN NI
+     * L'AUTRE n'etait signale sur /log avant ce fix, alors que
+     * moonraker_ws_commande() fait deja ce controle pour les commandes RPC. */
     uint32_t id_identify = prochain_id();
     if (rpc_construire_requete(tampon, sizeof(tampon), id_identify, "server.connection.identify",
                                 MOONRAKER_WS_IDENTIFY_PARAMS)) {
-        esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
-                                        pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de server.connection.identify echoue (id=%u)",
+                           (unsigned)id_identify);
+        }
     } else {
         JOURNAL_ERREUR(TAG, "construction de server.connection.identify impossible");
     }
@@ -339,8 +370,11 @@ static void envoyer_identify_et_abonnement(void)
     uint32_t id_abonnement = prochain_id();
     if (rpc_construire_abonnement(tampon, sizeof(tampon), id_abonnement)) {
         g_id_abonnement = id_abonnement;
-        esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
-                                        pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de l'abonnement echoue (id=%u)", (unsigned)id_abonnement);
+        }
     } else {
         JOURNAL_ERREUR(TAG, "construction de l'abonnement impossible");
     }

@@ -60,3 +60,17 @@ size_t source_etat_sim_file_taille(void);
  * que cette paire de fonctions transforme en erreur nommée dans
  * host-test/tests/main.c. */
 bool source_etat_sim_est_demarre(void);
+
+/* EXPOSÉ POUR LES TESTS UNIQUEMENT (fix round 1, revue tâche 6, M2) : efface
+ * le sceau à un seul emplacement de ui_commande_echec() (l'échec ASYNCHRONE
+ * le plus récent, voir source_etat.h) SANS le consommer/rendre à l'appelant
+ * -- contrairement à ui_commande_echec() lui-même, qui exige un tampon de
+ * sortie et fait partie du contrat façade partagé avec la cible. Un test qui
+ * PRODUIT un échec asynchrone dont il ne se sert pas (ex. une action inconnue
+ * envoyée juste pour prouver le câblage bouton -> ui_commander(), voir
+ * test_jouet.c) doit nettoyer APRÈS LUI, ici, plutôt que de laisser un sceau
+ * armé survivre à sa propre suite et se faire consommer par erreur par la
+ * suite suivante qui appellerait habillage_pomper() (c'était exactement le
+ * bug -- un sceau "reset" de test_jouet.c hérité à tort par
+ * test_ecran_macros.c). Sans effet si aucun échec n'est en attente. */
+void source_etat_sim_reset_echec(void);

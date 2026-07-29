@@ -336,7 +336,7 @@ int main(int argc, char **argv)
      * ci-dessous, meme schema que --scenario 9 juste au-dessus : le premier
      * source_etat_sim_cycle() l'execute (succes ou MACRO_ECHEC selon le nom
      * choisi), et habillage_pomper() du meme tour remonte le resultat au
-     * bandeau -- captures scenario 11 (« macro lancee -> notification
+     * bandeau -- captures scenario 11 (« macro envoyee -> notification
      * succes » et « MACRO_ECHEC -> bandeau rouge »), voir README §Options. */
     if (app == APP_ACCUEIL && macro_a_lancer != NULL) {
         char args[ECRAN_MACROS_ARGUMENTS_MAX];
@@ -357,7 +357,7 @@ int main(int argc, char **argv)
                 snprintf(texte, sizeof(texte), "Command failed: %s", macro_a_lancer);
                 habillage_notifier(texte, true);
             } else {
-                snprintf(texte, sizeof(texte), "Macro launched: %s", macro_a_lancer);
+                snprintf(texte, sizeof(texte), "Macro sent: %s", macro_a_lancer);
                 habillage_notifier(texte, false);
             }
         } else {

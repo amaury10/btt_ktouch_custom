@@ -75,6 +75,16 @@
 _Static_assert(MARGE + ECRAN_MACROS_PAGE_COLONNES * BOUTON_LARGEUR +
                        (ECRAN_MACROS_PAGE_COLONNES - 1) * BOUTON_ECART_X + MARGE <= LARGEUR_CONTENU,
                "la grille de macros deborde de la largeur du contenu");
+/* Fix round 1 (revue tache 6, L1) : GRILLE_Y (36) etait un litteral NU, pas
+ * derive de AVERTISSEMENT_Y + AVERTISSEMENT_HAUTEUR, malgre ce que promet le
+ * commentaire de tete du fichier ("toutes les constantes de position sont
+ * derivees les unes des autres, voir les _Static_assert"). Meme classe de
+ * bug que la superposition pagination/bandeau ci-dessous, juste jamais
+ * observee sur une capture : la ligne d'avertissement (8..30) et GRILLE_Y
+ * (36) ne se chevauchent PAS aujourd'hui, mais rien ne l'aurait signale si
+ * AVERTISSEMENT_HAUTEUR avait grandi. */
+_Static_assert(AVERTISSEMENT_Y + AVERTISSEMENT_HAUTEUR <= GRILLE_Y,
+               "la ligne d'avertissement de troncature chevauche la premiere rangee de la grille");
 _Static_assert(GRILLE_BAS <= PAGINATION_Y,
                "la grille de macros chevauche la ligne de pagination");
 _Static_assert(PAGINATION_Y + PAGINATION_HAUTEUR <= HAUTEUR_CONTENU,
@@ -255,17 +265,19 @@ static void afficher_page(ecran_macros_ctx_t *ctx)
  * soit toujours celui reellement affiche.
  *
  * Deux issues, deux libelles distincts et delibirement PAS le meme mot
- * ("launched" contre "failed"), trouvaille B de la revue des taches 4/5 :
- * - ESP_OK ⇒ "Macro launched: <nom>" (info) -- la commande est ACCEPTEE
+ * ("sent" contre "failed"), trouvaille B de la revue des taches 4/5 :
+ * - ESP_OK ⇒ "Macro sent: <nom>" (info) -- la commande est ACCEPTEE
  *   dans la file, rien de plus. Ce N'EST PAS une confirmation que Klipper a
  *   reellement execute la macro avec succes : sur un vrai Klipper, la
  *   reponse JSON-RPC corrolee de printer.gcode.script rend {"result":"ok"}
  *   AUSSI pour une macro totalement inconnue (voir moonraker_rpc.h, pres de
  *   rpc_lire_reponse et RPC_MSG_AUTRE) -- l'echec reel n'arrive que de facon
  *   asynchrone via notify_gcode_response, un canal que ce seam n'interprete
- *   pas encore (voir le rapport de tache 6). "launched" (envoyee), jamais
- *   "succeeded" (reussie) : le mot choisi ne pretend que ce que cet ecran
- *   sait reellement.
+ *   pas encore (voir le rapport de tache 6). Fix round 1 (revue tache 6, N1) :
+ *   "launched" (lancee) suggerait que l'EXECUTION avait commence, ce qui est
+ *   faux pour un nom que Klipper va rejeter -- "sent" (envoyee) ne pretend
+ *   que ce que cet ecran sait reellement : la commande a quitte la file
+ *   d'attente locale, rien de plus.
  * - erreur (file pleine, boucle pas demarree) ⇒ "Command failed: <nom>",
  *   rouge -- EXACTEMENT le meme seam synchrone que executer_commande() dans
  *   ecran_accueil.c (tache 9), avec le nom de la macro comme libelle
@@ -310,7 +322,7 @@ static void bouton_macro_cb(lv_event_t *e)
         snprintf(texte, sizeof(texte), "Command failed: %s", nom);
         habillage_notifier(texte, true);
     } else {
-        snprintf(texte, sizeof(texte), "Macro launched: %s", nom);
+        snprintf(texte, sizeof(texte), "Macro sent: %s", nom);
         habillage_notifier(texte, false);
     }
 }

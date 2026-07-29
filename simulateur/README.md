@@ -167,7 +167,7 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
   `ECRAN_MACROS` — construit `{"nom":"<nom>"}` avec la même fonction pure
   que ce bouton et empile `BACKEND_ACTION_MACRO` avant le premier cycle de
   `--cycles`, avec la même bannière synchrone que le tap réel poserait
-  ("Macro launched: `<nom>`" ou "Command failed: `<nom>`"). Utile avec
+  ("Macro sent: `<nom>`" ou "Command failed: `<nom>`"). Utile avec
   `--scenario 11` (« U1 ») : un nom connu (ex. `LOAD_FILAMENT`) démontre le
   succès, `MACRO_ECHEC` (sentinelle qui échoue toujours) démontre l'échec
   ASYNCHRONE remonté par le seam générique existant ("Command failed:

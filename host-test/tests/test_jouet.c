@@ -251,11 +251,22 @@ static void section_bouton_reset_ui_commander(void)
     lv_obj_send_event(ctx->bouton, LV_EVENT_CLICKED, NULL);
     VERIFIER(source_etat_sim_file_taille() == avant + 1);
 
-    /* Draine avant de rendre la main : ce fichier est le dernier de la suite
-     * (voir tests/main.c), la commande echouera contre backend_factice
-     * (ESP_ERR_NOT_SUPPORTED, "reset" lui est inconnu) sans consequence sur
-     * quoi que ce soit apres. */
+    /* Draine avant de rendre la main : la commande echoue contre
+     * backend_factice (ESP_ERR_NOT_SUPPORTED, "reset" lui est inconnu). */
     source_etat_sim_cycle();
+
+    /* Fix round 1 (revue tache 6, M2 MEDIUM) : cet echec ARME le sceau a un
+     * seul emplacement de ui_commande_echec() (source_etat_sim.c) -- ce
+     * fichier N'EST PLUS forcement le dernier de la suite (voir tests/main.c :
+     * suite_ecran_macros() tourne apres lui et appelle habillage_pomper(),
+     * qui aurait sinon herite ce sceau "reset" a tort). L'ancien commentaire
+     * ("ce fichier est le dernier de la suite, sans consequence sur quoi que
+     * ce soit apres") etait devenu FAUX des l'ajout de cette suite-la sans
+     * que rien ici ne le signale -- exactement la classe de couplage fragile
+     * qu'un nettoyage a la source (plutot qu'un pompage a vide chez le
+     * consommateur suivant) elimine. Draine ICI, au point de PRODUCTION du
+     * sceau -- jamais a la charge d'une suite future de savoir qu'il existe. */
+    source_etat_sim_reset_echec();
 
     lv_obj_delete(parent);
     free(brut);
