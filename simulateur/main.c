@@ -64,6 +64,8 @@
 #include "ecran_macros.h"
 #include "etat_klipper.h"
 #include "habillage.h"
+#include "hote_parse.h"
+#include "moonraker_pc.h"
 #include "navigation.h"
 #include "source_etat.h"
 #include "source_etat_sim.h"
@@ -187,7 +189,18 @@ static void jouet_pomper(void)
  * simule un appui tactile, voir --scenario ci-dessous et host-test/tests/
  * test_clavier.c pour la façon dont les événements sont simulés côté tests) ;
  * ils n'existent que pour satisfaire la signature de clavier_ouvrir()/
- * confirmation_ouvrir(), qui refusent un rappel NULL (voir clavier.h). */
+ * confirmation_ouvrir(), qui refusent un rappel NULL (voir clavier.h).
+ *
+ * --hote <adresse:port> (tâche 7 du JALON 3a -- numérotation de tâche
+ * distincte de celle ci-dessus, propre au jalon 2b) bascule --app accueil
+ * sur moonraker_pc.c (backend HTTP réel, sockets POSIX nus, voir son
+ * en-tête) au lieu de backend_factice.c -- la comparaison différée depuis
+ * le jalon 2a, enfin exécutée sur PC. Analysé avec hote_parse()
+ * (core/hote_parse.c, déjà lié ici pour ecran_configuration.c), jamais un
+ * second analyseur. Ignoré pour --app jouet (le jouet démontre le fork
+ * non-Klipper, aucune notion d'hôte réseau) et incompatible avec
+ * --scenario/--echec (propres au backend factice) -- voir plus bas où ce
+ * choix de backend est fait. */
 static void demo_clavier_rappel(const char *valeur, void *contexte)
 {
     (void)valeur;
@@ -218,6 +231,9 @@ int main(int argc, char **argv)
      * voir le commentaire de tete de ce fichier). */
     bool ecran_macros_demande = false;
     const char *macro_a_lancer = NULL;
+    /* Tache 7 (jalon 3a) : --hote <adresse:port>, voir le commentaire pres
+     * de demo_clavier_rappel() plus haut. */
+    const char *hote_brut = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--capture") == 0 && i + 1 < argc) {
@@ -242,6 +258,8 @@ int main(int argc, char **argv)
             ecran_macros_demande = (strcmp(valeur, "macros") == 0);
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
+        } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {
+            hote_brut = argv[++i];
         }
     }
 
@@ -287,6 +305,23 @@ int main(int argc, char **argv)
     const backend_desc_t *backend;
     if (app == APP_JOUET) {
         backend = echec ? &BACKEND_JOUET_ECHEC_DESC : backend_jouet_desc();
+    } else if (hote_brut != NULL) {
+        /* Tache 7 (jalon 3a) : --hote prend le pas sur --scenario/--echec,
+         * qui n'ont de sens que contre backend_factice.c. hote_parse() est
+         * la MEME fonction pure que ecran_configuration.c utilise pour
+         * valider une saisie -- une chaine que l'ecran de configuration
+         * refuserait n'a pas de raison d'etre acceptee ici. moonraker_pc_
+         * definir_hote() DOIT etre appelee avant source_etat_sim_demarrer()
+         * (voir moonraker_pc.h) : c'est le seul canal, cote simulateur, par
+         * lequel un hote reel atteint ce backend. */
+        backend_hote_t hote;
+        if (!hote_parse(hote_brut, &hote)) {
+            fprintf(stderr, "--hote : adresse invalide (%s)\n", hote_brut);
+            afficheur_arreter();
+            return 1;
+        }
+        moonraker_pc_definir_hote(&hote);
+        backend = moonraker_pc_desc();
     } else {
         backend = echec ? &BACKEND_ECHEC_DESC : backend_factice_desc();
         if (!echec) {

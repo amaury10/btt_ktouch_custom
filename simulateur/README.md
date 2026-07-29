@@ -184,6 +184,22 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
   spécification : la barre d'état est seule à afficher cet état, jamais une
   boîte d'erreur sur l'écran lui-même). Incompatible en pratique avec
   `--scenario` (le backend d'échec ignore ce choix).
+- `--hote <adresse:port>` (tâche 7, jalon 3a) : remplace `backend_factice`
+  par `moonraker_pc.c` (`simulateur/moonraker_pc.c`), un backend HTTP réel
+  vers un VRAI Moonraker -- via un GET sockets POSIX nu (HTTP/1.0, sans
+  garde-en-vie), PAS `esp_http_client` (ESP-only) ni libcurl. Alimente
+  `moonraker_parse_status()`/`rpc_lire_macros()`
+  (`firmware/main/apps/klipper/moonraker_parse.c`/`moonraker_rpc.c`) -- les
+  MÊMES fonctions pures que le backend ESP et que les fixtures de
+  `host-test/`, jamais une deuxième lecture du protocole. Le chemin
+  WebSocket de `backend_moonraker.c` (`moonraker_ws.c`) reste ESP-only :
+  n'est PAS exercé ici (les fixtures + l'appareil réel suffisent à le
+  couvrir, voir `docs/dev/klipper-simule.md`). Adresse analysée par
+  `hote_parse()` (`firmware/main/core/hote_parse.c`) -- même fonction que
+  `ecran_configuration.c`. Prend le pas sur `--scenario`/`--echec` (propres
+  au backend factice) ; ignoré pour `--app jouet`. Exemple, contre
+  `virtual-klipper-printer` (voir `docs/dev/klipper-simule.md`) :
+  `--hote localhost:7125`.
 
 **Toute image produite ici doit être ouverte et regardée, pas seulement
 générée.** Un PNG que personne n'a ouvert ne prouve rien de plus qu'une

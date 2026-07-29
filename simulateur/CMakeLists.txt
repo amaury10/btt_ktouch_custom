@@ -56,6 +56,17 @@ set(EXEMPLES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../exemples/backend_jouet)
 # — d'un répertoire d'outillage de test sans contrat garanti envers lui.
 set(ESP_ERR_SHIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../shim)
 
+# cJSON vendorisé : moonraker_parse.c/moonraker_rpc.c ci-dessous en ont besoin
+# (tâche 7, --hote) — RÉUTILISE le même vendor/ que host-test/ (voir son
+# CMakeLists.txt), jamais une deuxième copie qui pourrait diverger. Même
+# CJSON_NESTING_LIMIT=32 que la cible réelle (firmware/CMakeLists.txt) et que
+# host-test/, pour que ce backend PC exerce la même configuration que
+# l'appareil, pas une plus permissive.
+set(CJSON_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../host-test/vendor)
+add_library(cjson STATIC ${CJSON_DIR}/cJSON.c)
+target_include_directories(cjson PUBLIC ${CJSON_DIR})
+target_compile_definitions(cjson PUBLIC CJSON_NESTING_LIMIT=32)
+
 # Tâche 4 (habillage) fait tourner, sur PC, le même protocole que
 # core/boucle.c (magasin d'état, liaison, backend factice) via boucle_cycle()
 # et source_etat_sim.c (voir son en-tête) : ces quatre fichiers de core/,
@@ -70,6 +81,7 @@ add_executable(ktouch-sim
     plateforme_sim.c
     source_etat_sim.c
     source_reglages_sim.c
+    moonraker_pc.c
     ${CORE_DIR}/plateforme.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
@@ -87,7 +99,9 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_macros.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c
+    ${KLIPPER_DIR}/moonraker_parse.c
+    ${KLIPPER_DIR}/moonraker_rpc.c
 )
-target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${ESP_ERR_SHIM_DIR} ${SDL2_INCLUDE_DIRS})
-target_link_libraries(ktouch-sim PRIVATE lvgl ${SDL2_LIBRARIES} m)
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${KLIPPER_DIR} ${ESP_ERR_SHIM_DIR} ${CJSON_DIR} ${SDL2_INCLUDE_DIRS})
+target_link_libraries(ktouch-sim PRIVATE lvgl cjson ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)
