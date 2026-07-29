@@ -9,6 +9,7 @@ void suite_harnais(void);
 void suite_contrat(void);
 void suite_moonraker_parse(void);
 void suite_moonraker_rpc(void);
+void suite_fixtures_moonraker(void);
 void suite_etat_store(void);
 void suite_liaison(void);
 void suite_backend_factice(void);
@@ -100,6 +101,12 @@ int main(void)
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */
     suite_web_macros();
+
+    /* Tache 4 (jalon 3a) : rejeu de fixtures enregistrees contre un vrai
+     * Moonraker. Independante de toute autre suite (fichiers relus depuis
+     * le disque, aucun etat process-wide partage) : aucune contrainte
+     * d'ordre non plus. */
+    suite_fixtures_moonraker();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

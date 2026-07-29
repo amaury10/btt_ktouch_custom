@@ -114,6 +114,7 @@ add_executable(tests
     tests/test_contrat.c
     tests/test_moonraker_parse.c
     tests/test_moonraker_rpc.c
+    tests/test_fixtures_moonraker.c
     tests/test_etat_store.c
     tests/test_liaison.c
     tests/test_backend_factice.c
@@ -161,6 +162,18 @@ target_include_directories(tests PRIVATE ${MAIN_DIR} ${CORE_DIR} ${KLIPPER_DIR} 
 # coupler a nos avertissements ferait echouer le build sur un futur
 # compilateur plus strict pour un warning dans du code qu'on ne modifie pas.
 target_compile_options(tests PRIVATE -Wall -Wextra -Werror)
+
+# Chemin ABSOLU (fige a la configuration CMake) vers les fixtures
+# enregistrees contre un vrai Moonraker (tache 4, jalon 3a) : voir
+# tests/test_fixtures_moonraker.c, qui les relit avec un simple fopen().
+# Choix documente (le brief de la tache laissait le choix) : un define
+# absolu plutot qu'une copie des fichiers a cote du binaire (etape de build
+# en plus, chemins relatifs fragiles selon le repertoire d'execution) --
+# comme le harnais est toujours construit depuis CE depot, un chemin absolu
+# fige a la configuration reste valide quel que soit le repertoire de build
+# ou le repertoire courant au moment de lancer `tests`.
+target_compile_definitions(tests PRIVATE
+    KTOUCH_FIXTURES_MOONRAKER_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/moonraker")
 
 if(KTOUCH_HOST_TEST_SANITIZERS)
     # -fno-omit-frame-pointer : piles d'appel lisibles dans les rapports.
