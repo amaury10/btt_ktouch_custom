@@ -354,3 +354,189 @@ void suite_ecran_accueil_idle_jog(void)
     lv_obj_delete(parent);
     free(brut);
 }
+
+/* ------------------------------------------------------------------------
+ * Tache 5 (jalon 3b) : boutons de homing (Home All/X/Y/Z) -- confirmation
+ * conditionnelle (spec §7) et grisage RESOLU sur donnees_perimees uniquement
+ * (jamais sur "axe non reference", contrairement au pad de jog). Meme garde
+ * d'ordonnancement que suite_ecran_accueil_idle_jog() (reutilise la boucle
+ * simulee demarree par suite_commandes()) -- DOIT rester apres elle dans
+ * tests/main.c. Pilote le dialogue de confirmation via lv_obj_send_event()
+ * sur les boutons du pied, meme technique que test_clavier.c/
+ * test_commandes.c (voir dernier_msgbox() ci-dessous, copie locale du meme
+ * helper -- redefini ici plutot que partage, meme choix que le reste de ce
+ * harnais, voir pomper_transitions_style() plus haut dans ce fichier).
+ * ------------------------------------------------------------------------ */
+
+static lv_obj_t *dernier_enfant_calque_superieur(void)
+{
+    lv_obj_t *calque = lv_layer_top();
+    uint32_t n = lv_obj_get_child_count(calque);
+    if (n == 0) {
+        return NULL;
+    }
+    return lv_obj_get_child(calque, n - 1);
+}
+
+static lv_obj_t *dernier_msgbox(void)
+{
+    lv_obj_t *fond = dernier_enfant_calque_superieur();
+    if (fond == NULL) {
+        return NULL;
+    }
+    return lv_obj_get_child(fond, 0);
+}
+
+void suite_ecran_accueil_idle_home(void)
+{
+    printf("suite : ecran accueil idle (homing + confirmation)\n");
+
+    if (!habillage_est_construit() || !source_etat_sim_est_demarre()) {
+        printf("ERREUR: suite_ecran_accueil_idle_home() exige que suite_ecran_configuration() ET "
+               "suite_commandes() aient deja tourne -- verifier l'ordre dans tests/main.c.\n");
+        exit(1);
+    }
+
+    lv_obj_t *parent = lv_obj_create(lv_screen_active());
+    void *brut = calloc(1, ECRAN_ACCUEIL_IDLE.taille_contexte);
+    VERIFIER(brut != NULL);
+    ecran_accueil_idle_ctx_t *ctx = (ecran_accueil_idle_ctx_t *)brut;
+    ECRAN_ACCUEIL_IDLE.construire(parent, ctx);
+    for (int i = 0; i < ECRAN_ACCUEIL_IDLE_HOME_NB; i++) {
+        VERIFIER(ctx->home_boutons[i] != NULL);
+    }
+
+    etat_klipper_t etat;
+    char action[32];
+    char arguments[192];
+
+    /* --- (a) machine non referencee (axes_references=0) : "Home X" envoie
+     * DIRECTEMENT, aucun dialogue -- rien ne bouge d'une position "connue"
+     * puisqu'aucune position n'est connue (spec §7). */
+    memset(&etat, 0, sizeof(etat));
+    etat.nb_extrudeurs = 1;
+    etat.extrudeurs[0].presente = true;
+    etat.axes_references = 0;
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+
+    size_t avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_EVENT_CLICKED, NULL);
+    VERIFIER(dernier_enfant_calque_superieur() == NULL); /* pas de confirmation */
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "G28 X") != NULL);
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- (b) X deja reference : "Home X" ouvre la confirmation, AUCUN gcode
+     * encore envoye -- decliner d'abord (rien ne part), puis reessayer et
+     * confirmer (G28 X part exactement une fois). */
+    etat.axes_references = 0x1u; /* X reference */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_EVENT_CLICKED, NULL);
+    lv_obj_t *mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_msgbox_get_title(mbox)), "Home X?");
+    VERIFIER(source_etat_sim_file_taille() == avant); /* rien envoye tant que non confirme */
+
+    lv_obj_t *pied = lv_msgbox_get_footer(mbox);
+    lv_obj_t *bouton_decliner = lv_obj_get_child(pied, 0);
+    lv_obj_t *bouton_action = lv_obj_get_child(pied, 1);
+    VERIFIER(bouton_decliner != NULL);
+    VERIFIER(bouton_action != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_decliner, 0)), "Cancel");
+    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_action, 0)), "Home");
+    /* destructif=true (brief) : bouton d'action rouge, jamais l'etat "par
+     * defaut" -- meme verification que section_ecran_accueil_boutons() dans
+     * test_commandes.c pour "Cancel print?"/"Emergency stop?". */
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bouton_action, 0), lv_color_hex(0xE74C3C)));
+    VERIFIER(lv_obj_has_state(bouton_decliner, LV_STATE_FOCUS_KEY));
+    VERIFIER(!lv_obj_has_state(bouton_action, LV_STATE_FOCUS_KEY));
+
+    lv_obj_send_event(bouton_decliner, LV_EVENT_CLICKED, NULL);
+    lv_timer_handler(); /* acheve la fermeture asynchrone du dialogue */
+    VERIFIER(source_etat_sim_file_taille() == avant); /* toujours rien envoye */
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_EVENT_CLICKED, NULL);
+    mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+    pied = lv_msgbox_get_footer(mbox);
+    bouton_action = lv_obj_get_child(pied, 1);
+    lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL);
+    /* confirmation.c invoque le rappel de facon SYNCHRONE (fermer_et_rappeler(),
+     * voir son commentaire) : la commande est deja en file ici. */
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "G28 X") != NULL);
+    lv_timer_handler();
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- (c) donnees_perimees=true : les QUATRE boutons de homing se
+     * desactivent, style RESOLU (couleur reellement changee, pas seulement
+     * LV_STATE_DISABLED -- meme lecon que le pad de jog/tuile_griser()) --
+     * meme si X reste "reference" (contrairement au pad de jog, l'etat de
+     * reference ne joue AUCUN role dans le grisage du homing, spec §7). */
+    pomper_transitions_style();
+    lv_color_t fond_actif =
+        lv_obj_get_style_bg_color(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_PART_MAIN);
+
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, true, ctx);
+    for (int i = 0; i < ECRAN_ACCUEIL_IDLE_HOME_NB; i++) {
+        VERIFIER(lv_obj_has_state(ctx->home_boutons[i], LV_STATE_DISABLED));
+    }
+    pomper_transitions_style();
+    VERIFIER(!lv_color_eq(
+        lv_obj_get_style_bg_color(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_PART_MAIN), fond_actif));
+
+    /* Un clic sur un bouton desactive n'envoie rien et n'ouvre aucun
+     * dialogue -- garde defensive de home_bouton_cb(), lv_obj_send_event()
+     * ne passe jamais par la verification tactile de LV_STATE_DISABLED. */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    /* redevient frais : le bouton reprend sa couleur RESOLUE de depart. */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+    VERIFIER(!lv_obj_has_state(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_STATE_DISABLED));
+    pomper_transitions_style();
+    VERIFIER(lv_color_eq(
+        lv_obj_get_style_bg_color(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_PART_MAIN), fond_actif));
+
+    /* --- (d) "Home All" avec Y (seul) reference : confirmation quand meme
+     * ("au moins un axe" du brief) ; confirmer envoie "G28" PLEIN (le masque
+     * 0x7 passe a klipper_gcode_home() s'effondre en "tout", jamais
+     * "G28 Y" seul -- klipper_gcode_home() est deja teste pour ce cas,
+     * cette assertion ne fait que prouver que ecran_accueil_idle.c lui donne
+     * bien 0x7 pour "All", pas juste le masque des axes references). */
+    memset(&etat, 0, sizeof(etat));
+    etat.nb_extrudeurs = 1;
+    etat.extrudeurs[0].presente = true;
+    etat.axes_references = 0x2u; /* Y seul reference */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_ALL], LV_EVENT_CLICKED, NULL);
+    mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_msgbox_get_title(mbox)), "Home All?");
+    VERIFIER(source_etat_sim_file_taille() == avant);
+
+    pied = lv_msgbox_get_footer(mbox);
+    bouton_action = lv_obj_get_child(pied, 1);
+    lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "\"script\":\"G28\"") != NULL); /* plein, pas "G28 Y" */
+    lv_timer_handler();
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    lv_obj_delete(parent);
+    free(brut);
+}

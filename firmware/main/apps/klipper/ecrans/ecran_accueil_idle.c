@@ -47,6 +47,7 @@
 #include "cJSON.h"
 
 #include "backend.h"
+#include "confirmation.h"
 #include "klipper_gcode.h"
 #include "klipper_paliers.h"
 #include "source_etat.h"
@@ -213,19 +214,49 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + CONTROLES_Y + CONTROLES_HAUTEUR <= BANDEAU_
  * ne le distinguait pas assez (revue code, defaut Important n2). */
 #define JOG_Z_ECART_COLONNE (2 * JOG_ECART_COLONNE)
 
-#define SELECTEUR_ECART_PAD JOG_Z_ECART_COLONNE /* meme rythme visuel que l'ecart pad->Z */
+/* --- Homing (tache 5) : GROUPE SEPARE apres la colonne Z, meme rythme
+ * (HOME_ECART_COLONNE == JOG_Z_ECART_COLONNE) que celui qui isole deja la
+ * colonne Z du pad -- pas une septieme/huitieme colonne du pad, un groupe a
+ * part au meme titre que Z l'est du pad. PLEINE HAUTEUR (HOME_HAUTEUR ==
+ * JOG_PAD_HAUTEUR, une seule rangee de 4 boutons), PAS une rangee
+ * supplementaire EMPILEE au-dessus/en-dessous du pad : CONTROLES_HAUTEUR
+ * (donc le bas de zone_controles en coordonnees ABSOLUES) reste EXACTEMENT
+ * celui de la tache 4, aucun risque de reproduire le bug de bandeau
+ * documente en tete de ce fichier (CONTROLES_HAUTEUR n'a pas besoin de
+ * grandir : la largeur gagnee est reprise SUR le selecteur de pas, qui
+ * occupait deliberement "tout l'espace restant" tache 4 -- rien n'imposait
+ * de lui en laisser plus que necessaire). Libelles COURTS ("All"/"X"/"Y"/"Z",
+ * pas "Home X" au pied de la lettre du brief) : HOME_BOUTON_LARGEUR ==
+ * JOG_BOUTON_LARGEUR (54px, meme rythme que le pad/la colonne Z) ne tient pas
+ * "Home X" a la police 14 sans retrecir le selecteur sous sa largeur par
+ * defaut sensee (RACINE_LARGEUR_DEFAUT, selecteur_pas.c) -- l'absence du
+ * suffixe +/- que porte CHAQUE bouton de jog ("X-"/"X+") est deja ce qui
+ * distingue "X" ici, la separation visuelle (HOME_ECART_COLONNE) fait le
+ * reste ; verifie sur idle-home-confirm.png (capture de cette tache). */
+#define HOME_BOUTON_LARGEUR JOG_BOUTON_LARGEUR
+#define HOME_ECART_BOUTON        6 /* horizontal, entre les 4 boutons de homing */
+#define HOME_ECART_COLONNE JOG_Z_ECART_COLONNE /* meme rythme que pad->Z : groupe visuellement separe */
+#define HOME_LARGEUR (ECRAN_ACCUEIL_IDLE_HOME_NB * HOME_BOUTON_LARGEUR + \
+                      (ECRAN_ACCUEIL_IDLE_HOME_NB - 1) * HOME_ECART_BOUTON)
+#define HOME_HAUTEUR JOG_PAD_HAUTEUR
+
+#define SELECTEUR_ECART_PAD JOG_Z_ECART_COLONNE /* meme rythme visuel, maintenant entre homing et selecteur */
 #define SELECTEUR_LARGEUR (LARGEUR_CONTENU - 2 * MARGE - 2 * CONTROLES_PAD_INTERNE - JOG_PAD_LARGEUR - \
-                            JOG_Z_ECART_COLONNE - JOG_Z_LARGEUR - SELECTEUR_ECART_PAD)
+                            JOG_Z_ECART_COLONNE - JOG_Z_LARGEUR - HOME_ECART_COLONNE - HOME_LARGEUR - \
+                            SELECTEUR_ECART_PAD)
 #define SELECTEUR_HAUTEUR JOG_PAD_HAUTEUR
 
 _Static_assert(2 * CONTROLES_PAD_INTERNE + JOG_PAD_HAUTEUR == CONTROLES_HAUTEUR,
                 "le pad XY ne remplit plus exactement la hauteur de la zone de controles");
 _Static_assert(2 * JOG_Z_HAUTEUR + JOG_ECART_LIGNE == JOG_PAD_HAUTEUR,
                 "la colonne Z (2 boutons) ne fait plus exactement la hauteur du pad XY");
+_Static_assert(HOME_HAUTEUR == JOG_PAD_HAUTEUR,
+                "la rangee de homing ne fait plus exactement la hauteur du pad XY");
 _Static_assert(CONTROLES_PAD_INTERNE + JOG_PAD_LARGEUR + JOG_Z_ECART_COLONNE + JOG_Z_LARGEUR +
-                    SELECTEUR_ECART_PAD + SELECTEUR_LARGEUR + CONTROLES_PAD_INTERNE ==
+                    HOME_ECART_COLONNE + HOME_LARGEUR + SELECTEUR_ECART_PAD + SELECTEUR_LARGEUR +
+                    CONTROLES_PAD_INTERNE ==
                     LARGEUR_CONTENU - 2 * MARGE,
-                "pad + colonne Z + selecteur ne remplissent plus exactement la largeur de la zone de controles");
+                "pad + colonne Z + homing + selecteur ne remplissent plus exactement la largeur de la zone de controles");
 
 #define JOG_COL0_X CONTROLES_PAD_INTERNE
 #define JOG_COL1_X (JOG_COL0_X + JOG_BOUTON_LARGEUR + JOG_ECART_COLONNE)
@@ -239,7 +270,10 @@ _Static_assert(CONTROLES_PAD_INTERNE + JOG_PAD_LARGEUR + JOG_Z_ECART_COLONNE + J
 #define JOG_Z_Y0 CONTROLES_PAD_INTERNE
 #define JOG_Z_Y1 (JOG_Z_Y0 + JOG_Z_HAUTEUR + JOG_ECART_LIGNE)
 
-#define SELECTEUR_X (JOG_Z_X + JOG_Z_LARGEUR + SELECTEUR_ECART_PAD)
+#define HOME_X (JOG_Z_X + JOG_Z_LARGEUR + HOME_ECART_COLONNE)
+#define HOME_Y CONTROLES_PAD_INTERNE
+
+#define SELECTEUR_X (HOME_X + HOME_LARGEUR + SELECTEUR_ECART_PAD)
 #define SELECTEUR_Y CONTROLES_PAD_INTERNE
 
 /* Vitesses de jog (brief tache 4, jalon 3b) : 3000 mm/min pour XY, 600 pour
@@ -397,6 +431,69 @@ static lv_obj_t *jog_bouton_creer(lv_obj_t *parent, const char *texte, lv_coord_
     return bouton;
 }
 
+/* Tache 5 : boutons de homing -- MEME apparence que jog_bouton_creer()
+ * (couleurs/rayon/styles locaux DEFAUT+DISABLED identiques), mais un
+ * constructeur SEPARE plutot qu'un parametre booleen sur jog_bouton_creer() :
+ * lv_obj_remove_style_all() ICI ote le theme par defaut de lv_button_create()
+ * ET sa transition de couleur animee sur bg_color -- exactement le fix
+ * "round 1" deja documente dans selecteur_pas.c (voir son commentaire de
+ * tete), pour une raison decouverte EMPIRIQUEMENT en ecrivant cette tache :
+ * chaque bouton qui GARDE le theme programme, a CHAQUE bascule DISABLED, une
+ * nouvelle transition dans la liste globale de LVGL (style_trans_ll,
+ * lv_obj_style.c) -- une liste PROCESSUS ENTIER, jamais purgee tant que
+ * lv_timer_handler() ne tourne pas (jamais le cas dans
+ * suite_ecran_accueil_idle(), qui n'avance jamais l'horloge LVGL). Cette
+ * liste accumule DEJA des entrees de toutes les suites precedentes du
+ * harnais hote (host-test/tests/main.c en enregistre une trentaine) ; les
+ * six boutons de jog EXISTANTS (tache 4, theme garde deliberement, voir
+ * jog_bouton_creer() ci-dessus) restaient sous le seuil ou
+ * lv_obj_style_create_transition()/lv_anim_start() (qui scrutent cette
+ * liste) deviennent pathologiquement lents -- QUATRE boutons de homing DE
+ * PLUS, s'ils gardaient EUX AUSSI le theme, faisaient deborder ce budget
+ * implicite : suite_ecran_accueil_idle() se bloquait (CPU a 100%, plus de
+ * 10 minutes sans jamais rendre la main) des le 11e appel a
+ * mettre_a_jour() -- traque jusqu'a lv_obj_remove_state() sur le SIXIEME
+ * bouton de jog bascule dans ce meme appel. Les boutons de homing n'ont de
+ * toute facon aucun besoin d'une transition animee (bascule rare, sur
+ * donnees_perimees uniquement, jamais un geste repete comme le jog) : ce
+ * n'est PAS un contournement de test, c'est le style RESOLU deja choisi
+ * pour cellule_creer()/bouton_macros plus haut dans ce fichier, applique
+ * ici pour la meme raison ET parce qu'il elimine cette classe de probleme a
+ * la racine plutot que de la deplacer. */
+static lv_obj_t *home_bouton_creer(lv_obj_t *parent, const char *texte, lv_coord_t x, lv_coord_t y,
+                                    lv_coord_t largeur, lv_coord_t hauteur)
+{
+    lv_obj_t *bouton = lv_button_create(parent);
+    lv_obj_remove_style_all(bouton);
+    lv_obj_set_size(bouton, largeur, hauteur);
+    lv_obj_set_pos(bouton, x, y);
+    /* lv_obj_remove_style_all() remet bg_opa a LV_OPA_TRANSP (meme piege que
+     * "Fix round 1, defaut Important n1" documente dans selecteur_pas.c) :
+     * pose ici explicitement, jamais laisse au theme qui vient d'etre ote. */
+    lv_obj_set_style_bg_opa(bouton, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(bouton, lv_color_hex(COULEUR_BOUTON), 0);
+    lv_color_t couleur_desactivee =
+        lv_color_mix(lv_color_hex(COULEUR_BOUTON), lv_color_hex(COULEUR_FOND), BOUTON_DESACTIVE_MELANGE);
+    lv_obj_set_style_bg_color(bouton, couleur_desactivee, LV_STATE_DISABLED);
+    lv_obj_set_style_border_width(bouton, 0, 0);
+    lv_obj_set_style_shadow_width(bouton, 0, 0);
+    lv_obj_set_style_radius(bouton, 6, 0);
+
+    lv_obj_t *label = lv_label_create(bouton);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_GRISE), LV_STATE_DISABLED);
+    lv_label_set_text(label, texte);
+    lv_obj_center(label);
+
+    return bouton;
+}
+
+/* Bascule LV_STATE_DISABLED sur `bouton` ET son label (enfant 0) -- reutilise
+ * TEL QUEL par les boutons de homing (home_bouton_creer() ci-dessus) : cette
+ * fonction ne depend que de l'etat LVGL generique, jamais du theme ni d'une
+ * transition, donc indifferente a laquelle des deux constructeurs a cree
+ * `bouton`. */
 static void jog_bouton_definir_desactive(lv_obj_t *bouton, bool desactive)
 {
     lv_obj_t *label = lv_obj_get_child(bouton, 0);
@@ -506,6 +603,86 @@ static void jog_bouton_cb(lv_event_t *e)
     envoyer_gcode(script);
 }
 
+/* Copie du dialogue de confirmation de homing (tache 5) -- UNE SEULE
+ * definition, declaree dans ecran_accueil_idle.h et partagee avec
+ * simulateur/main.c (scenario 13, voir son commentaire) : le vrai rappel de
+ * clic ci-dessous ET la capture doivent afficher EXACTEMENT le meme
+ * dialogue, jamais deux chaines saisies a la main qui pourraient un jour
+ * diverger sans qu'aucun test ne le remarque. Titre par indice
+ * (ECRAN_ACCUEIL_IDLE_HOME_ALL/X/Y/Z), message/action/declin identiques pour
+ * les quatre (brief tache 5 : copie fixe, y compris pour "Home All?"). */
+const char *const ECRAN_ACCUEIL_IDLE_HOME_TITRES[ECRAN_ACCUEIL_IDLE_HOME_NB] = {
+    [ECRAN_ACCUEIL_IDLE_HOME_ALL] = "Home All?",
+    [ECRAN_ACCUEIL_IDLE_HOME_X]   = "Home X?",
+    [ECRAN_ACCUEIL_IDLE_HOME_Y]   = "Home Y?",
+    [ECRAN_ACCUEIL_IDLE_HOME_Z]   = "Home Z?",
+};
+const char ECRAN_ACCUEIL_IDLE_HOME_MESSAGE[]  = "The axis will move to its endstop.";
+const char ECRAN_ACCUEIL_IDLE_HOME_ACTION[]   = "Home";
+const char ECRAN_ACCUEIL_IDLE_HOME_DECLINER[] = "Cancel";
+
+/* Rappel de confirmation.c (tache 5), invoque UNE SEULE FOIS, longtemps
+ * apres le clic qui a ouvert le dialogue -- `ctx->home_masque_en_attente`,
+ * pose par home_bouton_cb() juste avant confirmation_ouvrir_ex(), est ce qui
+ * survit jusqu'ici (voir son commentaire dans ecran_accueil_idle.h : jamais
+ * une variable statique de fichier ni un local de pile, le contexte de
+ * l'ecran EST le `contexte` que confirmation.c relaie tel quel). Decline
+ * (confirme=false) ou ctx NULL (ne devrait jamais arriver, confirmation.c
+ * relaie toujours le contexte fourni a l'ouverture) : n'envoie rien, meme
+ * politique que rappel_confirmation_annuler()/rappel_confirmation_urgence()
+ * dans ecran_accueil.c. */
+static void rappel_confirmation_homing(bool confirme, void *contexte)
+{
+    ecran_accueil_idle_ctx_t *ctx = contexte;
+    if (!confirme || ctx == NULL) {
+        return;
+    }
+    char script[KLIPPER_GCODE_MAX];
+    if (klipper_gcode_home(script, sizeof(script), ctx->home_masque_en_attente)) {
+        envoyer_gcode(script);
+    }
+}
+
+/* Tache 5, spec §7 : `masque` reprend la convention de bits de
+ * axes_references (bit0=X bit1=Y bit2=Z, 0x7 pour "All") -- SI au moins un
+ * axe concerne est DEJA reference (un G28 le ferait donc bouger depuis une
+ * position connue), ouvre la confirmation avant d'envoyer ; SINON (aucun axe
+ * concerne n'est reference, rien ne bouge d'une position "connue"), envoie
+ * directement. Une SEULE formule pour les quatre boutons (y compris "All",
+ * masque=0x7) : `(axes_references_connus & masque) != 0` vaut vrai des qu'AU
+ * MOINS UN des axes du masque est reference, exactement la regle du brief
+ * pour "Home All" aussi -- aucun cas special necessaire. */
+static void home_bouton_cb(lv_event_t *e)
+{
+    ecran_accueil_idle_home_info_t *info = lv_event_get_user_data(e);
+    lv_obj_t *cible = lv_event_get_target(e);
+    if (info == NULL || info->ctx == NULL || cible == NULL) {
+        return;
+    }
+    if (lv_obj_has_state(cible, LV_STATE_DISABLED)) {
+        /* Garde defensive : meme raisonnement que jog_bouton_cb() -- un bouton
+         * de homing desactive (donnees_perimees, voir mettre_a_jour()) ne doit
+         * envoyer aucun gcode ni ouvrir aucune confirmation, y compris quand
+         * host-test contourne le blocage tactile reel via lv_obj_send_event(). */
+        return;
+    }
+
+    ecran_accueil_idle_ctx_t *ctx = info->ctx;
+    uint8_t masque = info->masque;
+
+    if ((ctx->axes_references_connus & masque) != 0) {
+        ctx->home_masque_en_attente = masque;
+        confirmation_ouvrir_ex(ECRAN_ACCUEIL_IDLE_HOME_TITRES[info->indice], ECRAN_ACCUEIL_IDLE_HOME_MESSAGE,
+                                ECRAN_ACCUEIL_IDLE_HOME_ACTION, true, ECRAN_ACCUEIL_IDLE_HOME_DECLINER,
+                                rappel_confirmation_homing, ctx);
+    } else {
+        char script[KLIPPER_GCODE_MAX];
+        if (klipper_gcode_home(script, sizeof(script), masque)) {
+            envoyer_gcode(script);
+        }
+    }
+}
+
 static void ecran_accueil_idle_construire(lv_obj_t *parent, void *contexte)
 {
     ecran_accueil_idle_ctx_t *ctx = contexte;
@@ -573,6 +750,32 @@ static void ecran_accueil_idle_construire(lv_obj_t *parent, void *contexte)
         ctx->jog_infos[i].axe = JOG_DEFS[i].axe;
         ctx->jog_infos[i].signe = JOG_DEFS[i].signe;
         lv_obj_add_event_cb(ctx->jog_boutons[i], jog_bouton_cb, LV_EVENT_CLICKED, &ctx->jog_infos[i]);
+    }
+
+    /* Tache 5 : quatre boutons de homing, groupe separe apres la colonne Z
+     * (voir le bloc de constantes HOME_* en tete de fichier pour la mise en
+     * page). L'ORDRE de ce tableau DOIT rester synchronise avec
+     * ECRAN_ACCUEIL_IDLE_HOME_* (ecran_accueil_idle.h), reutilise tel quel
+     * comme indice ici -- meme technique que JOG_DEFS[] juste au-dessus.
+     * home_bouton_creer(), PAS jog_bouton_creer() (voir son commentaire de
+     * tete pour la raison : theme + transition animee otes). */
+    static const struct {
+        uint8_t     masque;
+        const char *libelle;
+    } HOME_DEFS[ECRAN_ACCUEIL_IDLE_HOME_NB] = {
+        [ECRAN_ACCUEIL_IDLE_HOME_ALL] = { 0x7u, "All" },
+        [ECRAN_ACCUEIL_IDLE_HOME_X]   = { 0x1u, "X" },
+        [ECRAN_ACCUEIL_IDLE_HOME_Y]   = { 0x2u, "Y" },
+        [ECRAN_ACCUEIL_IDLE_HOME_Z]   = { 0x4u, "Z" },
+    };
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_IDLE_HOME_NB; i++) {
+        lv_coord_t x = HOME_X + (lv_coord_t)(i * (HOME_BOUTON_LARGEUR + HOME_ECART_BOUTON));
+        ctx->home_boutons[i] =
+            home_bouton_creer(ctx->zone_controles, HOME_DEFS[i].libelle, x, HOME_Y, HOME_BOUTON_LARGEUR, HOME_HAUTEUR);
+        ctx->home_infos[i].ctx = ctx;
+        ctx->home_infos[i].indice = i;
+        ctx->home_infos[i].masque = HOME_DEFS[i].masque;
+        lv_obj_add_event_cb(ctx->home_boutons[i], home_bouton_cb, LV_EVENT_CLICKED, &ctx->home_infos[i]);
     }
 
     /* Selecteur de pas (tache 4) : cree via son propre widget partage
@@ -756,6 +959,19 @@ static void ecran_accueil_idle_mettre_a_jour(const void *etat, bool donnees_peri
             break;
         }
         jog_bouton_definir_desactive(ctx->jog_boutons[i], donnees_perimees || !axe_reference);
+    }
+
+    /* --- Homing (tache 5) : `axes_references_connus` est relu par
+     * home_bouton_cb() AU MOMENT DU CLIC (voir son commentaire, meme
+     * discipline que selecteur_pas pour le jog) -- doit donc etre a jour
+     * AVANT tout clic possible, jamais seulement quand donnees_perimees
+     * change. Les boutons, eux, ne sont JAMAIS desactives par "axe non
+     * reference" (spec tache 5 §7 : homer est precisement ce qu'on fait
+     * quand ce n'est pas reference) -- seule `donnees_perimees` les grise,
+     * contrairement au pad de jog ci-dessus. */
+    ctx->axes_references_connus = e->axes_references;
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_IDLE_HOME_NB; i++) {
+        jog_bouton_definir_desactive(ctx->home_boutons[i], donnees_perimees);
     }
 
     /* --- Grisage integral, style RESOLU (spec tache 3) : cellules,

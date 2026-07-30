@@ -62,7 +62,30 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
     /*Size of the memory available for `lv_malloc()` in bytes (>= 2kB)*/
-    #define LV_MEM_SIZE (64 * 1024U)          /*[bytes]*/
+    /* 256 Ko, PAS les 64 Ko par defaut de LVGL (jalon 3b, tache 5). Ce pool
+     * fixe est celui ou LVGL taille AUSSI ses tampons de calque intermediaires
+     * transitoires pendant le rendu (lv_draw_layer_alloc_buf), pas seulement
+     * les objets. Mesure sur l'accueil idle (~70 widgets) + une modale de
+     * confirmation par-dessus : pic a ~60 Ko (lv_mem_monitor max_used), dont
+     * ~42 Ko d'objets persistants et ~18 Ko de calques transitoires (le coin
+     * arrondi de la boite de dialogue est peint via un calque ARGB de
+     * ~17,6 Ko). A 64 Ko, ce calque ne trouvait plus de bloc libre contigu :
+     * lv_draw_buf_create() rendait NULL, et le repartiteur de rendu
+     * (lv_draw_dispatch_layer) reessayait le MEME calque a l'infini -- process
+     * bloque a 100 % de CPU dans lv_tlsf_malloc/search_suitable_block, jamais
+     * la modale a l'ecran (diagnostic tache 5 : la capture idle+modale se
+     * figeait). Rien de specifique a l'appareil : ce pool fixe TLSF existe
+     * UNIQUEMENT ici (LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN, ci-dessus).
+     * Sur la K-Touch, firmware/sdkconfig pose CONFIG_LV_USE_CUSTOM_MALLOC=y +
+     * CONFIG_PT_LVGL_USE_PT_INTERNAL_MALLOC=y : lv_malloc y passe par
+     * l'allocateur PandaTouch adosse a la PSRAM (CONFIG_SPIRAM_USE_MALLOC=y),
+     * plusieurs Mo, jamais ce pool de 64 Ko -- l'appareil n'a donc jamais pu
+     * se bloquer la-dessus. C'est une limite du seul simulateur, dont le role
+     * est justement de rendre fidelement ce que rend l'appareil. 256 Ko : ~4x
+     * le pic mesure, marge pour les ecrans encore a venir de ce jalon
+     * (temperatures, macros) et pour la fragmentation TLSF, tout en restant
+     * modeste sur un hote. */
+    #define LV_MEM_SIZE (256 * 1024U)          /*[bytes]*/
 
     /*Size of the memory expand for `lv_malloc()` in bytes*/
     #define LV_MEM_POOL_EXPAND_SIZE 0

@@ -298,6 +298,17 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         nouveau.impression_en_pause = false;
         break;
 
+    case 13:
+        /* Tache 5, jalon 3b : arriere-plan de --scenario 13 (simulateur/
+         * main.c), qui ouvre en plus la confirmation de homing par-dessus --
+         * IDENTIQUE au scenario 10 juste en-dessous (empile ici, pas
+         * duplique) : au repos (ECRAN_ACCUEIL_IDLE, jamais ECRAN_ACCUEIL,
+         * contrairement au repli "scenario 3" que suivent 5/6/7/8/9 -- une
+         * confirmation de HOMING n'a de sens que sur l'accueil au repos) ET
+         * tous les axes deja references (necessaire pour que Home X declenche
+         * reellement la confirmation, spec tache 5 §7 -- un axe NON reference
+         * enverrait le gcode direct, sans dialogue, ce que cette capture ne
+         * veut pas montrer). */
     case 10:
         /* Palier « CR-10 » (tache 2, jalon 3a) : mono-extrudeur + plateau
          * chauffant deja etablis par le preambule ci-dessus, rien a changer

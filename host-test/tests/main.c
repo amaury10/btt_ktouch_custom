@@ -23,6 +23,7 @@ void suite_widgets(void);
 void suite_ecran_accueil(void);
 void suite_ecran_accueil_idle(void);
 void suite_ecran_accueil_idle_jog(void);
+void suite_ecran_accueil_idle_home(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -125,6 +126,12 @@ int main(void)
      * suite_ecran_configuration() (habillage construit), voir le
      * commentaire de tete de suite_ecran_accueil_idle_jog(). */
     suite_ecran_accueil_idle_jog();
+
+    /* Tache 5 (jalon 3b) : boutons de homing + confirmation. Meme garde
+     * d'ordonnancement que suite_ecran_accueil_idle_jog() juste au-dessus
+     * (boucle simulee demarree par suite_commandes()) -- voir le commentaire
+     * de tete de suite_ecran_accueil_idle_home() dans test_ecran_accueil_idle.c. */
+    suite_ecran_accueil_idle_home();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

@@ -534,6 +534,40 @@ int main(int argc, char **argv)
              * initiale de clavier_ouvrir() apparaît dans la textarea
              * exactement comme une saisie tactile l'aurait laissée. */
             clavier_ouvrir("Printer address", "192.168.1.42", CLAVIER_TEXTE, demo_clavier_rappel, NULL);
+        } else if (app == APP_ACCUEIL && scenario == 13) {
+            /* Tâche 5 (jalon 3b) : dialogue de confirmation de homing
+             * par-dessus ECRAN_ACCUEIL_IDLE (empilé plus haut par la logique
+             * idle/impression commune, `backend_factice_scenario(13)`
+             * produit le MÊME état repos + axes entièrement référencés que le
+             * scénario 10 -- voir son commentaire dans backend_factice.c --
+             * pour que "Home X" ait effectivement de quoi confirmer). Comme
+             * le scénario 6 ci-dessus pour "Cancel print?" : rien ici ne
+             * simule de tactile (voir le commentaire de tête de ce fichier),
+             * donc pas de vrai clic sur le bouton "Home X" réel de
+             * ecran_accueil_idle.c -- navigation.h ne rend jamais le
+             * contexte d'un écran empilé à cet appelant (les écrans cachent
+             * leurs widgets dans leur propre contexte, voir
+             * ecran_accueil_idle.h), atteindre le VRAI bouton depuis ce
+             * fichier serait donc plus retors que la valeur ajoutée : appel
+             * DIRECT à confirmation_ouvrir_ex(), avec les MÊMES constantes
+             * partagées (ECRAN_ACCUEIL_IDLE_HOME_*, ecran_accueil_idle.h) que
+             * home_bouton_cb() -- jamais une copie tapée à la main qui
+             * pourrait diverger, exactement le choix documenté par le
+             * commentaire de tête de ces constantes.
+             *
+             * Aucun afficheur_pomper() supplémentaire ici : exactement comme
+             * les scénarios 5/6/8 ci-dessus, l'unique pompe plus bas rend d'un
+             * coup l'accueil idle (~70 widgets) ET le dialogue. Une version de
+             * cette tâche avait cru devoir pré-rendre l'écran de fond seul
+             * d'abord (le process se bloquait sinon à 100 % de CPU dans
+             * lv_tlsf_malloc) : c'était le symptôme d'un pool LVGL trop petit,
+             * pas d'un ordre de rendu à respecter -- LV_MEM_SIZE relevé à
+             * 256 Ko dans lv_conf.h (voir son commentaire pour le mécanisme
+             * exact). Le pré-rendu masquait le blocage mais laissait la modale
+             * à 0x0, jamais visible ; il a donc été retiré. */
+            confirmation_ouvrir_ex(ECRAN_ACCUEIL_IDLE_HOME_TITRES[ECRAN_ACCUEIL_IDLE_HOME_X],
+                                    ECRAN_ACCUEIL_IDLE_HOME_MESSAGE, ECRAN_ACCUEIL_IDLE_HOME_ACTION, true,
+                                    ECRAN_ACCUEIL_IDLE_HOME_DECLINER, demo_confirmation_rappel, NULL);
         }
 
         /* Un cycle de pompe LVGL suffit à laisser rendre l'écran une

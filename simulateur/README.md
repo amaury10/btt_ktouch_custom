@@ -146,6 +146,16 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
     (`commande()`, `arguments_json = {"nom":"<macro>"}`) : nom connu →
     `ESP_OK`, `MACRO_ECHEC` → `ESP_FAIL`, nom inconnu ou `arguments_json`
     absent/illisible → `ESP_ERR_NOT_SUPPORTED`.
+  - `13` (tâche 5, jalon 3b, mode capture uniquement) : backend factice
+    IDENTIQUE au scénario 10 (« CR-10 », au repos, axes X/Y/Z tous
+    référencés — voir `backend_factice.c`), mais ouvre EN PLUS, par-dessus
+    `ECRAN_ACCUEIL_IDLE` déjà empilé, le dialogue de confirmation de homing
+    (`confirmation_ouvrir_ex()`, mêmes constantes partagées
+    `ECRAN_ACCUEIL_IDLE_HOME_*` que le vrai bouton « Home X » de
+    `ecran_accueil_idle.c`) — même schéma que `5`/`6` sur l'écran
+    d'impression, mais sur l'accueil au repos : un axe DOIT déjà être
+    référencé pour que la capture montre la confirmation plutôt que l'envoi
+    direct (spec §7). Sert uniquement à produire `idle-home-confirm.png`.
   - tout autre numéro retombe sur le comportement du scénario 3 (voir
     `backend_factice_rafraichir()`).
 - `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`
