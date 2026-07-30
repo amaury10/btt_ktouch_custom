@@ -25,6 +25,7 @@ void suite_ecran_accueil_idle(void);
 void suite_ecran_accueil_idle_jog(void);
 void suite_ecran_accueil_idle_home(void);
 void suite_ecran_accueil_idle_temp(void);
+void suite_ecran_accueil_idle_macros(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -139,6 +140,12 @@ int main(void)
      * ci-dessus -- voir le commentaire de tete de
      * suite_ecran_accueil_idle_temp() dans test_ecran_accueil_idle.c. */
     suite_ecran_accueil_idle_temp();
+
+    /* Tache 7 (jalon 3b) : bouton Macros (visibilite + navigation vers
+     * ECRAN_MACROS). Meme garde d'ordonnancement que les trois suites
+     * ci-dessus -- voir le commentaire de tete de
+     * suite_ecran_accueil_idle_macros() dans test_ecran_accueil_idle.c. */
+    suite_ecran_accueil_idle_macros();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

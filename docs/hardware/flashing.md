@@ -79,9 +79,14 @@ jalon 1, pas la mire elle-même :
   champs « Printer address » et « Machine type », valeur « Not configured »
   tant que rien n'a été saisi, bouton « Save ». C'est l'état normal d'un
   premier démarrage, pas une panne.
-- **Appareil déjà configuré** : écran d'accueil Klipper directement (tuiles de
-  température, progression d'impression, etc.), sans l'écran de configuration
-  par-dessus.
+- **Appareil déjà configuré** : écran d'accueil Klipper directement — l'accueil
+  IMPRESSION (tuiles de température, progression, boutons Pause/Cancel/E-STOP)
+  si une impression est en cours au démarrage, sinon l'accueil IDLE (tuiles de
+  température par palier d'outils, position XYZ, pad de jog/homing, bouton
+  Macros) quand la machine est au repos — c'est ce dernier que rencontrera
+  l'utilisateur au démarrage dans l'immense majorité des cas (voir
+  `accueil_choix.h` pour le critère, et `ecran_accueil_idle.c` pour l'écran
+  lui-même). Sans l'écran de configuration par-dessus dans les deux cas.
 - **Écran ou tactile en panne** (`pt_display_init()` en échec, ou GT911
   muet) : l'appareil reste diagnosticable à distance (WiFi, `/log`, `/state`,
   `/revert`) même sans rien afficher — voir le commentaire en tête

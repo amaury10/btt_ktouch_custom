@@ -80,11 +80,19 @@
 #include "backend.h"
 #include "clavier.h"
 #include "confirmation.h"
+#include "ecran_macros.h" /* ECRAN_MACROS (tache 7) */
 #include "habillage.h" /* habillage_notifier() */
+#include "journal.h" /* JOURNAL_ERREUR (tache 7) */
 #include "klipper_gcode.h"
 #include "klipper_paliers.h"
+#include "navigation.h" /* navigation_empiler() (tache 7) */
 #include "source_etat.h"
 #include "tuile.h" /* ui_format_temperature() */
+
+/* Tache 7 : etiquette de journalisation de cet ecran, meme convention que TAG
+ * dans app_main.c -- utilisee uniquement pour journaliser un echec de
+ * navigation_empiler(&ECRAN_MACROS) (voir bouton_macros_cb() plus bas). */
+static const char *TAG = "ecran_accueil_idle";
 
 #define LARGEUR_CONTENU 800
 #define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
@@ -935,6 +943,47 @@ static void home_bouton_cb(lv_event_t *e)
     }
 }
 
+/* Tache 7 : navigue vers ECRAN_MACROS (l'ecran existant du 3a, cablage reel
+ * ici -- le placeholder de la tache 3 n'avait aucun rappel de clic, voir le
+ * commentaire de tete de ce fichier). Meme idiome que bouton_macros_cb() dans
+ * ecran_accueil.c (une navigation, pas une commande -- aucun passage par
+ * ui_commander()/executer_commande(), la navigation elle-meme reste sure hors
+ * ligne) MAIS, contrairement a lui, l'esp_err_t de navigation_empiler() EST
+ * verifie et journalise en cas d'echec (meme discipline que app_main.c pour
+ * ses propres empilements, voir ses JOURNAL_ERREUR) : un bouton du dernier
+ * jalon qui echoue silencieusement a naviguer (pile pleine, allocation
+ * refusee -- improbable ici puisque ce bouton vit au sommet de la pile juste
+ * au-dessus de l'accueil, mais jamais impossible) laisserait l'utilisateur
+ * taper dans le vide sans le moindre indice.
+ *
+ * Code numerique (%d), PAS esp_err_to_name() : ce fichier fait partie de
+ * ui/apps, compile aussi bien pour l'appareil que pour le harnais hote (voir
+ * host-test/CMakeLists.txt) -- esp_err_to_name() n'existe pas dans le shim
+ * esp_err.h utilise cote hote (core/boucle.c, seul autre appelant de cette
+ * fonction dans ce depot, n'est lui-meme JAMAIS compile hors ESP-IDF, voir le
+ * commentaire de tete de host-test/CMakeLists.txt). Un code numerique reste
+ * suffisant pour du diagnostic (les valeurs ESP_ERR_* sont documentees dans
+ * shim/esp_err.h / esp_err.h ESP-IDF).
+ *
+ * Garde defensive sur LV_OBJ_FLAG_HIDDEN, pas LV_STATE_DISABLED : ce bouton
+ * ne porte jamais cet etat, meme sur donnees_perimees (voir mettre_a_jour()
+ * plus bas et son commentaire "Rangee Macros" pour ce choix delibere) --
+ * naviguer vers la liste de macros reste sans danger meme hors ligne. Un
+ * doigt reel ne peut pas atteindre un objet cache (LVGL le retire du scrutin
+ * tactile), mais lv_obj_send_event(), le seam de test, si -- meme
+ * raisonnement que jog_bouton_cb()/home_bouton_cb() pour LV_STATE_DISABLED. */
+static void bouton_macros_cb(lv_event_t *e)
+{
+    lv_obj_t *cible = lv_event_get_target(e);
+    if (cible == NULL || lv_obj_has_flag(cible, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
+    esp_err_t erreur = navigation_empiler(&ECRAN_MACROS);
+    if (erreur != ESP_OK) {
+        JOURNAL_ERREUR(TAG, "navigation_empiler(macros) a echoue (code %d)", (int)erreur);
+    }
+}
+
 static void ecran_accueil_idle_construire(lv_obj_t *parent, void *contexte)
 {
     ecran_accueil_idle_ctx_t *ctx = contexte;
@@ -1102,18 +1151,34 @@ static void ecran_accueil_idle_construire(lv_obj_t *parent, void *contexte)
         lv_obj_add_event_cb(bouton, preset_bouton_cb, LV_EVENT_CLICKED, &ctx->preset_infos[i]);
     }
 
-    /* Tache 3 : placeholder statique -- aucun rappel de clic pose ici, le
-     * cablage reel (visibilite selon nb_macros, navigation vers
-     * ECRAN_MACROS) arrive a la tache 7 (voir le brief : "Macros (tache 7)
-     * -- en tache 3, un placeholder"). */
+    /* Tache 7 : cablage reel du bouton Macros (visibilite selon nb_macros,
+     * navigation vers ECRAN_MACROS -- voir bouton_macros_cb() plus haut).
+     * Bare lv_obj_create() n'est PAS cliquable par defaut dans ce depot
+     * (contrairement a lv_button_create(), voir le commentaire de
+     * cellule_creer() plus haut pour le meme piege) : LV_OBJ_FLAG_CLICKABLE
+     * pose explicitement ici, jamais suppose.
+     *
+     * AUCUN bouton "Imprimer"/"Print" sur cet ecran : le navigateur de
+     * fichiers qui permettrait de choisir un fichier a imprimer arrive au
+     * jalon 3d, et poser ici un bouton qui ne ferait rien (ou pire, un
+     * bouton desactive en permanence) serait exactement le "bouton mort"
+     * que le brief de cette tache interdit explicitement -- mieux vaut
+     * l'absence totale d'un controle que sa presence trompeuse. */
     ctx->bouton_macros = lv_obj_create(parent);
     lv_obj_remove_style_all(ctx->bouton_macros);
     lv_obj_set_style_bg_color(ctx->bouton_macros, lv_color_hex(COULEUR_BOUTON), 0);
     lv_obj_set_style_bg_opa(ctx->bouton_macros, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(ctx->bouton_macros, 10, 0);
     lv_obj_clear_flag(ctx->bouton_macros, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(ctx->bouton_macros, LARGEUR_CONTENU - 2 * MARGE, MACROS_HAUTEUR);
     lv_obj_set_pos(ctx->bouton_macros, MARGE, MACROS_Y);
+    /* Visibilite initiale : cachee jusqu'au premier mettre_a_jour() (voir
+     * son commentaire "Rangee Macros" -- nb_macros n'est connu qu'une fois
+     * l'etat backend recu), meme politique que les cellules de temperature
+     * (cellule_creer(), plus haut) qui demarrent toutes masquees. */
+    lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(ctx->bouton_macros, bouton_macros_cb, LV_EVENT_CLICKED, NULL);
 
     ctx->label_macros = lv_label_create(ctx->bouton_macros);
     lv_obj_set_style_text_font(ctx->label_macros, &lv_font_montserrat_20, 0);
@@ -1322,13 +1387,34 @@ static void ecran_accueil_idle_mettre_a_jour(const void *etat, bool donnees_peri
     lv_obj_set_style_text_color(ctx->outil_actif_nom, lv_color_hex(couleur_texte), 0);
     /* Rangee Macros : non listee explicitement par le brief de la tache 3
      * ("cellules, position, controles"), grisee quand meme pour rester
-     * visuellement coherente avec le reste de l'ecran perime -- ce
-     * placeholder ne porte de toute facon aucun etat LV_STATE_DISABLED
-     * avant la tache 7. Le selecteur de pas, lui, N'EST PAS grise sur
-     * donnees_perimees (ni desactive) : choisir un pas reste un reglage
-     * purement local a l'ecran, sans effet tant qu'aucun jog n'est envoye
-     * -- le grisage des boutons de jog ci-dessus est deja la garde reelle. */
+     * visuellement coherente avec le reste de l'ecran perime. Tache 7 :
+     * ce bouton reste maintenant reellement cliquable (bouton_macros_cb()
+     * plus haut), et le choix delibere est de NE JAMAIS le desactiver sur
+     * donnees_perimees (contrairement au pad de jog/homing) -- naviguer
+     * vers la liste de macros n'est pas une commande de mouvement, c'est
+     * sans danger meme avec un etat perime ou hors ligne (la liste elle-meme
+     * grise integralement son propre contenu des l'arrivee si besoin, voir
+     * ecran_macros.c). Le regrisage du texte ci-dessous reste donc purement
+     * cosmetique : coherent visuellement avec le reste d'un ecran perime,
+     * jamais un moyen de bloquer l'acces aux macros -- meme raisonnement que
+     * le selecteur de pas juste en dessous, qui n'est PAS grise du tout
+     * (reglage purement local, sans effet tant qu'aucun jog n'est envoye). */
     lv_obj_set_style_text_color(ctx->label_macros, lv_color_hex(couleur_texte), 0);
+
+    /* Tache 7 : visibilite du bouton Macros, ssi au moins une macro existe
+     * (brief : "visible si nb_macros > 0") -- reevaluee a CHAQUE appel,
+     * meme discipline systematique que tout le reste de cette fonction
+     * (jamais incremental) : une machine qui perdrait toutes ses macros
+     * (reconfiguration Klipper) doit voir ce bouton disparaitre au prochain
+     * appel, pas rester visible sur la foi d'un etat perime. Cache => aucun
+     * clic ne peut plus l'atteindre (LVGL retire un objet cache du scrutin
+     * tactile, et bouton_macros_cb() refuse explicitement lv_obj_send_event()
+     * sur un objet cache de toute facon, voir son commentaire). */
+    if (e->nb_macros > 0) {
+        lv_obj_clear_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 const ecran_desc_t ECRAN_ACCUEIL_IDLE = {

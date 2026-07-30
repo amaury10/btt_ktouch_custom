@@ -10,7 +10,11 @@
  * Contrôles : le pad de jog XY/Z + sélecteur de pas (tâche 4, jalon 3b) et
  * les quatre boutons de homing avec confirmation (tâche 5) sont désormais
  * réels, dans le même conteneur `zone_controles` que la tâche 3 avait
- * réservé. Rangée Macros : encore un PLACEHOLDER (câblage réel tâche 7).
+ * réservé. Rangée Macros (tâche 7) : réelle elle aussi -- visible ssi
+ * `nb_macros > 0`, un tap navigue vers ECRAN_MACROS (l'écran du 3a). AUCUN
+ * bouton « Imprimer » sur cet écran : le navigateur de fichiers arrive au
+ * jalon 3d, un bouton mort n'a pas sa place ici (voir ecran_accueil_idle.c,
+ * le commentaire de tête de la construction du bouton Macros).
  *
  * Tâche 6 (jalon 3b) : chaque cellule de température devient tapable --
  * ouvre le clavier numérique (clavier.h) prérempli avec la consigne
@@ -232,7 +236,7 @@ typedef struct ecran_accueil_idle_ctx_s {
     lv_obj_t                         *preset_boutons[ECRAN_ACCUEIL_IDLE_PRESET_NB];
     ecran_accueil_idle_preset_info_t  preset_infos[ECRAN_ACCUEIL_IDLE_PRESET_NB];
 
-    lv_obj_t *bouton_macros;   /* placeholder tache 3, cablage reel tache 7 */
+    lv_obj_t *bouton_macros;   /* visible ssi nb_macros > 0, clic -> ECRAN_MACROS (tache 7) */
     lv_obj_t *label_macros;    /* enfant direct de bouton_macros, pour le regrisage */
 } ecran_accueil_idle_ctx_t;
 

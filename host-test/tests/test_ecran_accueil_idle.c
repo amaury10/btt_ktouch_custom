@@ -203,6 +203,100 @@ void suite_ecran_accueil_idle(void)
 }
 
 /* ------------------------------------------------------------------------
+ * Tache 7 (jalon 3b) : bouton Macros -- visible ssi nb_macros > 0, un clic
+ * empile ECRAN_MACROS (profondeur 1 -> 2). Contrairement aux autres suites
+ * de ce fichier, celle-ci empile ECRAN_ACCUEIL_IDLE via navigation_empiler()
+ * plutot que de le construire directement (comme suite_ecran_accueil_idle()
+ * en tete de ce fichier) : prouver un changement REEL de profondeur exige un
+ * vrai sommet de pile pour naviguer depuis. Sans accesseur public vers le
+ * ctx d'un ecran empile (navigation.h n'en expose aucun, deliberement --
+ * voir son commentaire de tete), le bouton est retrouve par parcours de
+ * l'arbre LVGL depuis lv_screen_active() : meme idiome que
+ * dernier_enfant_calque_superieur()/dernier_msgbox() plus haut dans ce
+ * fichier, applique ici a l'ecran plutot qu'au calque superieur --
+ * navigation_empiler() cree toujours le conteneur du nouvel ecran comme
+ * DERNIER enfant du conteneur racine (voir navigation.c), et
+ * ecran_accueil_idle_construire() cree toujours bouton_macros en DERNIER
+ * (apres les cellules, la ligne de position, zone_controles et
+ * zone_preregalges -- voir son ordre de construction).
+ * ------------------------------------------------------------------------ */
+void suite_ecran_accueil_idle_macros(void)
+{
+    printf("suite : ecran accueil idle (macros)\n");
+
+    if (!habillage_est_construit() || !source_etat_sim_est_demarre()) {
+        printf("ERREUR: suite_ecran_accueil_idle_macros() exige que suite_ecran_configuration() ET "
+               "suite_commandes() aient deja tourne -- verifier l'ordre dans tests/main.c.\n");
+        exit(1);
+    }
+
+    navigation_init(lv_screen_active()); /* pile vide, meme technique defensive que _temp() ci-dessus */
+    VERIFIER(navigation_empiler(&ECRAN_ACCUEIL_IDLE) == ESP_OK);
+    VERIFIER(navigation_profondeur() == 1);
+
+    lv_obj_t *ecran = lv_screen_active();
+    lv_obj_t *conteneur = lv_obj_get_child(ecran, lv_obj_get_child_count(ecran) - 1);
+    VERIFIER(conteneur != NULL);
+    /* 9 cellules + position + outil actif + zone_controles + zone_preregalges
+     * + bouton_macros = 14 enfants directs, jamais un 15e (ce serait un
+     * bouton "Imprimer" non documente -- ecran_accueil_idle_ctx_t, voir
+     * ecran_accueil_idle.h, ne declare structurellement AUCUN champ de ce
+     * genre : aucun code ne peut en lire un qui n'existe pas). */
+    VERIFIER(lv_obj_get_child_count(conteneur) == 14);
+    lv_obj_t *bouton_macros = lv_obj_get_child(conteneur, lv_obj_get_child_count(conteneur) - 1);
+    VERIFIER(bouton_macros != NULL);
+    lv_obj_t *label_macros = lv_obj_get_child(bouton_macros, 0);
+    VERIFIER(label_macros != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(label_macros), "Macros");
+
+    etat_klipper_t etat;
+    memset(&etat, 0, sizeof(etat));
+    etat.nb_extrudeurs = 1;
+    etat.extrudeurs[0].presente = true;
+
+    /* --- nb_macros == 0 : cache -- deja le cas juste apres construire()
+     * (voir "Visibilite initiale" dans ecran_accueil_idle.c), mais
+     * mettre_a_jour() doit le CONFIRMER explicitement, jamais herite par
+     * hasard de l'etat de construction (meme discipline systematique que le
+     * reste de cette fonction). ------------------------------------------ */
+    etat.nb_macros = 0;
+    navigation_mettre_a_jour(&etat, false);
+    VERIFIER(lv_obj_has_flag(bouton_macros, LV_OBJ_FLAG_HIDDEN));
+
+    /* Un clic sur un bouton cache n'empile rien -- garde defensive de
+     * bouton_macros_cb() sur LV_OBJ_FLAG_HIDDEN, meme raisonnement que
+     * jog_bouton_cb()/home_bouton_cb() pour LV_STATE_DISABLED : un vrai
+     * doigt ne peut pas atteindre un objet cache, mais lv_obj_send_event(),
+     * le seam de test, si. */
+    lv_obj_send_event(bouton_macros, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 1);
+
+    /* --- nb_macros > 0 : visible, un clic empile ECRAN_MACROS ----------- */
+    etat.nb_macros = 3;
+    navigation_mettre_a_jour(&etat, false);
+    VERIFIER(!lv_obj_has_flag(bouton_macros, LV_OBJ_FLAG_HIDDEN));
+
+    lv_obj_send_event(bouton_macros, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "macros");
+
+    navigation_depiler();
+    VERIFIER(navigation_profondeur() == 1);
+
+    /* --- choix documente (ecran_accueil_idle.c, commentaire "Rangee
+     * Macros") : ce bouton n'est JAMAIS desactive sur donnees_perimees,
+     * contrairement au pad de jog/homing -- naviguer vers la liste de
+     * macros reste sans danger meme avec un etat perime. Preuve
+     * comportementale : le clic empile toujours ECRAN_MACROS ici. --------- */
+    navigation_mettre_a_jour(&etat, true);
+    VERIFIER(!lv_obj_has_flag(bouton_macros, LV_OBJ_FLAG_HIDDEN));
+    lv_obj_send_event(bouton_macros, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    navigation_depiler();
+    VERIFIER(navigation_profondeur() == 1);
+}
+
+/* ------------------------------------------------------------------------
  * Tache 4 (jalon 3b) : trace du seam pad de jog -> ui_commander(), et
  * grisage par axe. DOIT rester APRES suite_commandes() dans tests/main.c --
  * reutilise la boucle simulee deja demarree par elle (singleton
