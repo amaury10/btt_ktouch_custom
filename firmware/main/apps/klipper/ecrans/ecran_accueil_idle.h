@@ -12,6 +12,16 @@
  * réels, dans le même conteneur `zone_controles` que la tâche 3 avait
  * réservé. Rangée Macros : encore un PLACEHOLDER (câblage réel tâche 7).
  *
+ * Tâche 6 (jalon 3b) : chaque cellule de température devient tapable --
+ * ouvre le clavier numérique (clavier.h) prérempli avec la consigne
+ * courante, valide en [0, 350] °C, envoie SET_HEATER_TEMPERATURE. Au palier
+ * COMPACT (spec §6 : la cellule n'a plus la place d'un réglage direct), la
+ * « vue détaillée » minimale pour ce jalon EST ce même clavier ouvert sur le
+ * chauffeur tapé -- PAS un sous-écran séparé avec graphe/historique, hors
+ * scope de ce jalon (voir cellule_bouton_cb() dans ecran_accueil_idle.c).
+ * Une rangée de préréglages (PLA/PETG/ABS/Off) sous `zone_controles` envoie
+ * directement la paire buse active + plateau sans passer par le clavier.
+ *
  * `ecran_accueil_idle_ctx_t` est exposé ici plutôt qu'opaque, même raison
  * que ecran_accueil_ctx_t (voir son en-tête) : host-test/tests/
  * test_ecran_accueil_idle.c relit les libellés via lv_label_get_text() pour
@@ -37,6 +47,71 @@ typedef struct {
     lv_obj_t *valeur;
     lv_obj_t *consigne;
 } ecran_accueil_idle_cellule_t;
+
+/* user_data du rappel de clic d'UNE cellule de température (tâche 6) --
+ * même forme que ecran_accueil_idle_jog_info_t/home_info_t : un tableau
+ * PARALLÈLE à `cellules[]`, indexé EXACTEMENT pareil (voir
+ * ecran_accueil_idle_mettre_a_jour() dans le .c, qui remplit `cellules[i]`
+ * ET `cellule_infos[i]` du même indice `total` à chaque appel). Passé
+ * DIRECTEMENT comme `contexte` à clavier_ouvrir() (pas via un champ
+ * "en attente" du ctx d'écran, contrairement à home_masque_en_attente) :
+ * clavier_ouvrir() relaie son `contexte` tel quel au rappel, donc CE
+ * pointeur suffit à identifier quel chauffeur a été tapé sans jamais écrire
+ * d'état partagé avant l'ouverture -- rien à cloner-avant-ouverture, donc
+ * rien que la garde du T5 (home_masque_en_attente + confirmation_est_ouverte())
+ * ait besoin de protéger ici : clavier_ouvrir() est déjà lui-même un
+ * singleton qui refuse une seconde ouverture (voir clavier.h), et cette
+ * fonction n'écrit jamais rien avant de l'appeler. */
+typedef struct {
+    struct ecran_accueil_idle_ctx_s *ctx; /* jamais NULL une fois construire() passe */
+    bool     est_plateau;      /* true => "heater_bed", false => extrudeurs[indice_extrudeur] */
+    uint8_t  indice_extrudeur; /* valide seulement si !est_plateau, voir etat_klipper_t::extrudeurs */
+    /* Consigne courante (°C, entier -- klipper_gcode_consigne_temp() ne
+     * connaît que des cibles entières) : rafraîchie à CHAQUE
+     * mettre_a_jour() depuis etat_klipper_t::extrudeurs[i].consigne /
+     * ::plateau.consigne (bornée [0, 350], voir consigne_u16() dans le .c),
+     * jamais relue depuis l'état backend au moment du clic -- même
+     * discipline que ctx->selecteur_pas pour le pas de jog : ce que le clic
+     * lit doit être ce que le dernier rendu a montré à l'utilisateur, pas un
+     * état backend qui a pu changer entre-temps. */
+    uint16_t consigne_courante;
+} ecran_accueil_idle_cellule_info_t;
+
+/* Titres du clavier numérique de température (tâche 6), copie FIXE
+ * exportée -- même raison que ECRAN_ACCUEIL_IDLE_HOME_TITRES ci-dessous :
+ * cellule_bouton_cb() (ecran_accueil_idle.c) ET la capture du simulateur
+ * (--scenario 14, aucun tactile simulé ne peut atteindre une vraie cellule)
+ * DOIVENT ouvrir EXACTEMENT le même clavier, jamais deux chaînes tapées à la
+ * main qui pourraient diverger. */
+extern const char ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE[];
+extern const char ECRAN_ACCUEIL_IDLE_TEMP_TITRE_PLATEAU[];
+
+/* Bornes de saisie du clavier numérique de température (tâche 6, spec :
+ * "borner à [0, 350]") -- nommées pour que cellule_clavier_rappel() (le
+ * rappel) et un futur test ne puissent jamais diverger sur la borne haute. */
+#define ECRAN_ACCUEIL_IDLE_TEMP_MIN 0
+#define ECRAN_ACCUEIL_IDLE_TEMP_MAX 350
+
+/* Préréglages (tâche 6, brief : "PLA 210/60, PETG 240/80, ABS 250/100,
+ * Off") -- index FIXE dans `preset_boutons`/`preset_infos`, même convention
+ * que ECRAN_ACCUEIL_IDLE_HOME_* plus haut. */
+#define ECRAN_ACCUEIL_IDLE_PRESET_PLA  0
+#define ECRAN_ACCUEIL_IDLE_PRESET_PETG 1
+#define ECRAN_ACCUEIL_IDLE_PRESET_ABS  2
+#define ECRAN_ACCUEIL_IDLE_PRESET_OFF  3
+#define ECRAN_ACCUEIL_IDLE_PRESET_NB   4
+
+/* user_data d'un rappel de clic de préréglage : le contexte de l'écran (pour
+ * lire l'outil actif AU MOMENT DU CLIC, même discipline que
+ * jog_bouton_cb()/home_bouton_cb() pour le pas/les axes référencés) et les
+ * deux cibles (°C) que CE préréglage précis pose -- buse ACTIVE puis
+ * plateau, décision figée (task-6-brief.md) : toujours DEUX gcodes, jamais
+ * un seul combiné. */
+typedef struct {
+    struct ecran_accueil_idle_ctx_s *ctx;
+    uint16_t cible_buse;
+    uint16_t cible_plateau;
+} ecran_accueil_idle_preset_info_t;
 
 /* Une par extrudeur possible plus le plateau (voir KLIPPER_EXTRUDEURS_MAX
  * dans etat_klipper.h) : le pool est dimensionné au pire cas (palier
@@ -110,8 +185,17 @@ extern const char        ECRAN_ACCUEIL_IDLE_HOME_DECLINER[];
 
 typedef struct ecran_accueil_idle_ctx_s {
     ecran_accueil_idle_cellule_t cellules[ECRAN_ACCUEIL_IDLE_CELLULES_MAX];
+    /* Tâche 6 : tableau PARALLÈLE à `cellules[]`, même indexation (voir le
+     * commentaire de ecran_accueil_idle_cellule_info_t plus haut). */
+    ecran_accueil_idle_cellule_info_t cellule_infos[ECRAN_ACCUEIL_IDLE_CELLULES_MAX];
     lv_obj_t *position;        /* "X:.. Y:.. Z:.." (1 decimale, "--" si l'axe n'est pas reference) */
     lv_obj_t *outil_actif_nom; /* "Active: T.." / "Active: --" (aucun extrudeur) */
+    /* Tâche 6 : dernier `e->outil_actif` vu par mettre_a_jour(), relu par
+     * preset_bouton_cb() AU MOMENT DU CLIC -- même discipline que
+     * axes_references_connus pour le homing (voir plus bas) : le contexte de
+     * l'écran ne doit jamais être touché depuis le rappel de clic hors de ce
+     * genre de lecture différée. */
+    uint8_t   outil_actif_connu;
     lv_obj_t *zone_controles;  /* conteneur reserve (pad de jog + homing, taches 4/5) */
 
     /* Pad de jog (tache 4, jalon 3b) : voir ECRAN_ACCUEIL_IDLE_JOG_* plus
@@ -138,6 +222,15 @@ typedef struct ecran_accueil_idle_ctx_s {
     ecran_accueil_idle_home_info_t  home_infos[ECRAN_ACCUEIL_IDLE_HOME_NB];
     uint8_t                         axes_references_connus;
     uint8_t                         home_masque_en_attente;
+
+    /* Tâche 6 : rangée de préréglages, entre `zone_controles` et
+     * `bouton_macros` (voir ECRAN_ACCUEIL_IDLE_PRESET_* plus haut pour
+     * l'indexation). `zone_preregalges` est le conteneur flex qui les porte,
+     * même idiome que `selecteur_pas.racine` (widgets à largeur égale,
+     * flex_grow). */
+    lv_obj_t                         *zone_preregalges;
+    lv_obj_t                         *preset_boutons[ECRAN_ACCUEIL_IDLE_PRESET_NB];
+    ecran_accueil_idle_preset_info_t  preset_infos[ECRAN_ACCUEIL_IDLE_PRESET_NB];
 
     lv_obj_t *bouton_macros;   /* placeholder tache 3, cablage reel tache 7 */
     lv_obj_t *label_macros;    /* enfant direct de bouton_macros, pour le regrisage */

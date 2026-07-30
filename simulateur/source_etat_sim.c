@@ -281,3 +281,20 @@ bool source_etat_sim_derniere_commande(char *action, size_t taille_action,
     }
     return true;
 }
+
+bool source_etat_sim_avant_derniere_commande(char *action, size_t taille_action,
+                                              char *arguments_json, size_t taille_arguments)
+{
+    if (action == NULL || taille_action == 0 || g_file_taille < 2) {
+        return false;
+    }
+    /* Meme calcul que source_etat_sim_derniere_commande() ci-dessus, un cran
+     * plus tot dans la file circulaire (g_file_taille - 2, pas - 1). */
+    size_t indice = (g_file_tete + g_file_taille - 2) % FILE_PROFONDEUR;
+    const commande_t *cmd = &g_file[indice];
+    snprintf(action, taille_action, "%s", cmd->action);
+    if (arguments_json != NULL && taille_arguments > 0) {
+        snprintf(arguments_json, taille_arguments, "%s", cmd->avec_arguments ? cmd->arguments_json : "");
+    }
+    return true;
+}

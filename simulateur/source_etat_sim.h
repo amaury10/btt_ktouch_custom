@@ -96,3 +96,15 @@ void source_etat_sim_reset_echec(void);
  * vaut 0. */
 bool source_etat_sim_derniere_commande(char *action, size_t taille_action,
                                         char *arguments_json, size_t taille_arguments);
+
+/* EXPOSÉ POUR LES TESTS UNIQUEMENT (tâche 6, jalon 3b) : comme
+ * source_etat_sim_derniere_commande() ci-dessus, mais l'AVANT-DERNIÈRE
+ * commande poussée -- nécessaire pour prouver qu'un préréglage de
+ * température (tâche 6, ecran_accueil_idle.c) pousse VRAIMENT DEUX gcodes
+ * dans le MÊME clic (buse puis plateau) : source_etat_sim_cycle() dépile
+ * TOUTE la file d'un coup (voir traiter_commandes() dans
+ * source_etat_sim.c), impossible donc d'inspecter la première des deux
+ * commandes en cyclant entre les deux. Rend false SANS RIEN TOUCHER si
+ * moins de deux commandes sont actuellement en file. */
+bool source_etat_sim_avant_derniere_commande(char *action, size_t taille_action,
+                                              char *arguments_json, size_t taille_arguments);

@@ -24,6 +24,7 @@ void suite_ecran_accueil(void);
 void suite_ecran_accueil_idle(void);
 void suite_ecran_accueil_idle_jog(void);
 void suite_ecran_accueil_idle_home(void);
+void suite_ecran_accueil_idle_temp(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -132,6 +133,12 @@ int main(void)
      * (boucle simulee demarree par suite_commandes()) -- voir le commentaire
      * de tete de suite_ecran_accueil_idle_home() dans test_ecran_accueil_idle.c. */
     suite_ecran_accueil_idle_home();
+
+    /* Tache 6 (jalon 3b) : consignes de temperature manuelles + prereglages.
+     * Meme garde d'ordonnancement que suite_ecran_accueil_idle_jog()/_home()
+     * ci-dessus -- voir le commentaire de tete de
+     * suite_ecran_accueil_idle_temp() dans test_ecran_accueil_idle.c. */
+    suite_ecran_accueil_idle_temp();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

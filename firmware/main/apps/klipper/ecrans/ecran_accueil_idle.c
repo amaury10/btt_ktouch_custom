@@ -38,16 +38,49 @@
  * est un lv_obj_t normal, cliquable) sur Y-/Z-/le sélecteur. Découvert en
  * ouvrant la capture, corrigé ICI (92 px, pas 98) avec le même
  * _Static_assert que PAGINATION_Y dans ecran_macros.c pour que cette classe
- * de bug ne puisse plus jamais repasser inaperçue. */
+ * de bug ne puisse plus jamais repasser inaperçue.
+ *
+ * ÉCART tâche 6 (jalon 3b) : une rangée de PRÉRÉGLAGES (PLA/PETG/ABS/Off,
+ * spec §6) s'ajoute sous `zone_controles` -- PAS entre la zone de
+ * température et la ligne de position comme une première lecture du brief
+ * le suggérait : cet endroit-là appartient au budget "au-dessus du
+ * bandeau de notification" (voir le garde-fou BARRE_HAUTEUR_ECRAN +
+ * CONTROLES_Y + CONTROLES_HAUTEUR <= BANDEAU_Y_ECRAN plus bas), qui est déjà
+ * une ÉGALITÉ EXACTE (aucune marge) sans toucher à CONTROLES_HAUTEUR/
+ * JOG_BOUTON_HAUTEUR -- retailler ces derniers pour gagner de la place aurait
+ * réduit la cible tactile du pad de jog/homing, exactement ce que la tâche 4
+ * a dû agrandir (70 -> 92 px, voir plus haut) pour la rendre tactile-sûre :
+ * régresser cette taille pour loger les préréglages aurait défait ce travail
+ * pour un gain marginal. La rangée de préréglages va donc PLUS BAS,
+ * remplaçant l'emplacement qu'occupait MACROS_Y (qui recule d'autant, et
+ * rétrécit -- MACROS_HAUTEUR n'a toujours aucune contrainte, voir le
+ * commentaire de tâche 4 plus haut, câblage réel tâche 7). Cette rangée-là
+ * hérite donc de la MÊME acceptation que Macros avait déjà : elle NE PEUT
+ * PAS éviter structurellement les 60 derniers px absolus de l'écran (voir le
+ * commentaire de MACROS_Y plus bas pour le récit complet), une notification
+ * active peut donc la recouvrir transitoirement -- acceptable ici pour deux
+ * raisons que Macros n'avait pas besoin d'invoquer : (1) un envoi de
+ * consigne de température réussi ne pose JAMAIS de bannière (même politique
+ * que le jog, voir envoyer_gcode()/preset_bouton_cb() -- seule une ERREUR de
+ * saisie ou un échec ASYNCHRONE de commande en pose une, un cas rare) ; (2)
+ * les captures de cette tâche utilisent `--cycles 0` pour ce cliché
+ * (idle-prereglages.png), exactement la technique déjà établie par
+ * `--scenario 7 --cycles 0` (voir simulateur/README.md) pour une capture
+ * "au repos" sans bannière "host connected". */
 #include "ecran_accueil_idle.h"
 
+#include <errno.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
 
 #include "backend.h"
+#include "clavier.h"
 #include "confirmation.h"
+#include "habillage.h" /* habillage_notifier() */
 #include "klipper_gcode.h"
 #include "klipper_paliers.h"
 #include "source_etat.h"
@@ -118,8 +151,23 @@
 #define CONTROLES_Y        284
 #define CONTROLES_HAUTEUR   92
 
-#define MACROS_HAUTEUR       56
-#define MACROS_Y            380
+/* Tâche 6 : rangée de préréglages, juste sous `zone_controles` -- voir le
+ * commentaire de tête de ce fichier ("ÉCART tâche 6") pour pourquoi ici et
+ * pas entre la zone de température et la ligne de position. 24 px : même
+ * hauteur que JOG_BOUTON_HAUTEUR (rythme visuel cohérent avec le pad de jog/
+ * homing juste au-dessus), largement suffisant pour un libellé police 14
+ * ("PLA 210/60", le plus long des quatre) sur 187 px de large (voir
+ * PRESETS_LARGEUR_BOUTON plus bas). */
+#define PRESETS_Y         380
+#define PRESETS_HAUTEUR    24
+#define PRESETS_ECART_BOUTON 8 /* meme rythme que ECART_BOUTONS dans selecteur_pas.c */
+
+/* MACROS_HAUTEUR : 56 -> 28 (tâche 6). Toujours un placeholder (câblage réel
+ * tâche 7, voir son commentaire plus bas) : "rien ne dépend encore de sa
+ * hauteur exacte" reste vrai, 28 px reste assez pour UNE ligne de texte
+ * police 20 ("Macros", ~23-24 px de hauteur de ligne) centrée verticalement. */
+#define MACROS_HAUTEUR       28
+#define MACROS_Y            408
 
 /* Même convention que BARRE_HAUTEUR_ECRAN/BANDEAU_HAUTEUR_ECRAN/
  * BANDEAU_Y_ECRAN dans ecran_macros.c (voir son commentaire complet) : bande
@@ -150,8 +198,14 @@ _Static_assert(TEMP_ZONE_Y + ZONE_TEMP_HAUTEUR_MAX + ZONE_ECART == POSITION_Y,
                 "la ligne de position ne demarre plus juste sous la zone de temperature");
 _Static_assert(POSITION_Y + POSITION_HAUTEUR + ZONE_ECART == CONTROLES_Y,
                 "la zone de controles chevauche la ligne de position");
-_Static_assert(CONTROLES_Y + CONTROLES_HAUTEUR + ZONE_ECART == MACROS_Y,
-                "la rangee Macros chevauche la zone de controles");
+/* Tache 6 : la rangee de preregalges s'intercale desormais entre la zone de
+ * controles et la rangee Macros (voir le commentaire de tete "ECART tache
+ * 6"), qui recule et retrecit d'autant -- les deux _Static_assert suivants
+ * remplacent l'ancienne paire (CONTROLES->MACROS directement). */
+_Static_assert(CONTROLES_Y + CONTROLES_HAUTEUR + ZONE_ECART == PRESETS_Y,
+                "la rangee de preregalges chevauche la zone de controles");
+_Static_assert(PRESETS_Y + PRESETS_HAUTEUR + ZONE_ECART == MACROS_Y,
+                "la rangee Macros chevauche la rangee de preregalges");
 _Static_assert(MACROS_Y + MACROS_HAUTEUR == HAUTEUR_CONTENU,
                 "la rangee Macros deborde de la hauteur du contenu");
 _Static_assert(MARGE + OUTIL_ACTIF_LARGEUR <= LARGEUR_CONTENU - MARGE,
@@ -167,7 +221,17 @@ _Static_assert(MARGE + OUTIL_ACTIF_LARGEUR <= LARGEUR_CONTENU - MARGE,
  * rangee Macros est de toute facon la derniere du contenu (MACROS_Y +
  * MACROS_HAUTEUR == HAUTEUR_CONTENU, assert ci-dessus) et ne PEUT
  * structurellement pas eviter les 60 derniers px absolus de l'ecran, meme
- * probleme deja accepte tel quel par le placeholder de la tache 3. */
+ * probleme deja accepte tel quel par le placeholder de la tache 3.
+ *
+ * Tache 6 : NON PLUS applique a PRESETS_Y pour la meme raison -- voir le
+ * commentaire de tete de ce fichier ("ECART tache 6") pour pourquoi la
+ * rangee de preregalges vit elle aussi, deliberement, dans cette bande
+ * (retailler CONTROLES_HAUTEUR pour l'en sortir aurait regresse la cible
+ * tactile du pad de jog/homing) et pourquoi ce n'est pas un probleme dans la
+ * pratique : un envoi de consigne reussi ne pose jamais de banniere (meme
+ * politique que le jog, voir envoyer_gcode()), et les captures de cette
+ * tache utilisent `--cycles 0` pour eviter "host connected" sur
+ * idle-prereglages.png. */
 _Static_assert(BARRE_HAUTEUR_ECRAN + CONTROLES_Y + CONTROLES_HAUTEUR <= BANDEAU_Y_ECRAN,
                 "la zone de controles chevauche la bande du bandeau de notification de l'habillage");
 
@@ -283,6 +347,18 @@ _Static_assert(CONTROLES_PAD_INTERNE + JOG_PAD_LARGEUR + JOG_Z_ECART_COLONNE + J
 #define JOG_VITESSE_XY_MM_MIN 3000u
 #define JOG_VITESSE_Z_MM_MIN   600u
 
+/* Preregalges de temperature (tache 6, brief : "PLA 210/60, PETG 240/80,
+ * ABS 250/100, Off"). Off n'a pas besoin de sa propre paire de constantes
+ * nommees "PREREGLAGE_OFF_*" (0 EST la valeur, pas un choix arbitraire a
+ * documenter) -- klipper_gcode_consigne_temp() accepte deja 0 comme cible
+ * valide ("0 = eteindre", voir klipper_gcode.h). */
+#define PREREGLAGE_PLA_BUSE      210u
+#define PREREGLAGE_PLA_PLATEAU    60u
+#define PREREGLAGE_PETG_BUSE     240u
+#define PREREGLAGE_PETG_PLATEAU   80u
+#define PREREGLAGE_ABS_BUSE      250u
+#define PREREGLAGE_ABS_PLATEAU  100u
+
 /* Tampon suffisant pour {"script":"<gcode>"} : KLIPPER_GCODE_MAX (160,
  * klipper_gcode.h) plus la marge du wrapper JSON (guillemets, cle "script",
  * accolades) et de l'echappement des `\n` reels que klipper_gcode_jog()
@@ -355,7 +431,12 @@ static idle_geometrie_t geometrie_pour_palier(palier_outils_t palier)
     case PALIER_COMPACT:
     default:
         /* Spec tache 3 : "Au palier COMPACT, la valeur en 20 et pas de
-         * consigne inline (le tap->detail viendra en tache 6)." */
+         * consigne inline (le tap->detail viendra en tache 6)." Tache 6 :
+         * la "vue detaillee" a laquelle ce commentaire faisait reference EST
+         * desormais le clavier numerique (cellule_bouton_cb() plus bas),
+         * PAS un sous-ecran separe avec graphe/historique -- une vue riche
+         * de ce genre reste hors scope de ce jalon, voir le commentaire de
+         * tete de ecran_accueil_idle.h. */
         g.largeur = CELL_LARGEUR_2COL;
         g.hauteur = CELL_HAUTEUR_COMPACT;
         g.afficher_consigne = false;
@@ -369,7 +450,14 @@ static idle_geometrie_t geometrie_pour_palier(palier_outils_t palier)
  * taille, police de la valeur et visibilité de la consigne sont posées ici
  * de façon triviale (rien n'est encore connu du palier courant, voir
  * ecran_accueil_idle_construire() plus bas qui ne connaît que `parent`) --
- * c'est mettre_a_jour() qui les recalcule systématiquement à chaque appel. */
+ * c'est mettre_a_jour() qui les recalcule systématiquement à chaque appel.
+ *
+ * Tache 6 : LV_OBJ_FLAG_CLICKABLE pose ICI, une fois pour toutes -- une
+ * cellule bare lv_obj_create() n'est PAS cliquable par defaut (contrairement
+ * a lv_button_create(), voir jog_bouton_creer()/home_bouton_creer()) ; le
+ * rappel de clic lui-meme (cellule_bouton_cb()) est branche par
+ * ecran_accueil_idle_construire(), qui connait ctx (jamais ici : ce
+ * constructeur ne prend meme pas ctx en parametre). */
 static void cellule_creer(ecran_accueil_idle_cellule_t *c, lv_obj_t *parent)
 {
     c->racine = lv_obj_create(parent);
@@ -382,6 +470,7 @@ static void cellule_creer(ecran_accueil_idle_cellule_t *c, lv_obj_t *parent)
      * theme par defaut (meme motif que tuile.c/habillage.c) : neutralises
      * ici, jamais laisses a la charge de l'appelant. */
     lv_obj_clear_flag(c->racine, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(c->racine, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_flex_flow(c->racine, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(c->racine, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(c->racine, 2, 0);
@@ -571,6 +660,157 @@ static void envoyer_gcode(const char *script)
     ui_commander(BACKEND_ACTION_GCODE, arguments);
 }
 
+/* ------------------------------------------------------------------------
+ * Tache 6 (jalon 3b) : consignes de temperature manuelles (clavier
+ * numerique) + prereglages. Voir cellule_bouton_cb()/cellule_clavier_rappel()
+ * pour le clavier, preset_bouton_cb() pour les boutons PLA/PETG/ABS/Off.
+ * ------------------------------------------------------------------------ */
+
+const char ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE[]    = "Nozzle target";
+const char ECRAN_ACCUEIL_IDLE_TEMP_TITRE_PLATEAU[] = "Bed target";
+
+/* Nom du chauffeur Klipper d'un extrudeur, convention verifiee (task-6-brief.md
+ * / task-1) : indice 0 => "extruder", indice N (1..7) => "extruderN" -- PAS
+ * "extruder0" pour l'indice 0. Rend faux SANS toucher `sortie` si le tampon
+ * est trop court ou si `indice` deborde KLIPPER_EXTRUDEURS_MAX (defensif,
+ * comme le reste de ce fichier vis-a-vis d'un etat malforme). */
+static bool nom_chauffeur_extrudeur(uint8_t indice, char *sortie, size_t taille)
+{
+    if (sortie == NULL || taille == 0 || indice >= KLIPPER_EXTRUDEURS_MAX) {
+        return false;
+    }
+    int ecrit = (indice == 0) ? snprintf(sortie, taille, "extruder")
+                               : snprintf(sortie, taille, "extruder%u", (unsigned)indice);
+    return ecrit >= 0 && (size_t)ecrit < taille;
+}
+
+/* Convertit une consigne backend (float, potentiellement NaN/negative/hors
+ * plage -- voir etat_klipper_t) en entier [0, 350] affichable/envoyable :
+ * meme borne que klipper_gcode_consigne_temp() (task 1). isnan() teste
+ * EXPLICITEMENT en premier -- comparer un NaN a 0.0f rend faux dans les DEUX
+ * sens (`v <= 0.0f` ET `v > 350.0f` valent faux), ce qui laisserait tomber
+ * dans la conversion (uint16_t)v finale avec un NaN : comportement indefini
+ * en C (6.3.1.4), jamais accepte silencieusement ici. */
+static uint16_t consigne_u16(float valeur)
+{
+    if (isnan(valeur) || valeur <= 0.0f) {
+        return 0;
+    }
+    if (valeur > (float)ECRAN_ACCUEIL_IDLE_TEMP_MAX) {
+        return ECRAN_ACCUEIL_IDLE_TEMP_MAX;
+    }
+    return (uint16_t)valeur;
+}
+
+/* Rend `info->ctx` -> nom du chauffeur Klipper de CETTE cellule (extrudeur
+ * ou "heater_bed"), dans `sortie`. Factorise entre cellule_bouton_cb() (pour
+ * le titre "Nozzle"/"Bed") et cellule_clavier_rappel() (pour le gcode
+ * reellement envoye) -- les deux ne doivent jamais diverger sur QUEL
+ * chauffeur une cellule precise designe. */
+static bool cellule_info_nom_chauffeur(const ecran_accueil_idle_cellule_info_t *info, char *sortie, size_t taille)
+{
+    if (info->est_plateau) {
+        int ecrit = snprintf(sortie, taille, "heater_bed");
+        return ecrit >= 0 && (size_t)ecrit < taille;
+    }
+    return nom_chauffeur_extrudeur(info->indice_extrudeur, sortie, taille);
+}
+
+/* Rappel du clavier numerique ouvert par cellule_bouton_cb() ci-dessous --
+ * `contexte` EST directement `&ctx->cellule_infos[i]` (voir le commentaire
+ * de ecran_accueil_idle_cellule_info_t dans le .h pour pourquoi ceci evite
+ * tout etat "en attente" partage, contrairement a home_masque_en_attente).
+ * `valeur == NULL` (annule) : rien (spec). Sinon parse en entier, borne
+ * [ECRAN_ACCUEIL_IDLE_TEMP_MIN, ECRAN_ACCUEIL_IDLE_TEMP_MAX] -- une saisie
+ * hors borne OU non numerique => notification d'erreur, AUCUN gcode envoye
+ * (spec : "jamais de consigne aberrante envoyee a la machine"). */
+static void cellule_clavier_rappel(const char *valeur, void *contexte)
+{
+    ecran_accueil_idle_cellule_info_t *info = contexte;
+    if (valeur == NULL || info == NULL) {
+        return;
+    }
+
+    /* strtol() plutot que sscanf("%d") : rend un pointeur de fin qu'on peut
+     * comparer au terme de la chaine, la seule facon fiable de distinguer
+     * "210" (valide) de "210abc"/"12.5"/""/"  " (non numerique) -- sscanf()
+     * accepterait silencieusement le prefixe numerique d'une chaine invalide
+     * (meme piege que partout ailleurs dans ce depot ou une saisie utilisateur
+     * est parsee, voir hote_parse.c). Chaine vide (clavier valide sans rien
+     * saisir) : `fin == valeur`, rejetee explicitement ci-dessous. */
+    char *fin = NULL;
+    errno = 0;
+    long cible = strtol(valeur, &fin, 10);
+    bool numerique = (fin != valeur) && (fin != NULL) && (*fin == '\0') && (errno == 0);
+    bool dans_bornes = numerique && cible >= ECRAN_ACCUEIL_IDLE_TEMP_MIN && cible <= ECRAN_ACCUEIL_IDLE_TEMP_MAX;
+
+    if (!dans_bornes) {
+        habillage_notifier("Invalid temperature (0-350)", true);
+        return;
+    }
+
+    char chauffeur[40];
+    if (!cellule_info_nom_chauffeur(info, chauffeur, sizeof(chauffeur))) {
+        return; /* ne devrait jamais arriver : indice/tampon toujours valides depuis ce clavier */
+    }
+    char script[KLIPPER_GCODE_MAX];
+    if (!klipper_gcode_consigne_temp(script, sizeof(script), chauffeur, (uint16_t)cible)) {
+        return; /* ne devrait jamais arriver : chauffeur/cible deja valides ci-dessus */
+    }
+    envoyer_gcode(script);
+}
+
+/* Tap sur une cellule de temperature (tache 6, spec §6 -- au palier COMPACT,
+ * ceci EST la "vue detaillee" de ce jalon, voir geometrie_pour_palier()).
+ * `info` est passe DIRECTEMENT comme `contexte` a clavier_ouvrir() : aucun
+ * etat "en attente" a poser avant l'ouverture (voir le commentaire de
+ * ecran_accueil_idle_cellule_info_t dans le .h), donc aucune garde de
+ * reentrance requise ici -- clavier_ouvrir() est deja lui-meme un singleton
+ * qui refuse/journalise une seconde ouverture (voir clavier.h) sans que ce
+ * rappel ait rien ecrit au prealable qu'un second tap pourrait corrompre. */
+static void cellule_bouton_cb(lv_event_t *e)
+{
+    ecran_accueil_idle_cellule_info_t *info = lv_event_get_user_data(e);
+    lv_obj_t *cible = lv_event_get_target(e);
+    if (info == NULL || info->ctx == NULL || cible == NULL) {
+        return;
+    }
+
+    const char *titre = info->est_plateau ? ECRAN_ACCUEIL_IDLE_TEMP_TITRE_PLATEAU : ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE;
+    char valeur_initiale[8];
+    snprintf(valeur_initiale, sizeof(valeur_initiale), "%u", (unsigned)info->consigne_courante);
+    clavier_ouvrir(titre, valeur_initiale, CLAVIER_NUMERIQUE, cellule_clavier_rappel, info);
+}
+
+/* Prereglage (tache 6) : DEUX gcodes, toujours -- la buse ACTIVE
+ * (ctx->outil_actif_connu, relu AU MOMENT DU CLIC, meme discipline que
+ * home_bouton_cb() pour axes_references_connus) puis le plateau, decision
+ * figee (task-6-brief.md : "chaque preset envoie DEUX gcodes ... jamais un
+ * seul combine"). "Off" (cibles 0/0) n'est pas un cas special : c'est le
+ * MEME chemin, juste avec des cibles nulles -- klipper_gcode_consigne_temp()
+ * accepte 0 comme cible valide ("eteindre"). */
+static void preset_bouton_cb(lv_event_t *e)
+{
+    ecran_accueil_idle_preset_info_t *info = lv_event_get_user_data(e);
+    lv_obj_t *cible = lv_event_get_target(e);
+    if (info == NULL || info->ctx == NULL || cible == NULL) {
+        return;
+    }
+
+    char chauffeur_buse[16];
+    if (nom_chauffeur_extrudeur(info->ctx->outil_actif_connu, chauffeur_buse, sizeof(chauffeur_buse))) {
+        char script_buse[KLIPPER_GCODE_MAX];
+        if (klipper_gcode_consigne_temp(script_buse, sizeof(script_buse), chauffeur_buse, info->cible_buse)) {
+            envoyer_gcode(script_buse);
+        }
+    }
+
+    char script_plateau[KLIPPER_GCODE_MAX];
+    if (klipper_gcode_consigne_temp(script_plateau, sizeof(script_plateau), "heater_bed", info->cible_plateau)) {
+        envoyer_gcode(script_plateau);
+    }
+}
+
 /* Tache 4 : lit le pas courant du selecteur AU MOMENT DU CLIC (jamais mis en
  * cache ailleurs -- meme discipline que bouton_macro_cb() qui relit
  * ctx->macros_filtrees/ctx->page au moment du clic, pas avant), construit le
@@ -709,6 +949,15 @@ static void ecran_accueil_idle_construire(lv_obj_t *parent, void *contexte)
     for (size_t i = 0; i < ECRAN_ACCUEIL_IDLE_CELLULES_MAX; i++) {
         cellule_creer(&ctx->cellules[i], parent);
         lv_obj_add_flag(ctx->cellules[i].racine, LV_OBJ_FLAG_HIDDEN);
+        /* Tache 6 : ctx pose ICI, une fois pour toutes -- meme idiome que
+         * jog_infos[i].ctx/home_infos[i].ctx ("jamais NULL une fois
+         * construire() passe"). est_plateau/indice_extrudeur/consigne_courante
+         * restent a leur valeur zero-initialisee (calloc du contexte, voir
+         * ecran.h) tant que mettre_a_jour() n'a pas tourne au moins une fois
+         * pour CETTE cellule -- inoffensif, la cellule est masquee (voir
+         * juste au-dessus) jusque-la. */
+        ctx->cellule_infos[i].ctx = ctx;
+        lv_obj_add_event_cb(ctx->cellules[i].racine, cellule_bouton_cb, LV_EVENT_CLICKED, &ctx->cellule_infos[i]);
     }
 
     ctx->position = lv_label_create(parent);
@@ -799,6 +1048,60 @@ static void ecran_accueil_idle_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_size(ctx->selecteur_pas.racine, SELECTEUR_LARGEUR, SELECTEUR_HAUTEUR);
     lv_obj_set_pos(ctx->selecteur_pas.racine, SELECTEUR_X, SELECTEUR_Y);
 
+    /* Tache 6 : rangee de prereglages, quatre boutons a largeur egale --
+     * meme idiome flex que selecteur_pas.c (racine FLEX_ROW, chaque bouton
+     * flex_grow(1)), plus simple ici qu'une position X calculee a la main
+     * (pas de groupes asymetriques a distinguer visuellement, contrairement
+     * au pad de jog/Z/homing). Voir ECRAN_ACCUEIL_IDLE_PRESET_* (le .h) pour
+     * l'indexation et PREREGLAGE_* (tete de ce fichier) pour les cibles. */
+    ctx->zone_preregalges = lv_obj_create(parent);
+    lv_obj_remove_style_all(ctx->zone_preregalges);
+    lv_obj_clear_flag(ctx->zone_preregalges, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(ctx->zone_preregalges, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(ctx->zone_preregalges, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_column(ctx->zone_preregalges, PRESETS_ECART_BOUTON, 0);
+    lv_obj_set_size(ctx->zone_preregalges, LARGEUR_CONTENU - 2 * MARGE, PRESETS_HAUTEUR);
+    lv_obj_set_pos(ctx->zone_preregalges, MARGE, PRESETS_Y);
+
+    static const struct {
+        const char *libelle;
+        uint16_t    cible_buse;
+        uint16_t    cible_plateau;
+    } PRESET_DEFS[ECRAN_ACCUEIL_IDLE_PRESET_NB] = {
+        [ECRAN_ACCUEIL_IDLE_PRESET_PLA]  = { "PLA 210/60",  PREREGLAGE_PLA_BUSE,  PREREGLAGE_PLA_PLATEAU },
+        [ECRAN_ACCUEIL_IDLE_PRESET_PETG] = { "PETG 240/80", PREREGLAGE_PETG_BUSE, PREREGLAGE_PETG_PLATEAU },
+        [ECRAN_ACCUEIL_IDLE_PRESET_ABS]  = { "ABS 250/100", PREREGLAGE_ABS_BUSE,  PREREGLAGE_ABS_PLATEAU },
+        [ECRAN_ACCUEIL_IDLE_PRESET_OFF]  = { "Off",         0,                    0 },
+    };
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_IDLE_PRESET_NB; i++) {
+        lv_obj_t *bouton = lv_button_create(ctx->zone_preregalges);
+        /* lv_obj_remove_style_all() : meme raison que home_bouton_creer()
+         * (voir son commentaire complet plus haut) -- theme par defaut +
+         * transition animee otes, pour ne pas ajouter quatre entrees de plus
+         * a style_trans_ll (deja proche du seuil pathologique documente
+         * la-bas). */
+        lv_obj_remove_style_all(bouton);
+        lv_obj_set_height(bouton, LV_PCT(100));
+        lv_obj_set_flex_grow(bouton, 1);
+        lv_obj_set_style_bg_opa(bouton, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(bouton, lv_color_hex(COULEUR_BOUTON), 0);
+        lv_obj_set_style_border_width(bouton, 0, 0);
+        lv_obj_set_style_shadow_width(bouton, 0, 0);
+        lv_obj_set_style_radius(bouton, 6, 0);
+
+        lv_obj_t *label = lv_label_create(bouton);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
+        lv_label_set_text(label, PRESET_DEFS[i].libelle);
+        lv_obj_center(label);
+
+        ctx->preset_boutons[i] = bouton;
+        ctx->preset_infos[i].ctx = ctx;
+        ctx->preset_infos[i].cible_buse = PRESET_DEFS[i].cible_buse;
+        ctx->preset_infos[i].cible_plateau = PRESET_DEFS[i].cible_plateau;
+        lv_obj_add_event_cb(bouton, preset_bouton_cb, LV_EVENT_CLICKED, &ctx->preset_infos[i]);
+    }
+
     /* Tache 3 : placeholder statique -- aucun rappel de clic pose ici, le
      * cablage reel (visibilite selon nb_macros, navigation vers
      * ECRAN_MACROS) arrive a la tache 7 (voir le brief : "Macros (tache 7)
@@ -884,6 +1187,12 @@ static void ecran_accueil_idle_mettre_a_jour(const void *etat, bool donnees_peri
          * que tuile_griser()) : un outil qui change de "actif" a "inactif"
          * (changeur d'outils) doit perdre sa bordure au prochain appel. */
         lv_obj_set_style_border_width(c->racine, (i == e->outil_actif) ? 3 : 0, 0);
+        /* Tache 6 : identite du chauffeur + consigne courante, relues par
+         * cellule_bouton_cb()/le clavier au moment du tap -- voir le
+         * commentaire de ecran_accueil_idle_cellule_info_t (le .h). */
+        ctx->cellule_infos[total].est_plateau = false;
+        ctx->cellule_infos[total].indice_extrudeur = i;
+        ctx->cellule_infos[total].consigne_courante = consigne_u16(e->extrudeurs[i].consigne);
         total++;
     }
 
@@ -902,6 +1211,9 @@ static void ecran_accueil_idle_mettre_a_jour(const void *etat, bool donnees_peri
         /* Le plateau n'est jamais "l'outil actif" (outil_actif indexe
          * extrudeurs[], jamais le plateau, voir etat_klipper.h). */
         lv_obj_set_style_border_width(c->racine, 0, 0);
+        ctx->cellule_infos[total].est_plateau = true;
+        ctx->cellule_infos[total].indice_extrudeur = 0; /* non utilise, est_plateau=true */
+        ctx->cellule_infos[total].consigne_courante = consigne_u16(e->plateau.consigne);
         total++;
     }
 
@@ -947,6 +1259,13 @@ static void ecran_accueil_idle_mettre_a_jour(const void *etat, bool donnees_peri
         snprintf(texte_outil, sizeof(texte_outil), "Active: --");
     }
     lv_label_set_text(ctx->outil_actif_nom, texte_outil);
+
+    /* Tache 6 : `outil_actif_connu` est relu par preset_bouton_cb() AU
+     * MOMENT DU CLIC (meme discipline que axes_references_connus pour le
+     * homing, voir plus bas) -- la buse que "PLA"/"PETG"/"ABS"/"Off"
+     * ciblent est TOUJOURS la buse active, jamais un indice fige au dernier
+     * changement d'outil. */
+    ctx->outil_actif_connu = e->outil_actif;
 
     /* --- Grisage du pad de jog, PAR AXE (spec tache 4 §7) : un bouton est
      * desactive si les donnees sont perimees OU si SON axe n'est pas

@@ -309,6 +309,16 @@ static esp_err_t backend_factice_rafraichir(void *etat)
          * reellement la confirmation, spec tache 5 §7 -- un axe NON reference
          * enverrait le gcode direct, sans dialogue, ce que cette capture ne
          * veut pas montrer). */
+    case 14:
+        /* Tache 6, jalon 3b : arriere-plan de --scenario 14 (simulateur/
+         * main.c), qui ouvre en plus le clavier numerique de temperature
+         * par-dessus -- IDENTIQUE au scenario 10/13 (empile ici, pas
+         * duplique) : au repos, sur ECRAN_ACCUEIL_IDLE. Les axes references
+         * ne jouent aucun role pour cette capture (le clavier de temperature
+         * n'en depend pas, contrairement au homing du scenario 13) mais
+         * heriter du meme etat que 10/13 documente mieux l'intention "meme
+         * arriere-plan que les autres captures idle" qu'un etat distinct
+         * n'apporterait rien. */
     case 10:
         /* Palier « CR-10 » (tache 2, jalon 3a) : mono-extrudeur + plateau
          * chauffant deja etablis par le preambule ci-dessus, rien a changer

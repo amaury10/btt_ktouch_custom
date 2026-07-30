@@ -14,6 +14,7 @@
 #include "ecran_accueil_idle.h"
 #include "etat_klipper.h"
 #include "habillage.h"
+#include "navigation.h"
 #include "petit_test.h"
 #include "source_etat.h"
 #include "source_etat_sim.h"
@@ -387,6 +388,29 @@ static lv_obj_t *dernier_msgbox(void)
     return lv_obj_get_child(fond, 0);
 }
 
+/* Tache 6 : retrouve le premier descendant DIRECT de `parent` dont la classe
+ * LVGL est `classe` -- copie locale du meme helper que test_clavier.c (voir
+ * son commentaire complet), redefinie ici plutot que partagee, meme choix
+ * que le reste de ce harnais (pomper_transitions_style()/dernier_msgbox()
+ * ci-dessus). Utilisee pour retrouver le lv_keyboard/la lv_textarea du
+ * clavier numerique ouvert par une cellule de temperature -- clavier.h
+ * n'expose aucun accesseur, le test les retrouve par parcours de l'arbre
+ * LVGL depuis lv_layer_top(), exactement comme test_clavier.c. */
+static lv_obj_t *enfant_de_classe(lv_obj_t *parent, const lv_obj_class_t *classe)
+{
+    if (parent == NULL) {
+        return NULL;
+    }
+    uint32_t n = lv_obj_get_child_count(parent);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *enfant = lv_obj_get_child(parent, i);
+        if (lv_obj_check_type(enfant, classe)) {
+            return enfant;
+        }
+    }
+    return NULL;
+}
+
 void suite_ecran_accueil_idle_home(void)
 {
     printf("suite : ecran accueil idle (homing + confirmation)\n");
@@ -569,6 +593,185 @@ void suite_ecran_accueil_idle_home(void)
     VERIFIER(strstr(arguments, "G28 X") != NULL); /* le bon axe... */
     VERIFIER(strstr(arguments, "G28 Y") == NULL); /* ...jamais celui du second appui */
     lv_timer_handler();
+    source_etat_sim_cycle();
+
+    lv_obj_delete(parent);
+    free(brut);
+}
+
+/* ------------------------------------------------------------------------
+ * Tache 6 (jalon 3b) : consignes de temperature manuelles (clavier
+ * numerique ouvert sur une cellule) + prereglages (PLA/PETG/ABS/Off). Meme
+ * garde d'ordonnancement que suite_ecran_accueil_idle_jog()/_home()
+ * ci-dessus (reutilise l'habillage construit par suite_ecran_configuration()
+ * ET la boucle simulee demarree par suite_commandes()) -- DOIT rester apres
+ * elles dans tests/main.c.
+ *
+ * navigation_init(lv_screen_active()) au tout debut : meme technique
+ * defensive que groupe_file_pleine()/section_echec_asynchrone()
+ * (test_ecran_macros.c/test_commandes.c respectivement) avant de retrouver
+ * le bandeau de l'habillage comme DERNIER enfant de lv_screen_active() --
+ * detruit tout ecran qu'une suite precedente aurait laisse empile sans le
+ * depiler, ce qui decalerait sinon le bandeau d'un cran et casserait
+ * silencieusement cette hypothese. Les suites _jog()/_home() ci-dessus n'en
+ * avaient pas besoin (elles ne lisent jamais le bandeau) ; celle-ci est la
+ * premiere de ce fichier a le faire.
+ * ------------------------------------------------------------------------ */
+
+void suite_ecran_accueil_idle_temp(void)
+{
+    printf("suite : ecran accueil idle (temperatures manuelles + prereglages)\n");
+
+    if (!habillage_est_construit() || !source_etat_sim_est_demarre()) {
+        printf("ERREUR: suite_ecran_accueil_idle_temp() exige que suite_ecran_configuration() ET "
+               "suite_commandes() aient deja tourne -- verifier l'ordre dans tests/main.c.\n");
+        exit(1);
+    }
+
+    navigation_init(lv_screen_active());
+    lv_obj_t *ecran = lv_screen_active();
+    lv_obj_t *bandeau = lv_obj_get_child(ecran, lv_obj_get_child_count(ecran) - 1);
+    VERIFIER(bandeau != NULL);
+    lv_obj_t *bandeau_texte = lv_obj_get_child(bandeau, 0);
+    VERIFIER(bandeau_texte != NULL);
+
+    lv_obj_t *parent = lv_obj_create(lv_screen_active());
+    void *brut = calloc(1, ECRAN_ACCUEIL_IDLE.taille_contexte);
+    VERIFIER(brut != NULL);
+    ecran_accueil_idle_ctx_t *ctx = (ecran_accueil_idle_ctx_t *)brut;
+    ECRAN_ACCUEIL_IDLE.construire(parent, ctx);
+
+    /* Mono-extrudeur + plateau : cellules[0] = T0 (buse), cellules[1] = Bed
+     * -- meme mapping que suite_ecran_accueil_idle() (palier MONO). */
+    etat_klipper_t etat;
+    memset(&etat, 0, sizeof(etat));
+    etat.nb_extrudeurs = 1;
+    etat.extrudeurs[0].presente = true;
+    etat.extrudeurs[0].actuelle = 205.0f;
+    etat.extrudeurs[0].consigne = 200.0f;
+    etat.plateau.presente = true;
+    etat.plateau.actuelle = 55.0f;
+    etat.plateau.consigne = 55.0f;
+    etat.outil_actif = 0;
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+
+    char action[32];
+    char arguments[192];
+
+    /* --- (a) tap sur la cellule buse : un clavier numerique apparait sur
+     * lv_layer_top(), prerempli avec la consigne courante (200). --------- */
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+    lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *racine_clavier = dernier_enfant_calque_superieur();
+    VERIFIER(racine_clavier != NULL);
+    lv_obj_t *kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    lv_obj_t *ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    VERIFIER(lv_keyboard_get_mode(kb) == LV_KEYBOARD_MODE_NUMBER);
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "200");
+
+    /* --- (b) valider "210" : BACKEND_ACTION_GCODE, script
+     * SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210. ------------------ */
+    lv_textarea_set_text(ta, "210");
+    size_t avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210") != NULL);
+    lv_timer_handler(); /* acheve la fermeture asynchrone du clavier */
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- (c) valider "999" (hors borne [0,350]) : notification d'erreur,
+     * AUCUN gcode envoye (taille de file inchangee). --------------------- */
+    lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    lv_textarea_set_text(ta, "999");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+    VERIFIER(!lv_obj_has_flag(bandeau, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Invalid temperature (0-350)");
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bandeau, 0), lv_color_hex(0xB3352C))); /* erreur */
+    lv_timer_handler();
+
+    /* --- (d) saisie non numerique : meme resultat (erreur, rien envoye). - */
+    lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    lv_textarea_set_text(ta, "abc");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Invalid temperature (0-350)");
+    lv_timer_handler();
+
+    /* --- (e) annuler : rien envoye, clavier disparait sans invoquer le
+     * gcode (spec : "valeur NULL (annule) => rien"). --------------------- */
+    lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    VERIFIER(kb != NULL);
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_CANCEL, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+    lv_timer_handler();
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    /* --- cellule plateau ("Bed target"), prerempli 55, valider "70" :
+     * HEATER=heater_bed -- bed-cell test (brief). ------------------------- */
+    lv_obj_send_event(ctx->cellules[1].racine, LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    VERIFIER(racine_clavier != NULL);
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "55");
+    lv_textarea_set_text(ta, "70");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=70") != NULL);
+    lv_timer_handler();
+    source_etat_sim_cycle();
+
+    /* --- (f) prereglage PLA : DEUX gcodes queues par le MEME clic -- buse
+     * ACTIVE (T0, 210) puis plateau (60), voir source_etat_sim_avant_derniere_commande()
+     * (necessaire ici : source_etat_sim_cycle() depile toute la file d'un
+     * coup, impossible d'inspecter le premier gcode en cyclant entre les
+     * deux). --------------------------------------------------------------*/
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_ACCUEIL_IDLE_PRESET_PLA], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 2);
+    VERIFIER(source_etat_sim_avant_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210") != NULL);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60") != NULL);
+    source_etat_sim_cycle();
+
+    /* --- (g) "Off" : buse active a 0, plateau a 0 -- meme chemin que PLA/
+     * PETG/ABS, jamais un cas special (voir preset_bouton_cb()). ---------- */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_ACCUEIL_IDLE_PRESET_OFF], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 2);
+    VERIFIER(source_etat_sim_avant_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=0") != NULL);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=0") != NULL);
     source_etat_sim_cycle();
 
     lv_obj_delete(parent);

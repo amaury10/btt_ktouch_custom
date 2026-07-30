@@ -568,6 +568,19 @@ int main(int argc, char **argv)
             confirmation_ouvrir_ex(ECRAN_ACCUEIL_IDLE_HOME_TITRES[ECRAN_ACCUEIL_IDLE_HOME_X],
                                     ECRAN_ACCUEIL_IDLE_HOME_MESSAGE, ECRAN_ACCUEIL_IDLE_HOME_ACTION, true,
                                     ECRAN_ACCUEIL_IDLE_HOME_DECLINER, demo_confirmation_rappel, NULL);
+        } else if (app == APP_ACCUEIL && scenario == 14) {
+            /* Tache 6 (jalon 3b) : clavier numerique de temperature
+             * par-dessus ECRAN_ACCUEIL_IDLE, meme schema que le scenario 13
+             * pour le homing juste au-dessus -- MEME constante partagee
+             * (ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE, ecran_accueil_idle.h) que
+             * le vrai tap sur une cellule (cellule_bouton_cb(),
+             * ecran_accueil_idle.c), jamais une chaine "Nozzle target" tapee
+             * a la main ici qui pourrait un jour diverger. Valeur initiale
+             * "210" en dur (pas de tactile simule pour lire une vraie
+             * consigne courante depuis ce fichier, meme limite documentee au
+             * scenario 13 pour le homing) : plausible pour le scenario 10
+             * dont ce cas herite l'etat (buse a 0, voir backend_factice.c). */
+            clavier_ouvrir(ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE, "210", CLAVIER_NUMERIQUE, demo_clavier_rappel, NULL);
         }
 
         /* Un cycle de pompe LVGL suffit à laisser rendre l'écran une

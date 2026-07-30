@@ -156,6 +156,13 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
     d'impression, mais sur l'accueil au repos : un axe DOIT déjà être
     référencé pour que la capture montre la confirmation plutôt que l'envoi
     direct (spec §7). Sert uniquement à produire `idle-home-confirm.png`.
+  - `14` (tâche 6, jalon 3b, mode capture uniquement) : backend factice
+    IDENTIQUE au scénario 10 (« CR-10 », au repos), mais ouvre EN PLUS,
+    par-dessus `ECRAN_ACCUEIL_IDLE` déjà empilé, le clavier numérique de
+    température (`clavier_ouvrir()`, même constante partagée
+    `ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE` que le vrai tap sur une cellule de
+    `ecran_accueil_idle.c`) — même schéma que `13` pour le homing. Sert
+    uniquement à produire `idle-temp-clavier.png`.
   - tout autre numéro retombe sur le comportement du scénario 3 (voir
     `backend_factice_rafraichir()`).
 - `--cycles <n>` : avant une capture, avance la boucle simulée de `<n>`
