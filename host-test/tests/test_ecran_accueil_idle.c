@@ -809,6 +809,37 @@ void suite_ecran_accueil_idle_temp(void)
     VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Invalid temperature (0-350)");
     lv_timer_handler();
 
+    /* --- (d bis) bornes EXACTES [0,350] (revue finale jalon 3b) : 350 passe
+     * (TARGET=350 envoye), 351 est rejete sans rien envoyer -- la borne haute
+     * est inclusive, exactement comme le code (cible <= 350). ------------- */
+    lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    lv_textarea_set_text(ta, "350");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1); /* 350 accepte */
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=350") != NULL);
+    lv_timer_handler();
+    source_etat_sim_cycle();
+
+    lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    lv_textarea_set_text(ta, "351");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant); /* 351 rejete, rien envoye */
+    VERIFIER_TEXTE(lv_label_get_text(bandeau_texte), "Invalid temperature (0-350)");
+    lv_timer_handler();
+
     /* --- (e) annuler : rien envoye, clavier disparait sans invoquer le
      * gcode (spec : "valeur NULL (annule) => rien"). --------------------- */
     lv_obj_send_event(ctx->cellules[0].racine, LV_EVENT_CLICKED, NULL);

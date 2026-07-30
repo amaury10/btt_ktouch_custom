@@ -959,9 +959,10 @@ static void home_bouton_cb(lv_event_t *e)
  * Code numerique (%d), PAS esp_err_to_name() : ce fichier fait partie de
  * ui/apps, compile aussi bien pour l'appareil que pour le harnais hote (voir
  * host-test/CMakeLists.txt) -- esp_err_to_name() n'existe pas dans le shim
- * esp_err.h utilise cote hote (core/boucle.c, seul autre appelant de cette
- * fonction dans ce depot, n'est lui-meme JAMAIS compile hors ESP-IDF, voir le
- * commentaire de tete de host-test/CMakeLists.txt). Un code numerique reste
+ * esp_err.h utilise cote hote. D'autres fichiers l'appellent bien (backend_
+ * moonraker.c, app_main.c, reglages.c...), mais aucun de ceux-la n'est compile
+ * cote hote : c'est parce que CE fichier-ci l'est qu'on evite la fonction ici.
+ * Un code numerique reste
  * suffisant pour du diagnostic (les valeurs ESP_ERR_* sont documentees dans
  * shim/esp_err.h / esp_err.h ESP-IDF).
  *
