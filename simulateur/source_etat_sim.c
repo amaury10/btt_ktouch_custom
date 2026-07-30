@@ -263,3 +263,21 @@ void source_etat_sim_reset_echec(void)
     g_echec_action[0] = '\0';
     g_echec_en_attente = false;
 }
+
+bool source_etat_sim_derniere_commande(char *action, size_t taille_action,
+                                        char *arguments_json, size_t taille_arguments)
+{
+    if (action == NULL || taille_action == 0 || g_file_taille == 0) {
+        return false;
+    }
+    /* Le dernier element POUSSE (pas le prochain a etre depile) : dernier
+     * indice occupe de la file circulaire, voir file_pousser() ci-dessus
+     * (g_file_tete + g_file_taille - 1, module FILE_PROFONDEUR). */
+    size_t indice = (g_file_tete + g_file_taille - 1) % FILE_PROFONDEUR;
+    const commande_t *cmd = &g_file[indice];
+    snprintf(action, taille_action, "%s", cmd->action);
+    if (arguments_json != NULL && taille_arguments > 0) {
+        snprintf(arguments_json, taille_arguments, "%s", cmd->avec_arguments ? cmd->arguments_json : "");
+    }
+    return true;
+}

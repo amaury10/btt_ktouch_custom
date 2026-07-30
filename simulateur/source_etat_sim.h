@@ -74,3 +74,25 @@ bool source_etat_sim_est_demarre(void);
  * bug -- un sceau "reset" de test_jouet.c hérité à tort par
  * test_ecran_macros.c). Sans effet si aucun échec n'est en attente. */
 void source_etat_sim_reset_echec(void);
+
+/* EXPOSÉ POUR LES TESTS UNIQUEMENT (tâche 4, jalon 3b) : copie dans `action`/
+ * `arguments_json` (au moins `taille_action`/`taille_arguments` octets
+ * chacun) l'action et les arguments JSON de la commande LA PLUS RÉCEMMENT
+ * empilée par ui_commander() -- une simple LECTURE (peek), qui ne dépile
+ * RIEN, contrairement à source_etat_sim_cycle() (voir son commentaire de
+ * tête). Complète source_etat_sim_file_taille() (tâche 9), qui dit
+ * seulement "combien de commandes attendent" jamais "avec quel contenu" :
+ * un test qui veut prouver qu'un clic envoie précisément
+ * BACKEND_ACTION_GCODE avec un script contenant "G1 X10 F3000" (voir
+ * test_ecran_accueil_idle.c, trace du seam pad de jog -> ui_commander())
+ * n'avait jusqu'ici aucun moyen d'inspecter CE que la file contient, seulement
+ * sa profondeur.
+ *
+ * `arguments_json`/`taille_arguments` peuvent valoir NULL/0 si l'appelant ne
+ * s'intéresse qu'à `action` -- copie alors "" (chaîne vide) si la commande la
+ * plus récente n'avait pas d'arguments (voir `avec_arguments` dans
+ * commande_t), jamais un pointeur non initialisé. Rend false SANS RIEN
+ * TOUCHER si la file est vide, si `action` est NULL, ou si `taille_action`
+ * vaut 0. */
+bool source_etat_sim_derniere_commande(char *action, size_t taille_action,
+                                        char *arguments_json, size_t taille_arguments);

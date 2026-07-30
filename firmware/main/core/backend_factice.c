@@ -310,6 +310,17 @@ static esp_err_t backend_factice_rafraichir(void *etat)
             snprintf(nouveau.macros[i], KLIPPER_MACRO_NOM_MAX, "%s", g_macros_cr10[i]);
         }
         nouveau.macros_tronquees = false;
+        /* Tache 4, jalon 3b : machine entierement referencee (homee) --
+         * necessaire pour que la capture --scenario 10 (le scenario que le
+         * brief de la tache 4 nomme explicitement) montre le pad de jog
+         * ENTIEREMENT actif plutot que grise par defaut (axes_references
+         * valait 0 avant ce changement, ce qui aurait grise les six boutons
+         * de jog des le premier cycle -- rien avant la tache 4 ne lisait ce
+         * champ pour ce scenario, donc rien ne l'avait jamais reclame). */
+        nouveau.axes_references = 0x1u | 0x2u | 0x4u;
+        nouveau.position[0] = 120.0f;
+        nouveau.position[1] = 100.0f;
+        nouveau.position[2] = 5.0f;
         break;
 
     case 11: {

@@ -92,6 +92,7 @@ add_executable(ktouch-sim
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
+    ${WIDGETS_DIR}/selecteur_pas.c
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c

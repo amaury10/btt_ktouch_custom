@@ -22,6 +22,7 @@ void suite_habillage(void);
 void suite_widgets(void);
 void suite_ecran_accueil(void);
 void suite_ecran_accueil_idle(void);
+void suite_ecran_accueil_idle_jog(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -31,6 +32,7 @@ void suite_web_macros(void);
 void suite_ecran_macros(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
+void suite_selecteur_pas(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -83,6 +85,10 @@ int main(void)
     suite_navigation();
     suite_habillage();
     suite_widgets();
+    /* Tache 4 (jalon 3b) : le selecteur de pas, un widget partage de plus
+     * (voir selecteur_pas.h) -- meme absence de contrainte d'ordre que
+     * suite_widgets() ci-dessus, aucun etat process-wide partage. */
+    suite_selecteur_pas();
     suite_ecran_accueil();
     suite_ecran_accueil_idle();
     suite_clavier();
@@ -112,6 +118,13 @@ int main(void)
      * garde d'ordre que les autres : suite_ecran_macros() verifie elle-meme
      * les deux avant de s'appuyer dessus (voir son commentaire de tete). */
     suite_ecran_macros();
+
+    /* Tache 4 (jalon 3b) : trace du seam pad de jog -> ui_commander(). Meme
+     * garde d'ordonnancement que suite_ecran_macros() ci-dessus -- DOIT
+     * rester APRES suite_commandes() (boucle simulee demarree) ET
+     * suite_ecran_configuration() (habillage construit), voir le
+     * commentaire de tete de suite_ecran_accueil_idle_jog(). */
+    suite_ecran_accueil_idle_jog();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

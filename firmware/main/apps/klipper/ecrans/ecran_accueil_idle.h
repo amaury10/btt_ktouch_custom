@@ -7,9 +7,10 @@
  * décidé au démarrage, entre cet écran et ECRAN_ACCUEIL (jalon 2b,
  * impression en cours).
  *
- * Contrôles (pad de jog, homing) et rangée Macros : réservés ici en
- * PLACEHOLDER seulement -- posés pour que la mise en page soit figée et
- * capturée avant que les tâches 4/5/7 n'y accrochent leurs widgets réels.
+ * Contrôles : le pad de jog XY/Z + sélecteur de pas (tâche 4, jalon 3b) est
+ * désormais réel, dans le même conteneur `zone_controles` que la tâche 3
+ * avait réservé -- le homing (tâche 5) y viendra s'ajouter. Rangée Macros :
+ * encore un PLACEHOLDER (câblage réel tâche 7).
  *
  * `ecran_accueil_idle_ctx_t` est exposé ici plutôt qu'opaque, même raison
  * que ecran_accueil_ctx_t (voir son en-tête) : host-test/tests/
@@ -22,6 +23,7 @@
 #include "ecran.h"
 #include "etat_klipper.h"
 #include "lvgl.h"
+#include "selecteur_pas.h"
 
 /* Une cellule de température : nom court ("T0".."T7", "Bed"), valeur
  * courante (police du palier), consigne (masquée -- LV_OBJ_FLAG_HIDDEN,
@@ -43,12 +45,41 @@ typedef struct {
  * chaque cellule suivent le palier courant. */
 #define ECRAN_ACCUEIL_IDLE_CELLULES_MAX (KLIPPER_EXTRUDEURS_MAX + 1)
 
+/* Six boutons de jog, index FIXE dans `jog_boutons`/`jog_infos` -- reutilise
+ * par mettre_a_jour() (grisage par axe) et par les tests (host-test/tests/
+ * test_ecran_accueil_idle.c), voir ecran_accueil_idle.c pour l'ordre de
+ * construction et la mise en page (pad XY autour d'un centre + colonne Z). */
+#define ECRAN_ACCUEIL_IDLE_JOG_X_NEG 0
+#define ECRAN_ACCUEIL_IDLE_JOG_X_POS 1
+#define ECRAN_ACCUEIL_IDLE_JOG_Y_NEG 2
+#define ECRAN_ACCUEIL_IDLE_JOG_Y_POS 3
+#define ECRAN_ACCUEIL_IDLE_JOG_Z_POS 4
+#define ECRAN_ACCUEIL_IDLE_JOG_Z_NEG 5
+#define ECRAN_ACCUEIL_IDLE_JOG_NB    6
+
+/* user_data d'un rappel de clic de bouton de jog -- meme forme que
+ * ecran_macros_emplacement_t (voir ecran_macros.h) : le contexte de l'ecran
+ * (pour relire le pas courant du selecteur au moment du clic) et ce que ce
+ * bouton precis represente (axe + sens), jamais recalcule ailleurs. */
 typedef struct {
+    struct ecran_accueil_idle_ctx_s *ctx; /* jamais NULL une fois construire() passe */
+    char                             axe;   /* 'X', 'Y' ou 'Z' */
+    float                            signe; /* +1.0f ou -1.0f */
+} ecran_accueil_idle_jog_info_t;
+
+typedef struct ecran_accueil_idle_ctx_s {
     ecran_accueil_idle_cellule_t cellules[ECRAN_ACCUEIL_IDLE_CELLULES_MAX];
     lv_obj_t *position;        /* "X:.. Y:.. Z:.." (1 decimale, "--" si l'axe n'est pas reference) */
     lv_obj_t *outil_actif_nom; /* "Active: T.." / "Active: --" (aucun extrudeur) */
     lv_obj_t *zone_controles;  /* conteneur reserve (pad de jog + homing, taches 4/5) */
-    lv_obj_t *label_controles; /* "Controls", placeholder tache 3 */
+
+    /* Pad de jog (tache 4, jalon 3b) : voir ECRAN_ACCUEIL_IDLE_JOG_* plus
+     * haut pour l'indexation. `jog_infos[i].ctx` pointe toujours vers CE
+     * contexte -- pose une fois par construire(), jamais recalcule. */
+    lv_obj_t                      *jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_NB];
+    ecran_accueil_idle_jog_info_t  jog_infos[ECRAN_ACCUEIL_IDLE_JOG_NB];
+    selecteur_pas_t                selecteur_pas;
+
     lv_obj_t *bouton_macros;   /* placeholder tache 3, cablage reel tache 7 */
     lv_obj_t *label_macros;    /* enfant direct de bouton_macros, pour le regrisage */
 } ecran_accueil_idle_ctx_t;

@@ -10,9 +10,13 @@
 
 #include "lvgl.h"
 
+#include "backend.h"
 #include "ecran_accueil_idle.h"
 #include "etat_klipper.h"
+#include "habillage.h"
 #include "petit_test.h"
+#include "source_etat.h"
+#include "source_etat_sim.h"
 
 static size_t compter_cellules_visibles(const ecran_accueil_idle_ctx_t *ctx)
 {
@@ -45,7 +49,16 @@ void suite_ecran_accueil_idle(void)
     VERIFIER(ctx->position != NULL);
     VERIFIER(ctx->outil_actif_nom != NULL);
     VERIFIER(ctx->zone_controles != NULL);
-    VERIFIER(ctx->label_controles != NULL);
+    /* Tache 4 : pad de jog (six boutons) + selecteur de pas, remplacent le
+     * placeholder "Controls" de la tache 3. */
+    for (int i = 0; i < ECRAN_ACCUEIL_IDLE_JOG_NB; i++) {
+        VERIFIER(ctx->jog_boutons[i] != NULL);
+    }
+    VERIFIER(ctx->selecteur_pas.racine != NULL);
+    for (int i = 0; i < 4; i++) {
+        VERIFIER(ctx->selecteur_pas.boutons[i] != NULL);
+    }
+    VERIFIER(ctx->selecteur_pas.index_actif == 1); /* 1 mm par defaut */
     VERIFIER(ctx->bouton_macros != NULL);
     VERIFIER(ctx->label_macros != NULL);
     /* aucune cellule visible tant que mettre_a_jour() n'a jamais tourne */
@@ -183,6 +196,145 @@ void suite_ecran_accueil_idle(void)
     VERIFIER(!lv_color_eq(normal_valeur, lv_color_hex(0x6B7280)));
     lv_color_t normal_position = lv_obj_get_style_text_color(ctx->position, 0);
     VERIFIER(!lv_color_eq(normal_position, lv_color_hex(0x6B7280)));
+
+    lv_obj_delete(parent);
+    free(brut);
+}
+
+/* ------------------------------------------------------------------------
+ * Tache 4 (jalon 3b) : trace du seam pad de jog -> ui_commander(), et
+ * grisage par axe. DOIT rester APRES suite_commandes() dans tests/main.c --
+ * reutilise la boucle simulee deja demarree par elle (singleton
+ * process-wide, voir le commentaire de tete de source_etat_sim.h), meme
+ * garde d'ordonnancement que groupe_trace_seam() dans test_ecran_macros.c.
+ * ------------------------------------------------------------------------ */
+
+/* Meme helper que pomper_transitions_style() dans test_commandes.c/
+ * test_ecran_macros.c (voir leur commentaire complet) : les boutons de jog
+ * et du selecteur de pas sont crees via lv_button_create(), qui garde le
+ * theme par defaut et sa transition de couleur animee. Redefini ici plutot
+ * que partage, meme choix que les autres fichiers de ce harnais. */
+static void pomper_transitions_style(void)
+{
+    for (int i = 0; i < 5; i++) {
+        lv_tick_inc(100);
+        lv_timer_handler();
+    }
+}
+
+void suite_ecran_accueil_idle_jog(void)
+{
+    printf("suite : ecran accueil idle (trace du seam -> pad de jog)\n");
+
+    if (!habillage_est_construit() || !source_etat_sim_est_demarre()) {
+        printf("ERREUR: suite_ecran_accueil_idle_jog() exige que suite_ecran_configuration() ET "
+               "suite_commandes() aient deja tourne -- verifier l'ordre dans tests/main.c.\n");
+        exit(1);
+    }
+
+    lv_obj_t *parent = lv_obj_create(lv_screen_active());
+    void *brut = calloc(1, ECRAN_ACCUEIL_IDLE.taille_contexte);
+    VERIFIER(brut != NULL);
+    ecran_accueil_idle_ctx_t *ctx = (ecran_accueil_idle_ctx_t *)brut;
+    ECRAN_ACCUEIL_IDLE.construire(parent, ctx);
+
+    /* X et Y references, Z ne l'est pas (brief tache 4, step 2). */
+    etat_klipper_t etat;
+    memset(&etat, 0, sizeof(etat));
+    etat.nb_extrudeurs = 1;
+    etat.extrudeurs[0].presente = true;
+    etat.axes_references = 0x1u | 0x2u; /* X, Y -- pas Z */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+
+    /* --- Z desactive (RESOLU), X/Y actifs -- couleur RESOLUE, pas
+     * seulement LV_STATE_DISABLED (meme lecon que partout ailleurs dans ce
+     * harnais depuis la revue finale du jalon 2b). */
+    VERIFIER(lv_obj_has_state(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Z_POS], LV_STATE_DISABLED));
+    VERIFIER(lv_obj_has_state(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Z_NEG], LV_STATE_DISABLED));
+    VERIFIER(!lv_obj_has_state(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_STATE_DISABLED));
+    VERIFIER(!lv_obj_has_state(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Y_POS], LV_STATE_DISABLED));
+    pomper_transitions_style();
+    lv_color_t fond_actif = lv_obj_get_style_bg_color(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_PART_MAIN);
+    lv_color_t fond_desactive_z =
+        lv_obj_get_style_bg_color(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Z_POS], LV_PART_MAIN);
+    VERIFIER(!lv_color_eq(fond_actif, fond_desactive_z));
+
+    /* Un clic sur Z+ (desactive) n'envoie RIEN -- garde defensive de
+     * jog_bouton_cb(), lv_obj_send_event() ne passe jamais par la
+     * verification tactile de LV_STATE_DISABLED (lv_indev.c). */
+    size_t avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Z_POS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+
+    /* --- Clic sur X+ (pas par defaut = 1 mm) : BACKEND_ACTION_GCODE, script
+     * contenant "G1 X1 F3000" (XY = 3000 mm/min, brief tache 4). Trace du
+     * seam via source_etat_sim_derniere_commande() (tache 4, nouvel accesseur
+     * de test -- voir son commentaire dans source_etat_sim.h). */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    char action[32];
+    char arguments[192];
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "G1 X1 F3000") != NULL);
+    /* le script est bien enveloppe dans un objet JSON valide, cle "script" */
+    VERIFIER(strstr(arguments, "\"script\"") != NULL);
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- donnees_perimees=true : TOUS les boutons de jog se desactivent,
+     * y compris X/Y qui etaient actifs juste au-dessus (spec tache 4 §7 :
+     * "donnees_perimees OU axe non reference"). */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, true, ctx);
+    for (int i = 0; i < ECRAN_ACCUEIL_IDLE_JOG_NB; i++) {
+        VERIFIER(lv_obj_has_state(ctx->jog_boutons[i], LV_STATE_DISABLED));
+    }
+    pomper_transitions_style();
+    VERIFIER(!lv_color_eq(
+        lv_obj_get_style_bg_color(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_PART_MAIN), fond_actif));
+
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant); /* rien envoye, donnees perimees */
+
+    /* --- redevient frais : X actif de nouveau, couleur RESOLUE exactement
+     * celle de depart (round-trip complet, meme lecon que tuile_griser()). */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+    VERIFIER(!lv_obj_has_state(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_STATE_DISABLED));
+    pomper_transitions_style();
+    VERIFIER(lv_color_eq(
+        lv_obj_get_style_bg_color(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_PART_MAIN), fond_actif));
+
+    /* --- le pas choisi change la distance : selecteur a 10 mm -> "X10" --- */
+    lv_obj_send_event(ctx->selecteur_pas.boutons[2], LV_EVENT_CLICKED, NULL); /* index 2 = 10 mm */
+    VERIFIER(ctx->selecteur_pas.index_actif == 2);
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_POS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "G1 X10 F3000") != NULL);
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- un axe negatif construit bien un signe negatif (X-, pas au pas
+     * courant, 10 mm) -- "G1 X-10 F3000", pas juste "X10" avec un moins
+     * ailleurs dans la chaine. */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_X_NEG], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "G1 X-10 F3000") != NULL);
+    source_etat_sim_cycle();
+
+    /* --- Z, quand reference, jog a la vitesse Z (600 mm/min) -- pas 3000. */
+    etat.axes_references = 0x1u | 0x2u | 0x4u; /* X, Y, Z tous references */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+    VERIFIER(!lv_obj_has_state(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Z_POS], LV_STATE_DISABLED));
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->jog_boutons[ECRAN_ACCUEIL_IDLE_JOG_Z_POS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "G1 Z10 F600") != NULL);
+    source_etat_sim_cycle();
 
     lv_obj_delete(parent);
     free(brut);

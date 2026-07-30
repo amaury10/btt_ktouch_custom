@@ -136,6 +136,7 @@ add_executable(tests
     tests/test_ecran_macros.c
     tests/test_klipper_gcode.c
     tests/test_klipper_paliers.c
+    tests/test_selecteur_pas.c
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
@@ -153,6 +154,7 @@ add_executable(tests
     ${UI_DIR}/habillage.c
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
+    ${WIDGETS_DIR}/selecteur_pas.c
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
