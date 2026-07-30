@@ -28,7 +28,16 @@
 
 #include "lvgl.h"
 
+#include "ecran.h"
 #include "liaison.h"
+
+/* Enregistre l'écran de réglages que le bouton engrenage de la barre d'état
+ * ouvre (visible seulement à la profondeur 1, un accueil au sommet). NULL (par
+ * défaut) masque le bouton. L'application le fixe après habillage_construire()
+ * -- l'habillage reste ainsi générique, sans connaître ECRAN_CONFIGURATION
+ * (l'application Klipper) ni l'écran de config d'un fork. `desc` doit rester
+ * valide tant que l'habillage vit (typiquement un descripteur statique). */
+void habillage_definir_ecran_reglages(const ecran_desc_t *desc);
 
 /* Construit la barre d'état (bande 44 px en haut), le bandeau de
  * notifications (masqué, 60 px, superposé en bas) et la zone de contenu

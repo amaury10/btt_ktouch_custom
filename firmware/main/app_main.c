@@ -469,6 +469,10 @@ void app_main(void)
              * (simulateur/main.c), mais rien ne l'appelle encore depuis
              * cette boucle applicative. */
             habillage_construire(lv_screen_active());
+            /* Bouton engrenage de la barre d'etat -> ecran de configuration
+             * (adresse imprimante), accessible depuis l'accueil a tout moment,
+             * pas seulement au premier demarrage. */
+            habillage_definir_ecran_reglages(&ECRAN_CONFIGURATION);
             esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_IDLE);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",

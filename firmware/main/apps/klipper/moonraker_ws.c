@@ -56,7 +56,12 @@ static const char *TAG = "moonraker_ws";
  * heures). 4 Kio couvre largement un `notify_status_update` ou une réponse
  * corrélée -- au-delà, le message est ABANDONNÉ (jamais un parse partiel,
  * jamais un débordement du tampon lui-même) et journalisé, throttlé. */
-#define MOONRAKER_WS_TAMPON_OCTETS 4096
+/* 16 Ko : l'etat complet + surtout la reponse `printer.objects.list` d'une
+ * VRAIE imprimante (nombreux objets/macros) depasse facilement 4 Ko. Un tampon
+ * trop petit tronquait le JSON -> parse en echec -> macros/etat non appliques
+ * (le debordement est detecte et journalise, jamais un crash, mais la donnee
+ * reelle etait perdue). Statique (.bss), pas de risque de pile. */
+#define MOONRAKER_WS_TAMPON_OCTETS 16384
 static char   g_tampon_msg[MOONRAKER_WS_TAMPON_OCTETS];
 static size_t g_tampon_len   = 0;
 static bool   g_tampon_texte = false; /* type de la trame en cours de reassemblage (fixe des le premier fragment) */
@@ -790,6 +795,19 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     memset(&config, 0, sizeof(config));
     config.uri = url;
     config.disable_auto_reconnect = true; /* backoff exponentiel gere par CE fichier, pas la bibliotheque */
+    /* Pile de la tache WS : le DEFAUT esp_websocket_client est 4 Ko, INSUFFISANT
+     * ici. ws_event_handler() -> traiter_message_complet() -> rpc_fusionner_*()
+     * tournent tous DANS cette tache, et rpc_fusionner_status()/_instantane()
+     * posent un `etat_klipper_t local = *etat` sur la pile -- or sizeof(etat_
+     * klipper_t) vaut 1808 octets (jusqu'a deux copies vivantes a la fois),
+     * plus la recursion de cJSON_ParseWithLength() sur le payload. Les petites
+     * fixtures vkp tenaient dans 4 Ko ; l'etat REEL complet d'une imprimante
+     * (bien plus gros) faisait deborder la pile -> crash + reboot des la
+     * connexion (constate sur une vraie CR-10/Snapmaker). 12 Ko laisse la marge.
+     * buffer_size : 4 Ko (defaut 1 Ko) reduit la fragmentation applicative des
+     * grosses trames (le reassemblage g_tampon_msg la gere de toute facon). */
+    config.task_stack = 16384;
+    config.buffer_size = 4096;
 
     g_client = esp_websocket_client_init(&config);
     if (g_client == NULL) {

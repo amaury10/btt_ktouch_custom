@@ -217,7 +217,13 @@ static void ecran_configuration_bouton_modifier_cb(lv_event_t *e)
     if (ctx == NULL) {
         return;
     }
-    clavier_ouvrir("Printer address", ctx->saisie, CLAVIER_TEXTE,
+    /* Clavier NUMERIQUE : une adresse d'imprimante est le plus souvent une IP
+     * (chiffres + point), et le pave numerique LVGL porte le point directement
+     * -- bien plus commode que de chercher le point sur le clavier texte. La
+     * touche clavier (coin haut-droit du pave) bascule vers le texte si l'on
+     * saisit un nom d'hote plutot qu'une IP. Le port se deduit ("adresse:7125")
+     * quand il n'est pas donne, voir ecran_configuration_valider(). */
+    clavier_ouvrir("Printer address", ctx->saisie, CLAVIER_NUMERIQUE,
                     ecran_configuration_rappel_clavier, ctx);
 }
 
@@ -249,7 +255,14 @@ static void ecran_configuration_bouton_enregistrer_cb(lv_event_t *e)
         return;
     }
 
-    habillage_notifier("Settings saved", false);
+    /* NB : la boucle d'interrogation lit l'hote une seule fois au demarrage
+     * (boucle_demarrer(), app_main.c) et ne le relit pas a chaud. Un changement
+     * d'hote (ou une premiere configuration) ne prend donc effet qu'au prochain
+     * demarrage -- power-cycle de l'appareil pour l'instant. Un "appliquer sans
+     * reboot" propre (redemarrage de la boucle, ou reset via une facade
+     * portable testable cote hote) est un suivi ; il ne doit PAS appeler
+     * esp_restart() directement ici, qui n'existe pas dans le harnais hote. */
+    habillage_notifier("Settings saved -- power-cycle to apply", false);
     navigation_accueil();
 }
 

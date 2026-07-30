@@ -36,6 +36,13 @@ static const char *TAG = "habillage";
  * pas, par contrat imposé par le brief. --- */
 static lv_obj_t *g_barre;
 static lv_obj_t *g_bouton_retour;
+/* Bouton "Reglages" (engrenage) : visible UNIQUEMENT a la profondeur 1 (un
+ * ecran d'accueil au sommet), l'inverse du bouton retour. Il ouvre l'ecran de
+ * reglages que l'APPLICATION enregistre via habillage_definir_ecran_reglages()
+ * -- l'habillage reste generique (le fork astro y met son propre ecran de
+ * config), aucune dependance en dur vers ECRAN_CONFIGURATION ici. */
+static lv_obj_t *g_bouton_reglages;
+static const ecran_desc_t *g_ecran_reglages;
 static lv_obj_t *g_titre;
 static lv_obj_t *g_pastille_liaison;
 static lv_obj_t *g_texte_liaison;
@@ -130,6 +137,22 @@ static void bouton_retour_cb(lv_event_t *e)
     navigation_depiler();
 }
 
+static void bouton_reglages_cb(lv_event_t *e)
+{
+    (void)e;
+    /* Garde defensive : si l'application n'a pas enregistre d'ecran de reglages,
+     * ne rien faire (le bouton est de toute facon masque dans ce cas, voir
+     * rafraichir_barre()). */
+    if (g_ecran_reglages != NULL) {
+        navigation_empiler(g_ecran_reglages);
+    }
+}
+
+void habillage_definir_ecran_reglages(const ecran_desc_t *desc)
+{
+    g_ecran_reglages = desc;
+}
+
 static void construire_barre(lv_obj_t *parent)
 {
     g_barre = lv_obj_create(parent);
@@ -167,6 +190,22 @@ static void construire_barre(lv_obj_t *parent)
     lv_obj_set_style_text_color(fleche, lv_color_hex(COULEUR_TEXTE_PRINCIPAL), 0);
     lv_label_set_text(fleche, "<");
     lv_obj_center(fleche);
+
+    /* Bouton reglages (engrenage) : meme gabarit que le bouton retour, occupe
+     * le meme coin gauche mais a la profondeur 1 (voir rafraichir_barre() : les
+     * deux ne sont jamais visibles en meme temps). */
+    g_bouton_reglages = lv_button_create(gauche);
+    lv_obj_set_size(g_bouton_reglages, 32, 32);
+    lv_obj_set_style_radius(g_bouton_reglages, 6, 0);
+    lv_obj_set_style_bg_color(g_bouton_reglages, lv_color_hex(COULEUR_BOUTON_RETOUR), 0);
+    lv_obj_set_style_border_width(g_bouton_reglages, 0, 0);
+    lv_obj_set_style_shadow_width(g_bouton_reglages, 0, 0);
+    lv_obj_add_flag(g_bouton_reglages, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(g_bouton_reglages, bouton_reglages_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *engrenage = lv_label_create(g_bouton_reglages);
+    lv_obj_set_style_text_color(engrenage, lv_color_hex(COULEUR_TEXTE_PRINCIPAL), 0);
+    lv_label_set_text(engrenage, LV_SYMBOL_SETTINGS);
+    lv_obj_center(engrenage);
 
     g_titre = lv_label_create(gauche);
     lv_obj_set_style_text_font(g_titre, &lv_font_montserrat_20, 0);
@@ -296,10 +335,20 @@ static void rafraichir_barre(liaison_etat_t liaison)
     const char *titre = navigation_titre_courant();
     lv_label_set_text(g_titre, titre != NULL ? titre : "");
 
+    /* Profondeur > 1 : bouton retour visible, reglages masque (on est deja dans
+     * un sous-ecran). Profondeur 1 (accueil) : l'inverse -- reglages visible
+     * (si l'application en a enregistre un), retour masque. Les deux ne
+     * coexistent jamais, ils partagent le meme coin gauche. */
     if (navigation_profondeur() > 1) {
         lv_obj_clear_flag(g_bouton_retour, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(g_bouton_reglages, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(g_bouton_retour, LV_OBJ_FLAG_HIDDEN);
+        if (g_ecran_reglages != NULL) {
+            lv_obj_clear_flag(g_bouton_reglages, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(g_bouton_reglages, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     lv_obj_set_style_bg_color(g_pastille_liaison, lv_color_hex(habillage_couleur_liaison(liaison)), 0);
