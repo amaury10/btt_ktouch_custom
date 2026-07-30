@@ -178,3 +178,8 @@ void confirmation_ouvrir(const char *titre, const char *message,
 {
     confirmation_ouvrir_ex(titre, message, libelle_action, destructif, "Cancel", rappel, contexte);
 }
+
+bool confirmation_est_ouverte(void)
+{
+    return g_confirmation.ouvert;
+}

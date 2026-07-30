@@ -537,6 +537,40 @@ void suite_ecran_accueil_idle_home(void)
     lv_timer_handler();
     source_etat_sim_cycle(); /* draine avant la suite */
 
+    /* --- (e) Fix revue tache 5 : un SECOND appui pendant qu'un dialogue est
+     * deja ouvert ne retargette PAS le G28 en attente. confirmation.c refuse
+     * silencieusement la seconde ouverture (singleton) ; sans la garde
+     * confirmation_est_ouverte() dans home_bouton_cb(), home_masque_en_attente
+     * passerait quand meme au nouvel axe, et confirmer le dialogue AFFICHE
+     * "Home X?" enverrait le G28 du mauvais axe. Atteignable via
+     * lv_obj_send_event() (le fond modal bloque un vrai doigt, pas ce seam). */
+    memset(&etat, 0, sizeof(etat));
+    etat.nb_extrudeurs = 1;
+    etat.extrudeurs[0].presente = true;
+    etat.axes_references = 0x1u | 0x2u; /* X et Y references */
+    ECRAN_ACCUEIL_IDLE.mettre_a_jour(&etat, false, ctx);
+
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_X], LV_EVENT_CLICKED, NULL);
+    mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_msgbox_get_title(mbox)), "Home X?");
+
+    /* second appui (Home Y) alors que "Home X?" est toujours ouvert */
+    lv_obj_send_event(ctx->home_boutons[ECRAN_ACCUEIL_IDLE_HOME_Y], LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_msgbox_get_title(dernier_msgbox())), "Home X?"); /* toujours le premier */
+    VERIFIER(source_etat_sim_file_taille() == avant); /* rien envoye */
+
+    pied = lv_msgbox_get_footer(mbox);
+    bouton_action = lv_obj_get_child(pied, 1);
+    lv_obj_send_event(bouton_action, LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "G28 X") != NULL); /* le bon axe... */
+    VERIFIER(strstr(arguments, "G28 Y") == NULL); /* ...jamais celui du second appui */
+    lv_timer_handler();
+    source_etat_sim_cycle();
+
     lv_obj_delete(parent);
     free(brut);
 }

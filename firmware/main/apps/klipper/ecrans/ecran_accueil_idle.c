@@ -671,6 +671,18 @@ static void home_bouton_cb(lv_event_t *e)
     uint8_t masque = info->masque;
 
     if ((ctx->axes_references_connus & masque) != 0) {
+        /* Ne poser le masque en attente QUE si le dialogue s'ouvre vraiment.
+         * confirmation_ouvrir_ex() est un singleton qui refuse silencieusement
+         * (void) une seconde ouverture tant qu'une premiere est a l'ecran ;
+         * ecrire home_masque_en_attente avant ce refus le pointerait vers un
+         * axe que le dialogue AFFICHE toujours comme l'ancien, et confirmer
+         * enverrait le G28 du mauvais axe (revue tache 5). Un vrai doigt ne
+         * peut pas atteindre un second bouton sous le fond modal plein cadre,
+         * mais lv_obj_send_event() -- le seam de test -- si : la garde ferme le
+         * chemin des deux cotes. */
+        if (confirmation_est_ouverte()) {
+            return;
+        }
         ctx->home_masque_en_attente = masque;
         confirmation_ouvrir_ex(ECRAN_ACCUEIL_IDLE_HOME_TITRES[info->indice], ECRAN_ACCUEIL_IDLE_HOME_MESSAGE,
                                 ECRAN_ACCUEIL_IDLE_HOME_ACTION, true, ECRAN_ACCUEIL_IDLE_HOME_DECLINER,

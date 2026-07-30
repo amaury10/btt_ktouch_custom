@@ -59,6 +59,18 @@ void confirmation_ouvrir(const char *titre, const char *message,
                           const char *libelle_action, bool destructif,
                           confirmation_rappel_t rappel, void *contexte);
 
+/* Vrai tant qu'un dialogue est ouvert (entre confirmation_ouvrir[_ex]() et
+ * l'invocation du rappel qui le referme). Un appelant qui, sur un même écran,
+ * peut déclencher plusieurs ouvertures avant que la première ne soit résolue
+ * s'en sert pour NE PAS préparer d'état associé à une ouverture que le
+ * singleton refuserait : confirmation_ouvrir[_ex]() rend void et ignore
+ * silencieusement une seconde ouverture, donc rien dans son retour ne le
+ * signale. Voir ecran_accueil_idle.c (home_bouton_cb), qui ne pose son masque
+ * d'axe en attente qu'après avoir vérifié que le dialogue va réellement
+ * s'ouvrir -- sans quoi un second appui retargetterait le G28 en attente vers
+ * un axe que le dialogue affiché nomme toujours autrement. */
+bool confirmation_est_ouverte(void);
+
 /* Fermeture : les deux boutons de pied sont les SEULES sorties. Un
  * effleurement du fond (hors de la boîte) et une touche ECHAP (clavier
  * physique/encodeur) ne ferment PAS le dialogue — délibérément :
