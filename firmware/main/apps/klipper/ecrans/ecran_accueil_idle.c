@@ -170,39 +170,57 @@ _Static_assert(MARGE + OUTIL_ACTIF_LARGEUR <= LARGEUR_CONTENU - MARGE,
 _Static_assert(BARRE_HAUTEUR_ECRAN + CONTROLES_Y + CONTROLES_HAUTEUR <= BANDEAU_Y_ECRAN,
                 "la zone de controles chevauche la bande du bandeau de notification de l'habillage");
 
-/* --- Mise en page interne de la zone de controles (tache 4) -------------
+/* --- Mise en page interne de la zone de controles (tache 4, fix round 1
+ * revue code -- defaut Important n2, "le pad de jog n'est pas une croix
+ * directionnelle propre") ------------------------------------------------
  *
- * Pad XY (trois lignes, "autour d'un centre" -- Y+ en haut, X-/(centre
- * vide)/X+ au milieu, Y- en bas) + colonne Z a cote (Z+/Z-, meme hauteur
- * totale que le pad) + selecteur de pas a droite (occupe TOUT l'espace
- * restant, voir SELECTEUR_LARGEUR ci-dessous) -- les trois groupes tiennent
- * sur UNE seule rangee horizontale : "en dessous" du brief (SDD
- * task-4-brief.md) n'est pas atteignable en restant dans CONTROLES_HAUTEUR
- * sans re-tailler la zone de temperature (voir le commentaire de tete de ce
- * fichier) -- cote a cote reste "un pad de jog + un selecteur de pas dans
- * la zone de controles" au sens du brief, juste reparti sur la largeur
- * plutot que la hauteur. */
-#define CONTROLES_PAD_INTERNE 6 /* marge interne de zone_controles, tous cotes */
+ * Pad XY (trois lignes, symetrique autour d'un centre vide -- Y+ en haut,
+ * X-/(centre)/X+ au milieu, Y- en bas) + colonne Z NETTEMENT separee a cote
+ * (Z+/Z-, meme hauteur totale que le pad, ecart double de celui entre les
+ * boutons du pad -- JOG_Z_ECART_COLONNE, pour qu'elle se lise comme un
+ * groupe distinct plutot que comme une cinquieme colonne du pad) +
+ * selecteur de pas a droite (occupe TOUT l'espace restant, voir
+ * SELECTEUR_LARGEUR ci-dessous) -- les trois groupes tiennent sur UNE seule
+ * rangee horizontale : "en dessous" du brief (SDD task-4-brief.md) n'est pas
+ * atteignable en restant dans CONTROLES_HAUTEUR sans re-tailler la zone de
+ * temperature (voir le commentaire de tete de ce fichier) -- cote a cote
+ * reste "un pad de jog + un selecteur de pas dans la zone de controles" au
+ * sens du brief, juste reparti sur la largeur plutot que la hauteur.
+ *
+ * Deux ecarts NOMMES SEPAREMENT (fix round 1) : JOG_ECART_LIGNE (vertical,
+ * entre les 3 lignes du pad ET entre les 2 boutons Z -- contraint par
+ * CONTROLES_HAUTEUR, donc serre) et JOG_ECART_COLONNE (horizontal, entre les
+ * 3 colonnes du pad -- jamais contraint par la hauteur, donc large) : les
+ * confondre sous un seul JOG_ECART (version initiale de cette tache) collait
+ * les boutons horizontalement aussi serre que verticalement, ce qui lisait
+ * "eparpille" plutot que "croix" sur idle-jog.png -- un ecart horizontal
+ * genereux, lui, ne coute rien au budget vertical. */
+#define CONTROLES_PAD_INTERNE 4 /* marge interne de zone_controles, tous cotes */
 
-#define JOG_BOUTON_LARGEUR 44
-#define JOG_BOUTON_HAUTEUR 24
-#define JOG_ECART           4 /* entre les 3 lignes du pad XY et entre les 2 boutons Z */
+#define JOG_BOUTON_LARGEUR  54
+#define JOG_BOUTON_HAUTEUR  24
+#define JOG_ECART_LIGNE      6 /* vertical : entre les 3 lignes du pad, et entre les 2 boutons Z */
+#define JOG_ECART_COLONNE   12 /* horizontal : entre les 3 colonnes du pad (X-/centre/X+) */
 
-#define JOG_PAD_LARGEUR (3 * JOG_BOUTON_LARGEUR + 2 * JOG_ECART)
-#define JOG_PAD_HAUTEUR (3 * JOG_BOUTON_HAUTEUR + 2 * JOG_ECART)
+#define JOG_PAD_LARGEUR (3 * JOG_BOUTON_LARGEUR + 2 * JOG_ECART_COLONNE)
+#define JOG_PAD_HAUTEUR (3 * JOG_BOUTON_HAUTEUR + 2 * JOG_ECART_LIGNE)
 
 #define JOG_Z_LARGEUR JOG_BOUTON_LARGEUR
-#define JOG_Z_HAUTEUR ((JOG_PAD_HAUTEUR - JOG_ECART) / 2)
-#define JOG_Z_ECART_COLONNE 10 /* entre le pad XY et la colonne Z */
+#define JOG_Z_HAUTEUR ((JOG_PAD_HAUTEUR - JOG_ECART_LIGNE) / 2)
+/* Double de JOG_ECART_COLONNE (fix round 1) : la colonne Z doit se lire
+ * comme un groupe SEPARE du pad XY, pas comme un prolongement de sa
+ * troisieme colonne -- un ecart simplement egal aux ecarts internes du pad
+ * ne le distinguait pas assez (revue code, defaut Important n2). */
+#define JOG_Z_ECART_COLONNE (2 * JOG_ECART_COLONNE)
 
-#define SELECTEUR_ECART_PAD 16 /* entre la colonne Z et le selecteur de pas */
+#define SELECTEUR_ECART_PAD JOG_Z_ECART_COLONNE /* meme rythme visuel que l'ecart pad->Z */
 #define SELECTEUR_LARGEUR (LARGEUR_CONTENU - 2 * MARGE - 2 * CONTROLES_PAD_INTERNE - JOG_PAD_LARGEUR - \
                             JOG_Z_ECART_COLONNE - JOG_Z_LARGEUR - SELECTEUR_ECART_PAD)
 #define SELECTEUR_HAUTEUR JOG_PAD_HAUTEUR
 
 _Static_assert(2 * CONTROLES_PAD_INTERNE + JOG_PAD_HAUTEUR == CONTROLES_HAUTEUR,
                 "le pad XY ne remplit plus exactement la hauteur de la zone de controles");
-_Static_assert(2 * JOG_Z_HAUTEUR + JOG_ECART == JOG_PAD_HAUTEUR,
+_Static_assert(2 * JOG_Z_HAUTEUR + JOG_ECART_LIGNE == JOG_PAD_HAUTEUR,
                 "la colonne Z (2 boutons) ne fait plus exactement la hauteur du pad XY");
 _Static_assert(CONTROLES_PAD_INTERNE + JOG_PAD_LARGEUR + JOG_Z_ECART_COLONNE + JOG_Z_LARGEUR +
                     SELECTEUR_ECART_PAD + SELECTEUR_LARGEUR + CONTROLES_PAD_INTERNE ==
@@ -210,16 +228,16 @@ _Static_assert(CONTROLES_PAD_INTERNE + JOG_PAD_LARGEUR + JOG_Z_ECART_COLONNE + J
                 "pad + colonne Z + selecteur ne remplissent plus exactement la largeur de la zone de controles");
 
 #define JOG_COL0_X CONTROLES_PAD_INTERNE
-#define JOG_COL1_X (JOG_COL0_X + JOG_BOUTON_LARGEUR + JOG_ECART)
-#define JOG_COL2_X (JOG_COL1_X + JOG_BOUTON_LARGEUR + JOG_ECART)
+#define JOG_COL1_X (JOG_COL0_X + JOG_BOUTON_LARGEUR + JOG_ECART_COLONNE)
+#define JOG_COL2_X (JOG_COL1_X + JOG_BOUTON_LARGEUR + JOG_ECART_COLONNE)
 
 #define JOG_ROW0_Y CONTROLES_PAD_INTERNE
-#define JOG_ROW1_Y (JOG_ROW0_Y + JOG_BOUTON_HAUTEUR + JOG_ECART)
-#define JOG_ROW2_Y (JOG_ROW1_Y + JOG_BOUTON_HAUTEUR + JOG_ECART)
+#define JOG_ROW1_Y (JOG_ROW0_Y + JOG_BOUTON_HAUTEUR + JOG_ECART_LIGNE)
+#define JOG_ROW2_Y (JOG_ROW1_Y + JOG_BOUTON_HAUTEUR + JOG_ECART_LIGNE)
 
 #define JOG_Z_X (CONTROLES_PAD_INTERNE + JOG_PAD_LARGEUR + JOG_Z_ECART_COLONNE)
 #define JOG_Z_Y0 CONTROLES_PAD_INTERNE
-#define JOG_Z_Y1 (JOG_Z_Y0 + JOG_Z_HAUTEUR + JOG_ECART)
+#define JOG_Z_Y1 (JOG_Z_Y0 + JOG_Z_HAUTEUR + JOG_ECART_LIGNE)
 
 #define SELECTEUR_X (JOG_Z_X + JOG_Z_LARGEUR + SELECTEUR_ECART_PAD)
 #define SELECTEUR_Y CONTROLES_PAD_INTERNE

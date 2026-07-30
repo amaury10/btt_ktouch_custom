@@ -99,9 +99,30 @@ void selecteur_pas_creer(selecteur_pas_t *s, lv_obj_t *parent)
         lv_obj_remove_style_all(b);
         lv_obj_set_height(b, LV_PCT(100));
         lv_obj_set_flex_grow(b, 1);
+        /* Fix round 1 (revue code, defaut Important n1) : lv_obj_remove_style_all()
+         * remet bg_opa a LV_OPA_TRANSP -- bg_color, seul, restait donc
+         * invisible (0% opaque), quelle que soit sa valeur ou son etat :
+         * c'est CE qui rendait les quatre "boutons" indiscernables d'un
+         * simple texte sur idle-jog.png, pas une histoire de couleur. Sans
+         * cet appel, LV_STATE_CHECKED ci-dessous aurait beau changer
+         * bg_color, rien ne se serait jamais vu -- meme categorie de piege
+         * que la transition non purgee, corrigee juste au-dessus (les deux
+         * bugs venaient du meme remove_style_all() qui remet TOUT a zero,
+         * pas seulement le theme). */
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(b, lv_color_hex(COULEUR_BOUTON), 0);
         lv_obj_set_style_bg_color(b, lv_color_hex(COULEUR_ACTIF), LV_STATE_CHECKED);
+        /* Fix round 1 (revue code, defaut Important n1) : un remplissage
+         * plein ne bougeant QUE de teinte (gris fonce -> bleu) reste discret
+         * a l'oeil sur un petit ecran -- un bord ajoute, meme poids visuel
+         * que la bordure bleue de 3px qui marque l'outil actif sur les
+         * cellules de temperature (voir COULEUR_ACTIF/bordure dans
+         * ecran_accueil_idle.c), rend le bouton actif sans ambiguite
+         * possible sur une capture. Bord invisible (largeur 0) a l'etat
+         * normal : seul CHECKED en porte un. */
         lv_obj_set_style_border_width(b, 0, 0);
+        lv_obj_set_style_border_width(b, 3, LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(b, lv_color_hex(COULEUR_TEXTE_BOUTON), LV_STATE_CHECKED);
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_set_style_radius(b, 8, 0);
 

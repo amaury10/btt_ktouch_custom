@@ -280,6 +280,21 @@ void suite_ecran_accueil_idle_jog(void)
     VERIFIER(strstr(arguments, "G1 X1 F3000") != NULL);
     /* le script est bien enveloppe dans un objet JSON valide, cle "script" */
     VERIFIER(strstr(arguments, "\"script\"") != NULL);
+    /* Fix round 1 (revue code, defaut Minor n3) : epingle DIRECTEMENT
+     * l'echappement JSON du script de jog plutot que de ne l'inferer
+     * qu'indirectement d'un match de sous-chaine -- klipper_gcode_jog()
+     * produit de VRAIS octets 0x0A (SAVE_GCODE_STATE...\nG91\n...) ; le
+     * contrat BACKEND_ACTION_GCODE (core/backend.h) exige du JSON valide, ou
+     * un octet 0x0A brut a l'interieur d'une chaine JSON violerait RFC 8259
+     * (voir le commentaire de construire_arguments_gcode() dans
+     * ecran_accueil_idle.c). Aucun octet 0x0A cru dans les arguments
+     * envoyes... */
+    VERIFIER(strchr(arguments, '\n') == NULL);
+    /* ...ET la forme echappee (backslash-n litteral, deux caracteres) est
+     * bien presente -- les deux ensemble prouvent l'echappement REEL, pas
+     * une absence accidentelle de retour a la ligne dans un script qui
+     * n'en aurait jamais eu. */
+    VERIFIER(strstr(arguments, "\\n") != NULL);
     source_etat_sim_cycle(); /* draine avant la suite */
 
     /* --- donnees_perimees=true : TOUS les boutons de jog se desactivent,
