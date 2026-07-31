@@ -40,6 +40,27 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 
+# --- Affichage RGB tear-free (config gagnante, validee sur vraie K-Touch) ---
+# Le rendu est gere en CODE par esp_lvgl_port (voir pt_display_init dans le
+# sous-module BSP) : avoid_tearing + direct_mode + bounce buffer, sur le driver
+# officiel esp_lcd. Le choix PT_LVGL_RENDER_* du Kconfig BSP n'est donc PLUS
+# utilise. Les timings panneau (PCLK 14,8 MHz, porches 16/16 et 32/32) sont
+# dans include/pandatouch_board.h -- valeurs OFFICIELLES BTT. Les avoir
+# divergees au bring-up (17 MHz, porches a moitie) etait LA cause racine des
+# instabilites (rouleau/cisaillement/drift) ; les remettre a l'officiel a tout
+# regle.
+#
+# RESTART_IN_VSYNC reste volontairement OFF : avec esp_lvgl_port le swap de
+# framebuffer EST la synchro, donc RESTART se declenchait a chaque swap et
+# faisait clignoter l'ecran (~1-2/s). C'est le bounce buffer, pas RESTART, qui
+# previent le drift ici.
+#
+# Cache donnees 64 Ko (comme l'EV-board de reference Espressif) : plus de hits
+# cache CPU -> moins d'acces PSRAM par le CPU -> plus de bande passante pour le
+# balayage RGB, ce qui evite les underrun. Capture ici car sdkconfig n'est pas
+# suivi par git.
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+
 # --- Sauvetage (rescue.c) : ces trois réglages sont désormais une garantie de
 # sécurité, pas de simples valeurs par défaut, et sont donc pinnés ici. ---
 # Une panique doit toujours redémarrer l'appareil (jamais s'arrêter en

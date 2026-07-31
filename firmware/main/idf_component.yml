@@ -2,3 +2,6 @@ dependencies:
   idf: ">=5.5"
   lvgl/lvgl: "~9.2.0"
   espressif/esp_websocket_client: "^1.8"
+  # 2.8.0 reference LV_COLOR_FORMAT_RGB565_SWAPPED (LVGL 9.3+) ; on est en
+  # LVGL 9.2.2, donc on reste sur 2.7.x qui a deja l'anti-tearing RGB.
+  espressif/esp_lvgl_port: ">=2.7.0,<2.8.0"
