@@ -23,6 +23,13 @@ static const char *TAG = "clavier";
 
 #define COULEUR_FOND            0x1B2430
 #define COULEUR_TEXTE_PRINCIPAL 0xFFFFFF
+/* Palette alignee sur le theme sombre de l'app (voir ecran_accueil*.c) : sans
+ * style explicite, lv_keyboard/lv_textarea prennent le theme LVGL par defaut
+ * (clair) -> clavier blanc sur fond sombre. */
+#define COULEUR_TOUCHE          0x2A3644 /* face des touches = meme bleu-gris que les boutons de l'app */
+#define COULEUR_TOUCHE_PRESSEE  0x3B4E63 /* appui/controle : ECLAIRCIT (le defaut LVGL assombrit -> invisible en sombre) */
+#define COULEUR_CHAMP           0x10161D /* fond de la textarea, plus profond pour distinguer le champ de saisie */
+#define COULEUR_BORDURE         0x2A3644
 
 static struct {
     bool       ouvert;
@@ -43,6 +50,30 @@ static struct {
      * rappel, jamais en garder le pointeur. */
     char       valeur[CLAVIER_VALEUR_MAX];
 } g_clavier;
+
+/* Aligne clavier + textarea sur le theme sombre. Styles LOCAUX poses sur les
+ * objets (detruits a la fermeture du clavier), donc rien a liberer et pas de
+ * lv_style_t statique partage a gerer. */
+static void appliquer_theme_sombre(lv_obj_t *clavier, lv_obj_t *textarea)
+{
+    /* Clavier : fond fondu avec la racine, touches bleu-gris, texte blanc. */
+    lv_obj_set_style_bg_color(clavier, lv_color_hex(COULEUR_FOND), LV_PART_MAIN);
+    lv_obj_set_style_border_width(clavier, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(clavier, lv_color_hex(COULEUR_TOUCHE), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(clavier, lv_color_hex(COULEUR_TEXTE_PRINCIPAL), LV_PART_ITEMS);
+    lv_obj_set_style_border_width(clavier, 0, LV_PART_ITEMS);
+    lv_obj_set_style_radius(clavier, 6, LV_PART_ITEMS);
+    /* Appui (PRESSED) et touches de controle (CHECKED) : eclaircir, sinon le
+     * defaut LVGL les assombrit et le feedback est invisible en theme sombre. */
+    lv_obj_set_style_bg_color(clavier, lv_color_hex(COULEUR_TOUCHE_PRESSEE), LV_PART_ITEMS | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(clavier, lv_color_hex(COULEUR_TOUCHE_PRESSEE), LV_PART_ITEMS | LV_STATE_CHECKED);
+
+    /* Textarea : champ sombre, texte clair, bordure discrete. */
+    lv_obj_set_style_bg_color(textarea, lv_color_hex(COULEUR_CHAMP), LV_PART_MAIN);
+    lv_obj_set_style_text_color(textarea, lv_color_hex(COULEUR_TEXTE_PRINCIPAL), LV_PART_MAIN);
+    lv_obj_set_style_border_color(textarea, lv_color_hex(COULEUR_BORDURE), LV_PART_MAIN);
+    lv_obj_set_style_border_width(textarea, 1, LV_PART_MAIN);
+}
 
 static void evenement_clavier(lv_event_t *e)
 {
@@ -196,6 +227,8 @@ void clavier_ouvrir(const char *titre, const char *valeur_initiale,
     lv_keyboard_set_mode(g_clavier.clavier, mode == CLAVIER_NUMERIQUE
                                                  ? LV_KEYBOARD_MODE_NUMBER
                                                  : LV_KEYBOARD_MODE_TEXT_LOWER);
+
+    appliquer_theme_sombre(g_clavier.clavier, g_clavier.textarea);
 
     /* LV_EVENT_READY (touche OK) et LV_EVENT_CANCEL (touche clavier/fermer)
      * sont les deux seules sorties, voir clavier.h : lv_keyboard fournit déjà
