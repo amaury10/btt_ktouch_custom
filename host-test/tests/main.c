@@ -26,6 +26,7 @@ void suite_ecran_accueil_idle_jog(void);
 void suite_ecran_accueil_idle_home(void);
 void suite_ecran_accueil_idle_temp(void);
 void suite_ecran_accueil_idle_macros(void);
+void suite_ecran_deplacer(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -157,6 +158,12 @@ int main(void)
      * ci-dessus -- voir le commentaire de tete de
      * suite_ecran_accueil_idle_macros() dans test_ecran_accueil_idle.c. */
     suite_ecran_accueil_idle_macros();
+
+    /* Tache 4 (refonte accueil/deplacer) : l'ecran Deplacer (jog en grand +
+     * pas + vitesse + home). Meme garde d'ordonnancement que les suites
+     * ci-dessus (habillage construit + boucle simulee demarree) -- voir le
+     * commentaire de tete de suite_ecran_deplacer() dans test_ecran_deplacer.c. */
+    suite_ecran_deplacer();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */
