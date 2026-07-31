@@ -90,11 +90,16 @@ static bool   g_tampon_deborde = false;
  * réactif, assez long pour ne pas saturer inutilement le CPU en boucle. */
 #define MOONRAKER_WS_SONDAGE_MS 20u
 
-/* Backoff de reconnexion (spec §4, critère 2) : 1 s -> 2 -> 4 -> ... plafonné
- * 30 s, ré-identify + ré-abonnement à CHAQUE retour (jamais seulement le
- * premier). */
+/* Backoff de reconnexion (spec §4, critère 2) : 1 s -> 2 -> 4 -> ... plafonné,
+ * ré-identify + ré-abonnement à CHAQUE retour (jamais seulement le premier).
+ * Plafond a 5 s (et non 30 s) : constate sur vraie K-Touch -- si l'ecran boote
+ * AVANT l'imprimante, le backoff atteignait 30 s, donc jusqu'a 30 s de latence
+ * pour accrocher quand l'imprimante revient (ressenti "n'accroche jamais"). A
+ * 5 s la reconnexion est quasi-immediate ; le cout (une tentative WS toutes les
+ * <=5 s pendant que l'imprimante est absente) est negligeable -- le poll HTTP
+ * du backend tourne deja a ~4 s. */
 #define MOONRAKER_WS_BACKOFF_INITIAL_MS 1000u
-#define MOONRAKER_WS_BACKOFF_MAX_MS     30000u
+#define MOONRAKER_WS_BACKOFF_MAX_MS     5000u
 
 /* Cadencement du journal de reconnexion (même principe que
  * moonraker_journal_echec_pret() dans backend_moonraker.c, dont l'historique
