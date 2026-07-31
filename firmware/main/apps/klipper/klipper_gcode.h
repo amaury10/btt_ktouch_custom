@@ -47,3 +47,8 @@ bool klipper_gcode_home(char *sortie, size_t taille, uint8_t axes_masque);
  * le gcode). `cible_c` ∈ [0, 350] (0 = éteindre). */
 bool klipper_gcode_consigne_temp(char *sortie, size_t taille,
                                  const char *chauffeur, uint16_t cible_c);
+
+/* Arrêt d'urgence, via la commande M112 :
+ *   M112
+ * Fonction simple sans paramètres. */
+bool klipper_gcode_arret_urgence(char *sortie, size_t taille);

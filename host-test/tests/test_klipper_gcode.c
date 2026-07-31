@@ -46,4 +46,12 @@ void suite_klipper_gcode(void)
     VERIFIER(klipper_gcode_consigne_temp(g, sizeof(g), NULL, 210) == false);
     VERIFIER(klipper_gcode_consigne_temp(g, sizeof(g), "extruder\nM112", 210) == false); /* injection */
     VERIFIER(klipper_gcode_consigne_temp(g, sizeof(g), "extruder", 400) == false);       /* > 350 */
+
+    /* --- arret d'urgence --- */
+    VERIFIER(klipper_gcode_arret_urgence(g, sizeof(g)) == true);
+    VERIFIER_TEXTE(g, "M112");
+    /* tampon trop court : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_arret_urgence(g, 2) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
 }

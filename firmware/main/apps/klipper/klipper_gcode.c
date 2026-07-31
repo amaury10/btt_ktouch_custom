@@ -160,3 +160,22 @@ bool klipper_gcode_consigne_temp(char *sortie, size_t taille,
     memcpy(sortie, tampon, (size_t)ecrit + 1);
     return true;
 }
+
+bool klipper_gcode_arret_urgence(char *sortie, size_t taille)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "M112");
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
