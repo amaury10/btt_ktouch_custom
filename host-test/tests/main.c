@@ -37,6 +37,7 @@ void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
 void suite_selecteur_choix(void);
+void suite_rail(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -97,6 +98,11 @@ int main(void)
      * boutons, meme absence de contrainte d'ordre que suite_selecteur_pas()
      * juste au-dessus (aucun etat process-wide partage). */
     suite_selecteur_choix();
+    /* Tache 3 (refonte accueil/deplacer) : le rail persistant d'acces rapide,
+     * un widget autonome de plus (voir rail.h) -- meme absence de contrainte
+     * d'ordre que suite_selecteur_pas()/suite_selecteur_choix() ci-dessus
+     * (aucun etat process-wide partage). */
+    suite_rail();
     suite_ecran_accueil();
     suite_ecran_accueil_idle();
     suite_clavier();
