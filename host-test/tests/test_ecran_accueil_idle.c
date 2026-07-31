@@ -763,7 +763,10 @@ void suite_ecran_accueil_idle_temp(void)
     VERIFIER(kb != NULL);
     VERIFIER(ta != NULL);
     VERIFIER(lv_keyboard_get_mode(kb) == LV_KEYBOARD_MODE_NUMBER);
-    VERIFIER_TEXTE(lv_textarea_get_text(ta), "200");
+    /* Nouveau contrat : champ VIDE + consigne courante en placeholder (grisee),
+     * pour retaper par-dessus sans effacer. Valider sans saisir garde "200". */
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "200");
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "");
 
     /* --- (b) valider "210" : BACKEND_ACTION_GCODE, script
      * SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210. ------------------ */
@@ -861,7 +864,9 @@ void suite_ecran_accueil_idle_temp(void)
     ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
     VERIFIER(kb != NULL);
     VERIFIER(ta != NULL);
-    VERIFIER_TEXTE(lv_textarea_get_text(ta), "55");
+    /* Champ vide + consigne courante en placeholder (voir test consigne extrudeur). */
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "55");
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "");
     lv_textarea_set_text(ta, "70");
     avant = source_etat_sim_file_taille();
     lv_obj_send_event(kb, LV_EVENT_READY, NULL);

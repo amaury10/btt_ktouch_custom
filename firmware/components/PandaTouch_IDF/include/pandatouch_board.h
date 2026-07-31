@@ -9,6 +9,11 @@
  * clock trop haute = instabilite de synchro (rouleau/cisaillement/clignotement).
  * On revient aux constantes connues-bonnes. */
 #define PT_LCD_PCLK_HZ_MIN 14000000
+/* PCLK 14,8 MHz = valeur officielle BTT, config STABLE validee sur hardware.
+ * NE PAS remonter : le 25 MHz du datasheet (60 Hz, UI plus reactive) a ete
+ * teste sur la vraie K-Touch -> l'image RESAUTE (rouleau), meme avec le bounce
+ * buffer : la bande passante PSRAM ne suit pas a 60 Hz. On accepte donc ~32 Hz
+ * (clavier/UI un peu moins snappy) contre la stabilite. */
 #define PT_LCD_PCLK_HZ 14800000
 
 #define PT_LCD_H_RES 800

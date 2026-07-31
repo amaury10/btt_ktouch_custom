@@ -49,6 +49,11 @@ static struct {
      * appelant qui a besoin de la valeur plus tard doit la copier depuis le
      * rappel, jamais en garder le pointeur. */
     char       valeur[CLAVIER_VALEUR_MAX];
+    /* Valeur affichee en placeholder (grisee) a l'ouverture ; rendue telle
+     * quelle au rappel si OK est presse sans rien saisir -- le champ vide
+     * retombe dessus (voir evenement_clavier). Permet de « retaper par-dessus »
+     * sans effacer, tout en gardant l'ancienne valeur si on valide sans changer. */
+    char       valeur_initiale[CLAVIER_VALEUR_MAX];
 } g_clavier;
 
 /* Aligne clavier + textarea sur le theme sombre. Styles LOCAUX poses sur les
@@ -123,6 +128,11 @@ static void evenement_clavier(lv_event_t *e)
          * textarea de tout ce fichier, et elle a lieu pendant que l'objet
          * est encore parfaitement vivant. */
         const char *texte = lv_textarea_get_text(g_clavier.textarea);
+        if (texte == NULL || texte[0] == '\0') {
+            /* OK presse sans rien taper : on conserve la valeur initiale
+             * (affichee en placeholder) plutot que de rendre une chaine vide. */
+            texte = g_clavier.valeur_initiale;
+        }
         strncpy(g_clavier.valeur, texte != NULL ? texte : "", sizeof(g_clavier.valeur) - 1);
         g_clavier.valeur[sizeof(g_clavier.valeur) - 1] = '\0';
         resultat = g_clavier.valeur;
@@ -214,7 +224,14 @@ void clavier_ouvrir(const char *titre, const char *valeur_initiale,
      * validation, est l'unique source de vérité sur la taille maximale. */
     char tampon_initial[CLAVIER_VALEUR_MAX];
     snprintf(tampon_initial, sizeof(tampon_initial), "%s", valeur_initiale != NULL ? valeur_initiale : "");
-    lv_textarea_set_text(g_clavier.textarea, tampon_initial);
+    /* Placeholder plutot que set_text : la valeur actuelle s'affiche GRISEE et
+     * le champ reste VIDE, donc taper la remplace directement (« retaper
+     * par-dessus sans effacer »). LVGL 9 n'expose pas de select-all
+     * programmatique, c'est l'equivalent propre et 100% API publique. La valeur
+     * est memorisee pour le cas « OK sans saisie » (voir evenement_clavier). */
+    snprintf(g_clavier.valeur_initiale, sizeof(g_clavier.valeur_initiale), "%s", tampon_initial);
+    lv_textarea_set_placeholder_text(g_clavier.textarea, tampon_initial);
+    lv_textarea_set_text(g_clavier.textarea, "");
 
     g_clavier.clavier = lv_keyboard_create(g_clavier.racine);
     lv_obj_set_width(g_clavier.clavier, LV_PCT(100));

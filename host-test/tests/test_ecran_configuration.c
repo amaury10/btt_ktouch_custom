@@ -345,8 +345,10 @@ static void section_clavier(void)
     lv_obj_t *kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
     VERIFIER(ta != NULL);
     VERIFIER(kb != NULL);
-    /* pre-rempli avec la valeur courante du champ, pas une chaine vide */
-    VERIFIER_TEXTE(lv_textarea_get_text(ta), "192.168.1.1:7125");
+    /* Nouveau contrat : champ VIDE + valeur courante en placeholder (grisee),
+     * pour retaper par-dessus sans effacer. */
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "192.168.1.1:7125");
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "");
 
     lv_textarea_set_text(ta, "newhost.local:1234");
     lv_obj_send_event(kb, LV_EVENT_READY, NULL);
@@ -369,7 +371,8 @@ static void section_clavier(void)
     VERIFIER(ta != NULL);
     VERIFIER(kb != NULL);
     /* pre-rempli avec la valeur ISSUE du READY precedent, pas l'originale */
-    VERIFIER_TEXTE(lv_textarea_get_text(ta), "newhost.local:1234");
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "newhost.local:1234");
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "");
 
     lv_textarea_set_text(ta, "ceci-ne-doit-jamais-etre-enregistre");
     lv_obj_send_event(kb, LV_EVENT_CANCEL, NULL);
@@ -388,7 +391,8 @@ static void section_clavier(void)
     VERIFIER(racine_clavier != NULL);
     ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
     VERIFIER(ta != NULL);
-    VERIFIER_TEXTE(lv_textarea_get_text(ta), "newhost.local:1234");
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "newhost.local:1234");
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "");
     lv_obj_send_event(enfant_de_classe(racine_clavier, &lv_keyboard_class), LV_EVENT_CANCEL, NULL);
     lv_timer_handler();
     VERIFIER(dernier_enfant_calque_superieur() == NULL);
