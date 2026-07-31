@@ -19,6 +19,11 @@ static const char *TAG = "habillage";
 #define BARRE_HAUTEUR     44
 #define BANDEAU_HAUTEUR   60
 #define BANDEAU_DUREE_MS 4000
+/* Rail persistant, colonne gauche de la zone de contenu (voir rail.h,
+ * "colonne ~58 px") ; le conteneur de navigation occupe le reste
+ * (LARGEUR_ECRAN - RAIL_LARGEUR = 742 px), d'où les LARGEUR_CONTENU=742 des
+ * écrans qui y vivent (ecran_deplacer.c, ecran_accueil_hub.c). */
+#define RAIL_LARGEUR      58
 
 #define COULEUR_FOND_BARRE     0x1B2430
 #define COULEUR_TEXTE_PRINCIPAL 0xFFFFFF
@@ -53,6 +58,24 @@ static lv_obj_t *g_contenu;
 static lv_obj_t *g_bandeau;
 static lv_obj_t *g_bandeau_texte;
 static lv_timer_t *g_bandeau_timer;
+
+/* Rail persistant du shell : état de fichier comme g_barre (un seul rail
+ * existe jamais), PAS un contexte d'écran -- il survit à toute la pile de
+ * navigation. Le handler de clic et les ids de surlignage sont injectés par
+ * l'application (habillage_definir_action_rail()), l'habillage reste générique
+ * (aucun id Klipper en dur ici, même politique que g_ecran_reglages). */
+static rail_t g_rail;
+static void (*g_rail_handler)(rail_action_t, void *);
+static void *g_rail_ctx;
+static const char *g_rail_id_accueil;
+static const char *g_rail_id_macros;
+/* Dernière navigation_sequence() vue par le surlignage du rail. Suivi SÉPARÉ
+ * de g_derniere_sequence (plus bas) : ce dernier ne bouge que dans le bloc de
+ * propagation gardé par `disponible`, alors que le surlignage du rail doit
+ * suivre la navigation même hors ligne (avant tout premier état). Les fondre
+ * casserait aussi la propagation du premier mettre_a_jour d'un écran empilé
+ * pendant une période calme (voir habillage_pomper()). */
+static uint32_t g_derniere_sequence_rail;
 
 /* Dernier état transmis à navigation_mettre_a_jour(), pour la décision de
  * propagation de habillage_pomper() (voir son commentaire dans habillage.h).
@@ -151,6 +174,34 @@ static void bouton_reglages_cb(lv_event_t *e)
 void habillage_definir_ecran_reglages(const ecran_desc_t *desc)
 {
     g_ecran_reglages = desc;
+}
+
+/* Dispatch générique des clics du rail (passé à rail_creer()) : transmet à
+ * l'action injectée par l'application. Si aucune n'a été enregistrée (handler
+ * NULL), ne fait rien -- même garde que bouton_reglages_cb() sur
+ * g_ecran_reglages. Le `void *` reçu de rail.c est ignoré (rail_creer() a été
+ * appelé avec ctx=NULL) : c'est g_rail_ctx, fourni séparément par
+ * l'application, qui est relayé au handler. */
+static void habillage_rail_dispatch(rail_action_t action, void *inutilise)
+{
+    (void)inutilise;
+    if (g_rail_handler != NULL) {
+        g_rail_handler(action, g_rail_ctx);
+    }
+}
+
+void habillage_definir_action_rail(void (*handler)(rail_action_t, void *), void *ctx,
+                                   const char *id_accueil, const char *id_macros)
+{
+    g_rail_handler = handler;
+    g_rail_ctx = ctx;
+    g_rail_id_accueil = id_accueil;
+    g_rail_id_macros = id_macros;
+}
+
+rail_t *habillage_rail(void)
+{
+    return &g_rail;
 }
 
 static void construire_barre(lv_obj_t *parent)
@@ -308,14 +359,35 @@ void habillage_construire(lv_obj_t *ecran_racine)
 
     construire_barre(ecran_racine);
 
-    /* Zone de contenu : le reste (800x436), remis à navigation_init() sans
-     * aucun style hérité — c'est à chaque écran de poser son propre fond
-     * (même politique que navigation_empiler() applique déjà à chaque
-     * conteneur d'écran, voir navigation.c). */
-    g_contenu = lv_obj_create(ecran_racine);
+    /* Zone de contenu : le reste (800x436, sous la barre), scindée en
+     * [rail 58px | conteneur de navigation 742px] côte à côte. Conteneur nu
+     * (aucun style hérité) : le fond et le positionnement du rail/conteneur
+     * sont posés explicitement ci-dessous. */
+    lv_obj_t *zone_contenu = lv_obj_create(ecran_racine);
+    lv_obj_remove_style_all(zone_contenu);
+    lv_obj_set_size(zone_contenu, LARGEUR_ECRAN, HAUTEUR_ECRAN - BARRE_HAUTEUR);
+    lv_obj_set_pos(zone_contenu, 0, BARRE_HAUTEUR);
+    lv_obj_clear_flag(zone_contenu, LV_OBJ_FLAG_SCROLLABLE);
+
+    /* Rail persistant, colonne gauche (RAIL_LARGEUR px, pleine hauteur du
+     * contenu). rail_creer() lui donne sa taille par défaut ; on la force ici
+     * à la hauteur utile de l'écran (droit explicitement accordé par rail.h)
+     * pour que STOP se cale en bas de la colonne. ctx=NULL : le contexte
+     * applicatif est fourni séparément (g_rail_ctx), pas via rail.c. */
+    rail_creer(&g_rail, zone_contenu, habillage_rail_dispatch, NULL);
+    if (g_rail.racine != NULL) {
+        lv_obj_set_size(g_rail.racine, RAIL_LARGEUR, HAUTEUR_ECRAN - BARRE_HAUTEUR);
+        lv_obj_set_pos(g_rail.racine, 0, 0);
+    }
+
+    /* Conteneur de navigation : à droite du rail (742x436), remis à
+     * navigation_init() sans aucun style hérité — c'est à chaque écran de
+     * poser son propre fond (même politique que navigation_empiler() applique
+     * déjà à chaque conteneur d'écran, voir navigation.c). */
+    g_contenu = lv_obj_create(zone_contenu);
     lv_obj_remove_style_all(g_contenu);
-    lv_obj_set_size(g_contenu, LARGEUR_ECRAN, HAUTEUR_ECRAN - BARRE_HAUTEUR);
-    lv_obj_set_pos(g_contenu, 0, BARRE_HAUTEUR);
+    lv_obj_set_size(g_contenu, LARGEUR_ECRAN - RAIL_LARGEUR, HAUTEUR_ECRAN - BARRE_HAUTEUR);
+    lv_obj_set_pos(g_contenu, RAIL_LARGEUR, 0);
     lv_obj_clear_flag(g_contenu, LV_OBJ_FLAG_SCROLLABLE);
     navigation_init(g_contenu);
 
@@ -328,6 +400,7 @@ void habillage_construire(lv_obj_t *ecran_racine)
 
     g_derniere_generation = 0;
     g_derniere_liaison = LIAISON_CONNEXION;
+    g_derniere_sequence_rail = 0;
 }
 
 static void rafraichir_barre(liaison_etat_t liaison)
@@ -416,6 +489,28 @@ void habillage_pomper(void)
      * boucle non démarrée doit se lire "connecting", pas rester figée sur
      * un premier rendu jamais mis à jour. */
     rafraichir_barre(liaison);
+
+    /* Surlignage du rail : le bouton correspondant à l'écran au sommet de la
+     * pile. Recalculé au seul CHANGEMENT de sommet (navigation_sequence()),
+     * jamais à chaque pompe -- et AVANT la garde `disponible` ci-dessous : le
+     * rail reflète la navigation, pas l'état applicatif, il doit donc suivre
+     * même hors ligne. Reste générique : compare aux ids injectés par
+     * l'application (habillage_definir_action_rail()), aucun id Klipper en dur.
+     * NULL des deux ids (application non branchée, ou tests du seul widget) :
+     * chaque écran retombe sur RAIL_NB (aucun surligné), jamais un
+     * déréférencement. */
+    uint32_t sequence_rail = navigation_sequence();
+    if (sequence_rail != g_derniere_sequence_rail) {
+        const char *id = navigation_id_courant();
+        rail_action_t actif = RAIL_NB;
+        if (id != NULL && g_rail_id_accueil != NULL && strcmp(id, g_rail_id_accueil) == 0) {
+            actif = RAIL_ACCUEIL;
+        } else if (id != NULL && g_rail_id_macros != NULL && strcmp(id, g_rail_id_macros) == 0) {
+            actif = RAIL_MACROS;
+        }
+        rail_marquer_actif(&g_rail, actif);
+        g_derniere_sequence_rail = sequence_rail;
+    }
 
     if (!disponible) {
         return;

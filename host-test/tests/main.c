@@ -40,6 +40,7 @@ void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
 void suite_selecteur_choix(void);
 void suite_rail(void);
+void suite_integration_rail(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -171,6 +172,13 @@ int main(void)
      * suite_ecran_deplacer() juste au-dessus -- voir le commentaire de tete
      * de suite_ecran_accueil_hub() dans test_ecran_accueil_hub.c. */
     suite_ecran_accueil_hub();
+
+    /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
+     * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage
+     * construit -> rail cree) ET suite_commandes() (boucle simulee demarree) --
+     * meme garde d'ordonnancement que suite_ecran_deplacer(), verifiee a
+     * l'entree de la suite (voir test_integration_rail.c). */
+    suite_integration_rail();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

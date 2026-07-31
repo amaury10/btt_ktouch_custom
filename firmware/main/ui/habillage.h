@@ -30,6 +30,7 @@
 
 #include "ecran.h"
 #include "liaison.h"
+#include "widgets/rail.h"
 
 /* Enregistre l'écran de réglages que le bouton engrenage de la barre d'état
  * ouvre (visible seulement à la profondeur 1, un accueil au sommet). NULL (par
@@ -39,12 +40,33 @@
  * valide tant que l'habillage vit (typiquement un descripteur statique). */
 void habillage_definir_ecran_reglages(const ecran_desc_t *desc);
 
+/* Enregistre le comportement (couche APPLICATION) des clics du rail
+ * persistant, et les identifiants d'écran servant au surlignage. L'habillage
+ * reste générique : au clic d'un bouton du rail, il appelle `handler(action,
+ * ctx)` (voir apps/klipper/rail_actions.h pour l'implémentation Klipper) --
+ * comme habillage_definir_ecran_reglages() injecte l'écran de config sans que
+ * l'habillage ne connaisse ECRAN_CONFIGURATION en dur. `handler` NULL : un
+ * clic ne fait rien. `id_accueil`/`id_macros` sont comparés à
+ * navigation_id_courant() (voir navigation.h) à chaque changement de sommet de
+ * pile pour surligner le bon bouton (RAIL_ACCUEIL / RAIL_MACROS, RAIL_NB pour
+ * tout autre écran) -- NULL désactive simplement ce mappage-là. `ctx`, les
+ * deux ids et `handler` doivent rester valides tant que l'habillage vit. */
+void habillage_definir_action_rail(void (*handler)(rail_action_t, void *), void *ctx,
+                                   const char *id_accueil, const char *id_macros);
+
+/* Le rail persistant du shell (état de fichier, comme la barre d'état) : un
+ * accesseur générique, exposé pour le surlignage applicatif et les tests
+ * (parcours de `->racine`/`->boutons[]`). Toujours non-NULL ; ses champs ne
+ * sont peuplés qu'après habillage_construire() (avant, `->racine` vaut NULL). */
+rail_t *habillage_rail(void);
+
 /* Construit la barre d'état (bande 44 px en haut), le bandeau de
  * notifications (masqué, 60 px, superposé en bas) et la zone de contenu
- * (le reste, 800x436) sur `ecran_racine`, puis appelle navigation_init() sur
- * cette zone de contenu. `ecran_racine` doit rester valide tant que
- * l'habillage est utilisé — typiquement lv_screen_active(), comme pour
- * navigation_init() (voir navigation.h).
+ * (le reste), scindée en [rail 58 px | conteneur de navigation 742 px] sur
+ * `ecran_racine`, puis appelle navigation_init() sur ce conteneur (742x436).
+ * `ecran_racine` doit rester valide tant que l'habillage est utilisé —
+ * typiquement lv_screen_active(), comme pour navigation_init() (voir
+ * navigation.h).
  *
  * Un second appel sans avoir détruit l'habillage précédent journalise une
  * alerte et ne fait rien : il n'y a jamais qu'une seule barre d'état, et

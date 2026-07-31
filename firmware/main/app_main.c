@@ -26,12 +26,15 @@
 #include "backend_factice.h"
 #include "backend_moonraker.h"
 #include "boucle.h"
+#include "ecran_accueil_hub.h"
 #include "ecran_accueil_idle.h"
 #include "ecran_configuration.h"
+#include "ecran_macros.h"
 #include "habillage.h"
 #include "journal.h"
 #include "navigation.h"
 #include "netlog.h"
+#include "rail_actions.h"
 #include "reglages.h"
 #include "rescue.h"
 #include "web.h"
@@ -473,7 +476,17 @@ void app_main(void)
              * (adresse imprimante), accessible depuis l'accueil a tout moment,
              * pas seulement au premier demarrage. */
             habillage_definir_ecran_reglages(&ECRAN_CONFIGURATION);
-            esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_IDLE);
+            /* Comportement Klipper du rail persistant (Accueil/Home/Macros/STOP)
+             * + ids d'ecran servant au surlignage. L'habillage reste generique :
+             * il ne connait ni klipper_gcode.h ni ces ecrans, l'application les
+             * injecte ici (meme motif que habillage_definir_ecran_reglages
+             * ci-dessus). */
+            habillage_definir_action_rail(rail_action_klipper, NULL, ECRAN_ACCUEIL_HUB.id,
+                                          ECRAN_MACROS.id);
+            /* Accueil-hub (tuiles de temperature + grille de menu) comme ecran
+             * de depart, a la place de l'ancien ECRAN_ACCUEIL_IDLE (supprime en
+             * tache 7). */
+            esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_HUB);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
                                esp_err_to_name(erreur_accueil));

@@ -141,6 +141,7 @@ add_executable(tests
     tests/test_selecteur_pas.c
     tests/test_selecteur_choix.c
     tests/test_rail.c
+    tests/test_integration_rail.c
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
@@ -148,6 +149,7 @@ add_executable(tests
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c
     ${KLIPPER_DIR}/accueil_choix.c
+    ${KLIPPER_DIR}/rail_actions.c
     ${CORE_DIR}/etat_store.c
     ${CORE_DIR}/liaison.c
     ${CORE_DIR}/backend_factice.c

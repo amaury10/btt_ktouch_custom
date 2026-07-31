@@ -1,7 +1,7 @@
 /* Implémentation : voir ecran_accueil_hub.h pour le contrat.
  *
- * Mise en page (800x436, sous la barre d'état construite par habillage.c,
- * même convention que ecran_accueil_idle.c/ecran_deplacer.c) : la zone de
+ * Mise en page (742x436, dans le conteneur de navigation à droite du rail
+ * persistant, sous la barre d'état construite par habillage.c) : la zone de
  * température en haut (extrudeurs présents puis plateau, géométrie par
  * palier -- klipper_paliers.h, IDENTIQUE à ecran_accueil_idle.c, voir
  * geometrie_pour_palier()/cellule_creer() ci-dessous, copiés depuis ce
@@ -32,7 +32,7 @@
 #include "navigation.h" /* navigation_empiler() */
 #include "tuile.h" /* ui_format_temperature() */
 
-#define LARGEUR_CONTENU 800
+#define LARGEUR_CONTENU 742 /* 800 - RAIL_LARGEUR (58), voir habillage.c */
 #define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
 
 #define MARGE        14
@@ -47,8 +47,8 @@
  * commentaire de tête pour le détail du budget par palier). Dupliquées ici
  * plutôt que partagées, voir le commentaire de tête de ce fichier et celui
  * de ecran_accueil_hub.h ("Réutilisation (DRY)"). ------------------------ */
-#define CELL_LARGEUR_1COL 772
-#define CELL_LARGEUR_2COL 383
+#define CELL_LARGEUR_1COL 714
+#define CELL_LARGEUR_2COL 354
 
 #define CELL_HAUTEUR_MONO    100
 #define CELL_HAUTEUR_MOYEN    70
@@ -64,7 +64,12 @@
  * géométrie propre à ce hub (l'idle n'avait pas cette zone). ------------- */
 #define MENU_COLONNES 3
 #define MENU_LIGNES   2
-#define MENU_ECART_COLONNE 8
+/* 9 (et non 8 comme au temps du contenu 800px) : avec LARGEUR_CONTENU=742, la
+ * largeur utile de la grille vaut 714 ; il faut que (714 - 2*ecart) soit
+ * divisible par 3 pour que les 3 colonnes la remplissent EXACTEMENT
+ * (_Static_assert plus bas). 714 % 3 == 0 impose ecart % 3 == 0 ; 9 est
+ * l'ajustement minimal depuis 8 (cases de 232px, largement >= 44px). */
+#define MENU_ECART_COLONNE 9
 #define MENU_ECART_LIGNE   8
 
 #define MENU_ZONE_Y (TEMP_ZONE_Y + ZONE_TEMP_HAUTEUR_MAX + ZONE_ECART)
@@ -82,9 +87,9 @@
 #define BANDEAU_Y_ECRAN (HAUTEUR_ECRAN_TOTALE - BANDEAU_HAUTEUR_ECRAN)
 
 _Static_assert(2 * MARGE + CELL_LARGEUR_1COL == LARGEUR_CONTENU,
-                "la cellule pleine largeur (palier MONO) ne remplit plus exactement 800px");
+                "la cellule pleine largeur (palier MONO) ne remplit plus exactement 742px");
 _Static_assert(2 * MARGE + 2 * CELL_LARGEUR_2COL + GRILLE_ECART == LARGEUR_CONTENU,
-                "les deux colonnes (paliers MOYEN/COMPACT) ne remplissent plus exactement 800px");
+                "les deux colonnes (paliers MOYEN/COMPACT) ne remplissent plus exactement 742px");
 
 _Static_assert(LIGNES_PIRE_CAS_MONO * CELL_HAUTEUR_MONO + (LIGNES_PIRE_CAS_MONO - 1) * GRILLE_ECART
                    <= ZONE_TEMP_HAUTEUR_MAX,

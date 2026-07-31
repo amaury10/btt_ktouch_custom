@@ -2,8 +2,8 @@
  * délibérés par rapport à ecran_accueil_idle.c (pas de grisage par axe, pas
  * de confirmation avant Home).
  *
- * Mise en page (800x436, sous la barre d'état construite par habillage.c,
- * même convention que ecran_accueil_idle.c) : une ligne de position + outil
+ * Mise en page (742x436, dans le conteneur de navigation à droite du rail
+ * persistant, sous la barre d'état construite par habillage.c) : une ligne de position + outil
  * actif en haut, puis une seule rangée horizontale -- pad de jog XY (croix,
  * Y+ en haut / X-/X+ au milieu / Y- en bas) + colonne Z séparée + panneau des
  * deux sélecteurs (Pas, Vitesse) -- et enfin la rangée Home (All/X/Y/Z) en
@@ -23,7 +23,7 @@
 #include "klipper_gcode.h"
 #include "source_etat.h"
 
-#define LARGEUR_CONTENU 800
+#define LARGEUR_CONTENU 742 /* 800 - RAIL_LARGEUR (58), voir habillage.c */
 #define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
 
 #define MARGE       14
@@ -74,7 +74,12 @@
 /* Rangée Home, pleine largeur du contenu, sous la rangée jog/sélecteurs. */
 #define HOME_Y (CONTROLES_Y + JOG_PAD_HAUTEUR + ZONE_ECART)
 #define HOME_HAUTEUR 60
-#define HOME_ECART_BOUTON 16
+/* 14 (et non 16 comme au temps du contenu 800px) : avec LARGEUR_CONTENU=742,
+ * HOME_LARGEUR_TOTALE vaut 714, et il faut que (714 - 3*ecart) soit divisible
+ * par 4 pour que les 4 boutons remplissent EXACTEMENT la largeur (_Static_assert
+ * plus bas). 714 % 4 == 2 impose ecart % 4 == 2 ; 14 est l'ajustement minimal
+ * depuis 16 (boutons de 168px, largement >= 44px cible tactile). */
+#define HOME_ECART_BOUTON 14
 #define HOME_LARGEUR_TOTALE (LARGEUR_CONTENU - 2 * MARGE)
 #define HOME_BOUTON_LARGEUR ((HOME_LARGEUR_TOTALE - (ECRAN_DEPLACER_HOME_NB - 1) * HOME_ECART_BOUTON) / \
                               ECRAN_DEPLACER_HOME_NB)
