@@ -7,7 +7,7 @@ void suite_accueil_choix(void)
     printf("suite : accueil_choix\n");
     etat_klipper_t e;
     memset(&e, 0, sizeof(e));
-    /* repos : impression pas en cours => accueil idle */
+    /* repos : impression pas en cours => accueil-hub */
     e.impression_en_cours = false;
     VERIFIER(accueil_impression_actif(&e) == false);
     /* impression en cours => accueil impression */

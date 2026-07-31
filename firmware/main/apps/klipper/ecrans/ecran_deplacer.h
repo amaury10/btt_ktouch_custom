@@ -1,6 +1,7 @@
 /* Écran Déplacer (tâche 4, refonte accueil/déplacer) : la croix de jog
  * XY/Z, EN GRAND, sur son propre écran dédié -- contrairement au pad compact
- * de ecran_accueil_idle.c (54x24 px, partagé avec le reste de l'accueil),
+ * de l'ancien ecran_accueil_idle.c (54x24 px, partagé avec le reste de
+ * l'accueil, supprimé en tâche 7),
  * ici le jog EST tout l'écran : six boutons de 110x90 px minimum (bien
  * au-dessus des 44 px de cible tactile minimale imposés par la tâche),
  * disposés en croix (Y+ en haut, X-/(centre)/X+ au milieu, Y- en bas) +
@@ -8,8 +9,8 @@
  * sélecteur de Vitesse (Lent/Moyen/Rapide) via le widget générique
  * selecteur_choix.h (tâche 1), et une rangée Home (All/X/Y/Z).
  *
- * Réutilise le layout/la logique de ecran_accueil_idle.c (voir son
- * commentaire de tête et JOG_DEFS/jog_bouton_cb/HOME_DEFS/home_bouton_cb) :
+ * Réutilise le layout/la logique de l'ancien ecran_accueil_idle.c (JOG_DEFS/
+ * jog_bouton_cb/HOME_DEFS/home_bouton_cb, supprimé en tâche 7) :
  * même idiome axe+signe pour le pad, même wrapper JSON pour le gcode via
  * ui_commander(BACKEND_ACTION_GCODE, ...). Les fonctions ne sont pas
  * partagées (statiques à chaque fichier .c, même choix que le reste de ce
@@ -17,17 +18,19 @@
  * chaque fichier de host-test/tests/ pour le même principe) : ce fichier a
  * sa propre copie, adaptée à sa mise en page et à ses vitesses.
  *
- * ÉCART délibéré par rapport à ecran_accueil_idle.c : AUCUNE désactivation
- * (LV_STATE_DISABLED) des boutons de jog/homing ici, ni sur `donnees_perimees`
- * ni sur "axe non référencé" -- le brief de cette tâche (task-4-brief.md,
- * step 3) ne demande explicitement à `mettre_a_jour()` que de rafraîchir la
- * ligne de position + l'outil actif (grisés si `donnees_perimees`), rien de
- * plus. Ajouter le grisage par axe de ecran_accueil_idle.c ici aurait été de
- * la sur-ingénierie non demandée par ce brief précis, et rien ne prouverait
- * qu'elle marche (le scénario de test de la tâche ne l'exerce jamais).
+ * ÉCART délibéré par rapport à l'ancien ecran_accueil_idle.c : AUCUNE
+ * désactivation (LV_STATE_DISABLED) des boutons de jog/homing ici, ni sur
+ * `donnees_perimees` ni sur "axe non référencé" -- le brief de cette tâche
+ * (task-4-brief.md, step 3) ne demande explicitement à `mettre_a_jour()` que
+ * de rafraîchir la ligne de position + l'outil actif (grisés si
+ * `donnees_perimees`), rien de plus. Ajouter le grisage par axe de l'ancien
+ * ecran_accueil_idle.c ici aurait été de la sur-ingénierie non demandée par
+ * ce brief précis, et rien ne prouverait qu'elle marche (le scénario de test
+ * de la tâche ne l'exerce jamais).
  *
  * ÉCART délibéré n°2 : AUCUNE confirmation avant un "Home" ici (contrairement
- * à ecran_accueil_idle.c, qui ouvre un dialogue si l'axe est déjà référencé) :
+ * à l'ancien ecran_accueil_idle.c, qui ouvrait un dialogue si l'axe était
+ * déjà référencé) :
  * cet écran EST l'écran de contrôle manuel dédié -- un opérateur qui vient ici
  * taper "Home" agit déjà en connaissance de cause, contrairement à l'accueil
  * (où le pad de jog n'est qu'un raccourci secondaire au milieu d'un tableau de
@@ -45,8 +48,8 @@
 
 /* Six boutons de jog, ORDRE FIXE (brief : "ordre X-/X+/Y-/Y+/Z+/Z-") --
  * réutilisé par les rappels de clic (jog_infos[i]) et par host-test/tests/
- * test_ecran_deplacer.c, même convention que ECRAN_ACCUEIL_IDLE_JOG_*
- * (ecran_accueil_idle.h). */
+ * test_ecran_deplacer.c, même convention que l'ancien ECRAN_ACCUEIL_IDLE_JOG_*
+ * (supprimé en tâche 7). */
 #define ECRAN_DEPLACER_JOG_X_NEG 0
 #define ECRAN_DEPLACER_JOG_X_POS 1
 #define ECRAN_DEPLACER_JOG_Y_NEG 2
@@ -55,7 +58,8 @@
 #define ECRAN_DEPLACER_JOG_Z_NEG 5
 #define ECRAN_DEPLACER_JOG_NB    6
 
-/* Quatre boutons de homing, même convention que ECRAN_ACCUEIL_IDLE_HOME_*. */
+/* Quatre boutons de homing, même convention que l'ancien
+ * ECRAN_ACCUEIL_IDLE_HOME_* (supprimé en tâche 7). */
 #define ECRAN_DEPLACER_HOME_ALL 0
 #define ECRAN_DEPLACER_HOME_X   1
 #define ECRAN_DEPLACER_HOME_Y   2
@@ -70,7 +74,7 @@
 #define ECRAN_DEPLACER_VITESSE_DEFAUT 1
 
 /* user_data d'un rappel de clic de bouton de jog -- même forme que
- * ecran_accueil_idle_jog_info_t : le contexte de l'écran (pour relire le pas
+ * l'ancienne ecran_accueil_idle_jog_info_t : le contexte de l'écran (pour relire le pas
  * ET la vitesse courants au moment du clic, jamais mis en cache ailleurs) et
  * ce que ce bouton précis représente (axe + sens). */
 typedef struct {
@@ -102,7 +106,7 @@ typedef struct ecran_deplacer_ctx_s {
     /* Sélecteurs génériques (tâche 1) : Pas {0.1, 1, 10, 100} mm, Vitesse
      * {Lent, Moyen, Rapide} -- relus AU MOMENT DU CLIC par jog_bouton_cb(),
      * jamais mis en cache ailleurs (même discipline que selecteur_pas dans
-     * ecran_accueil_idle.c). */
+     * l'ancien ecran_accueil_idle.c). */
     selecteur_choix_t selecteur_pas;
     selecteur_choix_t selecteur_vitesse;
     lv_obj_t         *label_pas;     /* légende au-dessus du sélecteur de pas */

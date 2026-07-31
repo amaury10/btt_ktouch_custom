@@ -1,15 +1,15 @@
 /* Tâche 4 (refonte accueil/déplacer) : l'écran Déplacer -- construction
  * directe (calloc du contexte à la taille du descripteur, puis
  * ECRAN_DEPLACER.construire()) plutôt que navigation_empiler() -- même choix
- * que suite_ecran_accueil_idle() (host-test/tests/test_ecran_accueil_idle.c),
- * pour la même raison (tester uniquement le contrat de cet écran, pas celui
- * de la pile de navigation).
+ * que faisait l'ancienne suite_ecran_accueil_idle() (test_ecran_accueil_idle.c,
+ * supprimé en tâche 7), pour la même raison (tester uniquement le contrat de
+ * cet écran, pas celui de la pile de navigation).
  *
  * DOIT rester APRES suite_ecran_configuration() (habillage construit, voir
  * habillage_est_construit()) ET suite_commandes() (boucle simulée démarrée,
- * voir source_etat_sim_est_demarre()) dans tests/main.c -- même garde
- * d'ordonnancement que suite_ecran_accueil_idle_jog()/_home(), qui trace le
- * même seam ui_commander() -> source_etat_sim. */
+ * voir source_etat_sim_est_demarre()) dans tests/main.c -- ce fichier trace
+ * le même seam ui_commander() -> source_etat_sim que l'exerçait l'ancien
+ * test_ecran_accueil_idle.c (jog/home), même garde d'ordonnancement. */
 #include <stdlib.h>
 #include <string.h>
 
@@ -118,8 +118,8 @@ void suite_ecran_deplacer(void)
     source_etat_sim_cycle();
 
     /* --- mettre_a_jour() : ligne position + outil actif (brief step 3),
-     * meme format que ecran_accueil_idle.c (formater_axe : "--" si l'axe
-     * n'est pas reference). ------------------------------------------------ */
+     * meme format que l'ancien ecran_accueil_idle.c (formater_axe : "--" si
+     * l'axe n'est pas reference). -------------------------------------------*/
     etat_klipper_t etat;
     memset(&etat, 0, sizeof(etat));
     etat.nb_extrudeurs = 1;
@@ -145,7 +145,7 @@ void suite_ecran_deplacer(void)
     VERIFIER_TEXTE(lv_label_get_text(ctx->outil_actif_nom), "Active: --");
 
     /* --- perime : grise (position + outil actif), puis redevient normal --
-     * style RESOLU, meme lecon que tuile_griser()/ecran_accueil_idle.c
+     * style RESOLU, meme lecon que tuile_griser()/l'ancien ecran_accueil_idle.c
      * (round-trip reversible). ---------------------------------------------*/
     ECRAN_DEPLACER.mettre_a_jour(&etat, true, ctx);
     lv_color_t gris_position = lv_obj_get_style_text_color(ctx->position, 0);

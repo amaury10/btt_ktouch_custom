@@ -3,12 +3,13 @@
  * Mise en page (742x436, dans le conteneur de navigation à droite du rail
  * persistant, sous la barre d'état construite par habillage.c) : la zone de
  * température en haut (extrudeurs présents puis plateau, géométrie par
- * palier -- klipper_paliers.h, IDENTIQUE à ecran_accueil_idle.c, voir
- * geometrie_pour_palier()/cellule_creer() ci-dessous, copiés depuis ce
- * fichier -- tâche 5, "Réutilisation (DRY)" du brief), puis une grille de 6
- * cases de menu (3 colonnes x 2 lignes) en dessous.
+ * palier -- klipper_paliers.h, IDENTIQUE à l'ancien ecran_accueil_idle.c
+ * (supprimé en tâche 7), voir geometrie_pour_palier()/cellule_creer()
+ * ci-dessous, copiés depuis ce fichier -- tâche 5, "Réutilisation (DRY)" du
+ * brief), puis une grille de 6 cases de menu (3 colonnes x 2 lignes) en
+ * dessous.
  *
- * ÉCART délibéré par rapport à ecran_accueil_idle.c : PAS de clic sur les
+ * ÉCART délibéré par rapport à l'ancien ecran_accueil_idle.c : PAS de clic sur les
  * cellules de température ici (pas de LV_OBJ_FLAG_CLICKABLE, pas de
  * clavier.h) -- au palier COMPACT, l'ancien idle ouvrait le clavier
  * numérique directement depuis la cellule tapée ; ce hub renvoie plutôt
@@ -43,8 +44,8 @@
 #define TEMP_ZONE_Y 6
 
 /* --- Géométrie de la zone de température : copie EXACTE des constantes de
- * ecran_accueil_idle.c (même valeurs, même raisonnement -- voir son
- * commentaire de tête pour le détail du budget par palier). Dupliquées ici
+ * l'ancien ecran_accueil_idle.c (supprimé en tâche 7, même valeurs, même
+ * raisonnement pour le détail du budget par palier). Dupliquées ici
  * plutôt que partagées, voir le commentaire de tête de ce fichier et celui
  * de ecran_accueil_hub.h ("Réutilisation (DRY)"). ------------------------ */
 #define CELL_LARGEUR_1COL 714
@@ -78,9 +79,9 @@
 #define MENU_ZONE_HAUTEUR (MENU_LIGNES * MENU_CELL_HAUTEUR + (MENU_LIGNES - 1) * MENU_ECART_LIGNE)
 
 /* Même convention que BARRE_HAUTEUR_ECRAN/BANDEAU_HAUTEUR_ECRAN/
- * BANDEAU_Y_ECRAN dans ecran_accueil_idle.c/ecran_macros.c (voir leur
- * commentaire complet) : bande couverte par le bandeau de notification de
- * habillage.c, en coordonnées ABSOLUES d'écran. */
+ * BANDEAU_Y_ECRAN dans ecran_macros.c (voir son commentaire complet) : bande
+ * couverte par le bandeau de notification de habillage.c, en coordonnées
+ * ABSOLUES d'écran. */
 #define BARRE_HAUTEUR_ECRAN   44
 #define HAUTEUR_ECRAN_TOTALE 480
 #define BANDEAU_HAUTEUR_ECRAN 60
@@ -106,12 +107,12 @@ _Static_assert(MENU_COLONNES * MENU_CELL_LARGEUR + (MENU_COLONNES - 1) * MENU_EC
                 "la grille de menu ne remplit plus exactement la largeur du contenu");
 _Static_assert(MENU_ZONE_Y + MENU_ZONE_HAUTEUR <= HAUTEUR_CONTENU,
                 "la grille de menu deborde de la hauteur du contenu");
-/* Même garde-fou que CONTROLES_Y dans ecran_accueil_idle.c (voir son
- * commentaire de tête, "PLAFOND REEL de CONTROLES_HAUTEUR") : le bas de la
+/* Même garde-fou que CONTROLES_Y dans l'ancien ecran_accueil_idle.c
+ * (supprimé en tâche 7, "PLAFOND REEL de CONTROLES_HAUTEUR") : le bas de la
  * grille de menu, en coordonnées ABSOLUES d'écran, doit rester au-dessus du
  * bandeau de notification -- sans quoi une notification recouvrirait ET
  * bloquerait le tap sur les cases de menu (le bandeau est un lv_obj_t normal,
- * cliquable). Contrairement à MACROS_Y dans l'idle (qui ne peut
+ * cliquable). Contrairement à MACROS_Y dans l'ancien idle (qui ne pouvait
  * structurellement pas l'éviter, dernière zone de l'écran), ce hub A la
  * place de l'éviter -- fait ici, pas juste accepté. */
 _Static_assert(BARRE_HAUTEUR_ECRAN + MENU_ZONE_Y + MENU_ZONE_HAUTEUR <= BANDEAU_Y_ECRAN,
@@ -124,14 +125,14 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + MENU_ZONE_Y + MENU_ZONE_HAUTEUR <= BANDEAU_
 #define COULEUR_GRISE            0x6B7280 /* meme gris de peremption que le reste de ui/ */
 #define COULEUR_BOUTON           0x2A3644
 #define COULEUR_TEXTE_BOUTON     0xFFFFFF
-/* Bleu dedie a « outil actif », copie de ecran_accueil_idle.c (voir son
- * commentaire complet -- jamais le vert de habillage_couleur_liaison()). */
+/* Bleu dedie a « outil actif », copie de l'ancien ecran_accueil_idle.c --
+ * jamais le vert de habillage_couleur_liaison(). */
 #define COULEUR_ACTIF 0x3B82F6
 
 /* --- Zone de température : copie de idle_geometrie_t/geometrie_pour_palier()/
- * police_pour_taille()/cellule_creer() (ecran_accueil_idle.c), voir le
- * commentaire de tête de ce fichier pour pourquoi une copie plutôt qu'un
- * partage. ----------------------------------------------------------------*/
+ * police_pour_taille()/cellule_creer() de l'ancien ecran_accueil_idle.c
+ * (supprimé en tâche 7), voir le commentaire de tête de ce fichier pour
+ * pourquoi une copie plutôt qu'un partage. ---------------------------------*/
 typedef struct {
     uint8_t          colonnes;
     lv_coord_t       largeur;
@@ -252,7 +253,7 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
 
     /* --- tuiles de temperature : pool au pire cas, masquees tant que
      * mettre_a_jour() n'a pas tourne -- meme politique que cellule_creer()
-     * dans ecran_accueil_idle.c. --------------------------------------- */
+     * dans l'ancien ecran_accueil_idle.c. -------------------------------- */
     for (size_t i = 0; i < ECRAN_ACCUEIL_HUB_CELLULES_MAX; i++) {
         cellule_creer(&ctx->cellules[i], parent);
         lv_obj_add_flag(ctx->cellules[i].racine, LV_OBJ_FLAG_HIDDEN);
@@ -274,9 +275,9 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
 
         lv_obj_t *bouton = lv_button_create(ctx->zone_menu);
         /* lv_obj_remove_style_all() : meme raison que home_bouton_creer()
-         * dans ecran_accueil_idle.c (voir son commentaire complet) -- theme
-         * par defaut + transition animee otes, pour ne pas alourdir
-         * style_trans_ll cote host-test. */
+         * dans l'ancien ecran_accueil_idle.c -- theme par defaut +
+         * transition animee otes, pour ne pas alourdir style_trans_ll cote
+         * host-test. */
         lv_obj_remove_style_all(bouton);
         lv_obj_set_size(bouton, MENU_CELL_LARGEUR, MENU_CELL_HAUTEUR);
         lv_obj_set_pos(bouton, x, y);
@@ -315,8 +316,8 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         return;
     }
 
-    /* Defense contre un etat corrompu/malforme, meme garde que
-     * ecran_accueil_idle_mettre_a_jour() (voir son commentaire complet). */
+    /* Defense contre un etat corrompu/malforme, meme garde que l'ancienne
+     * ecran_accueil_idle_mettre_a_jour() (supprimee en tache 7). */
     uint8_t nb_extrudeurs = e->nb_extrudeurs;
     if (nb_extrudeurs > KLIPPER_EXTRUDEURS_MAX) {
         nb_extrudeurs = KLIPPER_EXTRUDEURS_MAX;
@@ -326,8 +327,8 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
     hub_geometrie_t geo = geometrie_pour_palier(palier);
 
     /* --- Contenu : extrudeurs presents puis plateau, dans cet ordre -----
-     * copie du corps de ecran_accueil_idle_mettre_a_jour() (voir son
-     * commentaire complet pour le detail de chaque champ). ---------------*/
+     * copie du corps de l'ancienne ecran_accueil_idle_mettre_a_jour()
+     * (supprimee en tache 7). ---------------------------------------------*/
     size_t total = 0;
     char valeur[16];
     char consigne[16];
@@ -370,7 +371,7 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
     }
 
     /* --- Geometrie + visibilite : appliquees a TOUT le pool, systematique,
-     * jamais incremental -- meme discipline que ecran_accueil_idle.c. ---- */
+     * jamais incremental -- meme discipline que l'ancien ecran_accueil_idle.c. ---- */
     for (size_t i = 0; i < ECRAN_ACCUEIL_HUB_CELLULES_MAX; i++) {
         ecran_accueil_hub_cellule_t *c = &ctx->cellules[i];
         if (i >= total) {
@@ -389,11 +390,11 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
 
     /* --- Grisage integral des tuiles, style RESOLU (spec C3, ecran.h) --
      * systematique a chaque appel, jamais incremental (meme lecon que
-     * tuile_griser()/ecran_accueil_idle.c). La grille de menu, elle, N'EST
-     * JAMAIS grisee -- meme choix delibere que bouton_macros dans l'idle
-     * ("naviguer... reste sans danger meme avec un etat perime", voir son
-     * commentaire complet) : DEPLACER reste toujours accessible, et les cinq
-     * cases no-op ne font de toute facon rien de dangereux. ---------------*/
+     * tuile_griser()/l'ancien ecran_accueil_idle.c). La grille de menu, elle,
+     * N'EST JAMAIS grisee -- meme choix delibere que bouton_macros dans
+     * l'ancien idle ("naviguer... reste sans danger meme avec un etat
+     * perime") : DEPLACER reste toujours accessible, et les cinq cases
+     * no-op ne font de toute facon rien de dangereux. ---------------------*/
     uint32_t couleur_texte = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
     uint32_t couleur_valeur = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE_PRINCIPAL;
     for (size_t i = 0; i < total; i++) {

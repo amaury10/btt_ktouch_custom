@@ -126,7 +126,6 @@ add_executable(tests
     tests/test_habillage.c
     tests/test_widgets.c
     tests/test_ecran_accueil.c
-    tests/test_ecran_accueil_idle.c
     tests/test_ecran_deplacer.c
     tests/test_ecran_accueil_hub.c
     tests/test_accueil_choix.c
@@ -166,7 +165,6 @@ add_executable(tests
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
-    ${ECRANS_DIR}/ecran_accueil_idle.c
     ${ECRANS_DIR}/ecran_deplacer.c
     ${ECRANS_DIR}/ecran_accueil_hub.c
     ${ECRANS_DIR}/ecran_configuration.c

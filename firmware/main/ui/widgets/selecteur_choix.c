@@ -2,7 +2,7 @@
 #include "selecteur_choix.h"
 
 #define COULEUR_BOUTON        0x2A3644
-#define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans selecteur_pas.c/ecran_accueil_idle.c */
+#define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans selecteur_pas.c/ecran_accueil_hub.c */
 #define COULEUR_TEXTE_BOUTON  0xFFFFFF
 
 /* nb hors [NB_MIN, NB_MAX] -> no-op (voir le contrat dans le .h) : deux

@@ -1,6 +1,8 @@
 /* accueil_choix.h — helper PUR : quel écran d'accueil pour un état donné
  * (tâche 3, jalon 3b). true => l'accueil impression (ECRAN_ACCUEIL, jalon
- * 2b) ; false => l'accueil idle (ECRAN_ACCUEIL_IDLE, cette tâche). Le socle
+ * 2b) ; false => l'accueil-hub au repos (ECRAN_ACCUEIL_HUB, tâche 5 de la
+ * refonte accueil/déplacer -- remplace l'ancien ECRAN_ACCUEIL_IDLE de cette
+ * tâche, supprimé en tâche 7). Le socle
  * (app_main.c, simulateur/main.c) appelle ceci AU DÉMARRAGE pour empiler le
  * bon écran de fond -- la bascule VIVANTE idle<->impression pendant une
  * session déjà en cours est différée à la fin du plan 3b (voir

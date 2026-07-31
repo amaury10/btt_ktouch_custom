@@ -1,6 +1,6 @@
 /* Implémentation : voir ecran_deplacer.h pour le contrat et les écarts
- * délibérés par rapport à ecran_accueil_idle.c (pas de grisage par axe, pas
- * de confirmation avant Home).
+ * délibérés par rapport à l'ancien ecran_accueil_idle.c (pas de grisage par
+ * axe, pas de confirmation avant Home).
  *
  * Mise en page (742x436, dans le conteneur de navigation à droite du rail
  * persistant, sous la barre d'état construite par habillage.c) : une ligne de position + outil
@@ -9,7 +9,7 @@
  * deux sélecteurs (Pas, Vitesse) -- et enfin la rangée Home (All/X/Y/Z) en
  * pleine largeur. Toutes les constantes de position sont vérifiées les unes
  * par rapport aux autres via _Static_assert (même discipline que
- * ecran_accueil_idle.c/ecran_macros.c) : un futur ajustement qui ferait
+ * ecran_macros.c) : un futur ajustement qui ferait
  * déborder ou chevaucher une zone devient une erreur de compilation. */
 #include "ecran_deplacer.h"
 
@@ -36,10 +36,10 @@
 #define CONTROLES_Y (POSITION_Y + POSITION_HAUTEUR + ZONE_ECART)
 
 /* Pad de jog EN GRAND (brief : "gros", cible tactile >= 44px très largement
- * dépassée) -- même structure à trois lignes/trois colonnes que
+ * dépassée) -- même structure à trois lignes/trois colonnes que l'ancien
  * ecran_accueil_idle.c (JOG_ECART_LIGNE vertical, JOG_ECART_COLONNE
- * horizontal, jamais confondus, voir son commentaire de tête pour la leçon
- * "fix round 1" qui a motivé cette séparation). */
+ * horizontal, jamais confondus -- séparation motivée par une leçon "fix
+ * round 1" de cet ancien écran, supprimé en tâche 7). */
 #define JOG_BOUTON_LARGEUR 110
 #define JOG_BOUTON_HAUTEUR  90
 #define JOG_ECART_LIGNE     10
@@ -50,8 +50,8 @@
 
 #define JOG_Z_LARGEUR JOG_BOUTON_LARGEUR
 #define JOG_Z_HAUTEUR ((JOG_PAD_HAUTEUR - JOG_ECART_LIGNE) / 2)
-/* Double de JOG_ECART_COLONNE, même raison que ecran_accueil_idle.c : la
- * colonne Z se lit comme un groupe séparé du pad XY, pas une 3e colonne. */
+/* Double de JOG_ECART_COLONNE, même raison que l'ancien ecran_accueil_idle.c :
+ * la colonne Z se lit comme un groupe séparé du pad XY, pas une 3e colonne. */
 #define JOG_Z_ECART_COLONNE (2 * JOG_ECART_COLONNE)
 
 /* Panneau des deux sélecteurs (Pas, Vitesse), à droite de la colonne Z --
@@ -101,7 +101,7 @@ _Static_assert(HOME_Y + HOME_HAUTEUR <= HAUTEUR_CONTENU,
 /* Vitesses de jog (brief, valeurs figées) : index 0=Lent, 1=Moyen, 2=Rapide
  * du sélecteur Vitesse -- XY et Z ont chacun leur propre table (Z est
  * mécaniquement plus lent, même raisonnement que JOG_VITESSE_Z_MM_MIN dans
- * ecran_accueil_idle.c). */
+ * l'ancien ecran_accueil_idle.c). */
 static const uint16_t VITESSE_XY[3] = { 600, 3000, 6000 };
 static const uint16_t VITESSE_Z[3]  = { 300, 600, 1200 };
 
@@ -118,14 +118,14 @@ static const float PAS_MM[4] = { 0.1f, 1.0f, 10.0f, 100.0f };
 #define COULEUR_TEXTE_BOUTON     0xFFFFFF
 
 /* Tampon suffisant pour {"script":"<gcode>"} -- même raisonnement que
- * ECRAN_ACCUEIL_IDLE_GCODE_ARGS_MAX (voir son commentaire complet dans
- * ecran_accueil_idle.c) : KLIPPER_GCODE_MAX plus la marge du wrapper JSON et
+ * l'ancienne ECRAN_ACCUEIL_IDLE_GCODE_ARGS_MAX (supprimée en tâche 7) :
+ * KLIPPER_GCODE_MAX plus la marge du wrapper JSON et
  * de l'échappement des `\n` réels que klipper_gcode_jog() produit. */
 #define GCODE_ARGS_MAX (KLIPPER_GCODE_MAX + 32)
 
 /* Construit {"script":"<script>"} via cJSON -- copie exacte de
- * construire_arguments_gcode()/envoyer_gcode() dans ecran_accueil_idle.c
- * (voir son commentaire complet pour la justification : de vrais octets
+ * construire_arguments_gcode()/envoyer_gcode() de l'ancien ecran_accueil_idle.c
+ * (supprimé en tâche 7 -- justification : de vrais octets
  * 0x0A dans un script de jog doivent être échappés par un JSON conforme
  * RFC 8259, jamais un snprintf à la main). Copie plutôt que partage, même
  * choix que le reste de ce dépôt (voir le commentaire de tête de
@@ -172,12 +172,13 @@ static void envoyer_gcode(const char *script)
 /* Bouton de jog/homing, EN GRAND (110x90 pour le pad/colonne Z, redimensionné
  * par les boucles de construction plus bas pour Home) -- lv_obj_remove_style_all()
  * ôte le thème par défaut ET sa transition de couleur animée sur bg_color,
- * même choix que home_bouton_creer() dans ecran_accueil_idle.c (voir son
- * commentaire complet : évite d'alourdir style_trans_ll côté host-test).
+ * même choix que home_bouton_creer() de l'ancien ecran_accueil_idle.c
+ * (évite d'alourdir style_trans_ll côté host-test).
  * Aucun état DISABLED n'est jamais posé sur ces boutons par ce fichier (voir
  * le commentaire de tête de ecran_deplacer.h, "ECART délibéré") : ce
  * constructeur n'a donc pas besoin du style LV_STATE_DISABLED dédié que
- * jog_bouton_creer()/home_bouton_creer() de ecran_accueil_idle.c posent. */
+ * jog_bouton_creer()/home_bouton_creer() de l'ancien ecran_accueil_idle.c
+ * posaient (supprimé en tâche 7). */
 static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, const lv_font_t *police, lv_coord_t x,
                                lv_coord_t y, lv_coord_t largeur, lv_coord_t hauteur)
 {
@@ -201,8 +202,9 @@ static lv_obj_t *bouton_creer(lv_obj_t *parent, const char *texte, const lv_font
 }
 
 /* Lit le pas ET la vitesse courants (au moment du clic, jamais mis en cache
- * ailleurs -- même discipline que jog_bouton_cb() dans ecran_accueil_idle.c),
- * construit le gcode via klipper_gcode_jog() et l'envoie. Index bornés
+ * ailleurs -- même discipline que jog_bouton_cb() de l'ancien
+ * ecran_accueil_idle.c), construit le gcode via klipper_gcode_jog() et
+ * l'envoie. Index bornés
  * défensivement (selecteur_choix_index() rend déjà 0..nb-1, mais ce fichier
  * ne fait jamais confiance aveuglément à un état externe, même politique que
  * le reste de ce dépôt). */
@@ -288,7 +290,7 @@ static void ecran_deplacer_construire(lv_obj_t *parent, void *contexte)
 
     /* --- pad de jog XY (croix, Y+ haut / X-/X+ milieu / Y- bas) + colonne Z,
      * ORDRE FIXE (ECRAN_DEPLACER_JOG_*, brief : "X-/X+/Y-/Y+/Z+/Z-"). Même
-     * idiome de tableau que JOG_DEFS dans ecran_accueil_idle.c. --------- */
+     * idiome de tableau que JOG_DEFS de l'ancien ecran_accueil_idle.c. --- */
     lv_coord_t col0_x = MARGE;
     lv_coord_t col1_x = col0_x + JOG_BOUTON_LARGEUR + JOG_ECART_COLONNE;
     lv_coord_t col2_x = col1_x + JOG_BOUTON_LARGEUR + JOG_ECART_COLONNE;
@@ -356,8 +358,8 @@ static void ecran_deplacer_construire(lv_obj_t *parent, void *contexte)
 }
 
 /* Écrit "%.1f" si `reference` est vrai, "--" sinon -- copie exacte de
- * formater_axe() dans ecran_accueil_idle.c (voir son commentaire : ne jamais
- * présenter comme mesurée une position qu'aucun homing n'a établie). */
+ * formater_axe() de l'ancien ecran_accueil_idle.c : ne jamais
+ * présenter comme mesurée une position qu'aucun homing n'a établie. */
 static void formater_axe(char *sortie, size_t taille, float valeur, bool reference)
 {
     if (!reference) {
@@ -370,7 +372,7 @@ static void formater_axe(char *sortie, size_t taille, float valeur, bool referen
 /* Brief (step 3) : "mettre_a_jour : ligne position + outil actif (grise si
  * donnees_perimees)" -- rien de plus. Voir le commentaire de tête de
  * ecran_deplacer.h ("ECART délibéré") pour pourquoi le pad de jog/homing
- * n'est PAS désactivé ici, contrairement à ecran_accueil_idle.c. */
+ * n'est PAS désactivé ici, contrairement à l'ancien ecran_accueil_idle.c. */
 static void ecran_deplacer_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
 {
     ecran_deplacer_ctx_t *ctx = contexte;

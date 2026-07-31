@@ -2,7 +2,7 @@
 #include "rail.h"
 
 #define COULEUR_BOUTON        0x2A3644 /* meme gris de fond que selecteur_pas.c/selecteur_choix.c */
-#define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans selecteur_pas.c/ecran_accueil_idle.c */
+#define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans selecteur_pas.c/ecran_accueil_hub.c */
 #define COULEUR_STOP          0xE5484D /* rouge -- imposee par le brief de la tache */
 #define COULEUR_TEXTE_BOUTON  0xFFFFFF
 

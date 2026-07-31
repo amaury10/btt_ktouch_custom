@@ -2,7 +2,7 @@
 #include "selecteur_pas.h"
 
 #define COULEUR_BOUTON        0x2A3644
-#define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans ecran_accueil_idle.c */
+#define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans ecran_accueil_hub.c */
 #define COULEUR_TEXTE_BOUTON  0xFFFFFF
 
 /* Taille par defaut de `racine`, PAS LV_SIZE_CONTENT -- meme piege, meme
@@ -117,7 +117,7 @@ void selecteur_pas_creer(selecteur_pas_t *s, lv_obj_t *parent)
          * a l'oeil sur un petit ecran -- un bord ajoute, meme poids visuel
          * que la bordure bleue de 3px qui marque l'outil actif sur les
          * cellules de temperature (voir COULEUR_ACTIF/bordure dans
-         * ecran_accueil_idle.c), rend le bouton actif sans ambiguite
+         * ecran_accueil_hub.c), rend le bouton actif sans ambiguite
          * possible sur une capture. Bord invisible (largeur 0) a l'etat
          * normal : seul CHECKED en porte un. */
         lv_obj_set_style_border_width(b, 0, 0);

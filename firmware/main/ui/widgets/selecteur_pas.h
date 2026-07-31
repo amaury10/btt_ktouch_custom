@@ -1,7 +1,7 @@
 /* selecteur_pas.h — widget « 0.1 / 1 / 10 / 100 mm » : quatre boutons
  * mutuellement exclusifs, un seul actif à la fois. Le pas courant est lu par
- * l'écran au moment d'un appui sur le pad de jog (voir ecran_accueil_idle.c,
- * tâche 4, jalon 3b) — ce widget ne connaît rien de klipper_gcode.h ni de
+ * l'écran au moment d'un appui sur le pad de jog (voir ecran_deplacer.c,
+ * tâche 4, refonte accueil/déplacer) — ce widget ne connaît rien de klipper_gcode.h ni de
  * ui_commander(), exactement comme tuile.h ne connaît aucune unité : un futur
  * fork non-Klipper le réutilise tel quel pour n'importe quel réglage à choix
  * discret.

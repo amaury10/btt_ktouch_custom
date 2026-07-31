@@ -93,10 +93,13 @@ add_executable(ktouch-sim
     ${WIDGETS_DIR}/tuile.c
     ${WIDGETS_DIR}/progression.c
     ${WIDGETS_DIR}/selecteur_pas.c
+    ${WIDGETS_DIR}/selecteur_choix.c
+    ${WIDGETS_DIR}/rail.c
     ${WIDGETS_DIR}/clavier.c
     ${WIDGETS_DIR}/confirmation.c
     ${ECRANS_DIR}/ecran_accueil.c
-    ${ECRANS_DIR}/ecran_accueil_idle.c
+    ${ECRANS_DIR}/ecran_deplacer.c
+    ${ECRANS_DIR}/ecran_accueil_hub.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${EXEMPLES_DIR}/backend_jouet.c

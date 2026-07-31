@@ -1,16 +1,16 @@
 /* Tache 5 (refonte accueil/deplacer) : l'ecran Accueil-hub -- tuiles de
- * temperature multi-tete (meme geometrie par palier que
- * test_ecran_accueil_idle.c, section temperatures) + grille de 6 cases de
+ * temperature multi-tete (meme geometrie par palier que l'ancien
+ * ecran_accueil_idle.c, supprime en tache 7) + grille de 6 cases de
  * menu, dont une seule (Deplacer) navigue reellement.
  *
  * Deux parties : la premiere construit ECRAN_ACCUEIL_HUB directement (calloc
  * du contexte a la taille du descripteur), meme choix que
- * suite_ecran_deplacer()/suite_ecran_accueil_idle() pour la meme raison
+ * suite_ecran_deplacer() pour la meme raison
  * (tester uniquement le contrat de cet ecran, pas celui de la pile de
  * navigation) -- c'est la partie qui a besoin d'un acces direct a `ctx` pour
  * lire les libelles/couleurs des tuiles. La seconde empile reellement
- * ECRAN_ACCUEIL_HUB via navigation_empiler() (meme technique que
- * suite_ecran_accueil_idle_macros(), voir son commentaire de tete dans
+ * ECRAN_ACCUEIL_HUB via navigation_empiler() (meme technique que l'ancienne
+ * suite_ecran_accueil_idle_macros(), supprimee en tache 7 avec le reste de
  * test_ecran_accueil_idle.c) : prouver un changement REEL de profondeur de
  * pile exige un vrai sommet de pile pour naviguer depuis, et retrouver le
  * bouton "Deplacer" par parcours de l'arbre LVGL (navigation_empiler() cree
@@ -133,7 +133,7 @@ void suite_ecran_accueil_hub(void)
 
     /* --- perime : grise (nom/valeur/consigne des 3 tuiles visibles), puis
      * redevient normal -- style RESOLU, meme lecon que
-     * tuile_griser()/ecran_accueil_idle.c (round-trip reversible). -------- */
+     * tuile_griser()/l'ancien ecran_accueil_idle.c (round-trip reversible). */
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, true, ctx);
     lv_color_t gris_valeur = lv_obj_get_style_text_color(ctx->cellules[2].valeur, 0);
     VERIFIER(lv_color_eq(gris_valeur, lv_color_hex(0x6B7280)));

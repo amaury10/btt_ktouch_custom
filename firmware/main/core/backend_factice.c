@@ -299,10 +299,11 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         break;
 
     case 13:
-        /* Tache 5, jalon 3b : arriere-plan de --scenario 13 (simulateur/
+        /* Tache 5, jalon 3b (fond mis a jour tache 7, retrait de l'ancien
+         * accueil idle) : arriere-plan de --scenario 13 (simulateur/
          * main.c), qui ouvre en plus la confirmation de homing par-dessus --
          * IDENTIQUE au scenario 10 juste en-dessous (empile ici, pas
-         * duplique) : au repos (ECRAN_ACCUEIL_IDLE, jamais ECRAN_ACCUEIL,
+         * duplique) : au repos (ECRAN_ACCUEIL_HUB, jamais ECRAN_ACCUEIL,
          * contrairement au repli "scenario 3" que suivent 5/6/7/8/9 -- une
          * confirmation de HOMING n'a de sens que sur l'accueil au repos) ET
          * tous les axes deja references (necessaire pour que Home X declenche
@@ -310,14 +311,15 @@ static esp_err_t backend_factice_rafraichir(void *etat)
          * enverrait le gcode direct, sans dialogue, ce que cette capture ne
          * veut pas montrer). */
     case 14:
-        /* Tache 6, jalon 3b : arriere-plan de --scenario 14 (simulateur/
+        /* Tache 6, jalon 3b (fond mis a jour tache 7, retrait de l'ancien
+         * accueil idle) : arriere-plan de --scenario 14 (simulateur/
          * main.c), qui ouvre en plus le clavier numerique de temperature
          * par-dessus -- IDENTIQUE au scenario 10/13 (empile ici, pas
-         * duplique) : au repos, sur ECRAN_ACCUEIL_IDLE. Les axes references
+         * duplique) : au repos, sur ECRAN_ACCUEIL_HUB. Les axes references
          * ne jouent aucun role pour cette capture (le clavier de temperature
          * n'en depend pas, contrairement au homing du scenario 13) mais
          * heriter du meme etat que 10/13 documente mieux l'intention "meme
-         * arriere-plan que les autres captures idle" qu'un etat distinct
+         * arriere-plan que les autres captures au repos" qu'un etat distinct
          * n'apporterait rien. */
     case 10:
         /* Palier « CR-10 » (tache 2, jalon 3a) : mono-extrudeur + plateau

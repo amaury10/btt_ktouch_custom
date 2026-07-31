@@ -65,10 +65,9 @@ void confirmation_ouvrir(const char *titre, const char *message,
  * s'en sert pour NE PAS préparer d'état associé à une ouverture que le
  * singleton refuserait : confirmation_ouvrir[_ex]() rend void et ignore
  * silencieusement une seconde ouverture, donc rien dans son retour ne le
- * signale. Voir ecran_accueil_idle.c (home_bouton_cb), qui ne pose son masque
- * d'axe en attente qu'après avoir vérifié que le dialogue va réellement
- * s'ouvrir -- sans quoi un second appui retargetterait le G28 en attente vers
- * un axe que le dialogue affiché nomme toujours autrement. */
+ * signale -- un appelant qui poserait un état "en attente" avant de vérifier
+ * ceci retargetterait ce dernier vers une action que le dialogue déjà ouvert
+ * ne nomme pourtant toujours pas. */
 bool confirmation_est_ouverte(void);
 
 /* Fermeture : les deux boutons de pied sont les SEULES sorties. Un

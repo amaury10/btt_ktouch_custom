@@ -84,7 +84,7 @@ void source_etat_sim_reset_echec(void);
  * seulement "combien de commandes attendent" jamais "avec quel contenu" :
  * un test qui veut prouver qu'un clic envoie précisément
  * BACKEND_ACTION_GCODE avec un script contenant "G1 X10 F3000" (voir
- * test_ecran_accueil_idle.c, trace du seam pad de jog -> ui_commander())
+ * test_ecran_deplacer.c, trace du seam pad de jog -> ui_commander())
  * n'avait jusqu'ici aucun moyen d'inspecter CE que la file contient, seulement
  * sa profondeur.
  *
@@ -100,7 +100,8 @@ bool source_etat_sim_derniere_commande(char *action, size_t taille_action,
 /* EXPOSÉ POUR LES TESTS UNIQUEMENT (tâche 6, jalon 3b) : comme
  * source_etat_sim_derniere_commande() ci-dessus, mais l'AVANT-DERNIÈRE
  * commande poussée -- nécessaire pour prouver qu'un préréglage de
- * température (tâche 6, ecran_accueil_idle.c) pousse VRAIMENT DEUX gcodes
+ * température (tâche 6, ancien ecran_accueil_idle.c, retiré tâche 7) pousse
+ * VRAIMENT DEUX gcodes
  * dans le MÊME clic (buse puis plateau) : source_etat_sim_cycle() dépile
  * TOUTE la file d'un coup (voir traiter_commandes() dans
  * source_etat_sim.c), impossible donc d'inspecter la première des deux

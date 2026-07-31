@@ -27,7 +27,6 @@
 #include "backend_moonraker.h"
 #include "boucle.h"
 #include "ecran_accueil_hub.h"
-#include "ecran_accueil_idle.h"
 #include "ecran_configuration.h"
 #include "ecran_macros.h"
 #include "habillage.h"
@@ -456,9 +455,10 @@ void app_main(void)
              * (profondeur > 1) pour qui veut jeter un œil à l'accueil en
              * cours de configuration sans valider quoi que ce soit.
              *
-             * Tâche 3 (jalon 3b) : ECRAN_ACCUEIL_IDLE plutôt que
-             * ECRAN_ACCUEIL (impression) ici -- au tout premier démarrage la
-             * boucle applicative vient tout juste de naître (boucle_init()
+             * Tâche 3 (jalon 3b), mis à jour tâche 7 (accueil-hub remplace
+             * l'idle) : ECRAN_ACCUEIL_HUB plutôt que ECRAN_ACCUEIL
+             * (impression) ici -- au tout premier démarrage la boucle
+             * applicative vient tout juste de naître (boucle_init()
              * ci-dessous n'a pas encore tourné un seul cycle), l'état réel
              * de la machine (impression en cours ou non) n'est donc pas
              * encore connu et accueil_choix.h ne peut pas encore trancher.
@@ -483,9 +483,6 @@ void app_main(void)
              * ci-dessus). */
             habillage_definir_action_rail(rail_action_klipper, NULL, ECRAN_ACCUEIL_HUB.id,
                                           ECRAN_MACROS.id);
-            /* Accueil-hub (tuiles de temperature + grille de menu) comme ecran
-             * de depart, a la place de l'ancien ECRAN_ACCUEIL_IDLE (supprime en
-             * tache 7). */
             esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_HUB);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",

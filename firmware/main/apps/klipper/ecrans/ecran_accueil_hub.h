@@ -1,9 +1,9 @@
 /* Écran Accueil-hub (tâche 5, refonte accueil/déplacer) : le nouvel écran
- * d'accueil, qui REMPLACERA ecran_accueil_idle.c (suppression prévue tâche
- * 7 -- voir task-5-brief.md, "Où cette tâche s'insère"). Contrairement à
- * l'ancien idle, ce hub n'a NI jog NI homing NI préréglages NI clavier de
+ * d'accueil, qui a REMPLACÉ l'ancien ecran_accueil_idle.c (supprimé en
+ * tâche 7 -- voir task-5-brief.md, "Où cette tâche s'insère"). Contrairement
+ * à l'ancien idle, ce hub n'a NI jog NI homing NI préréglages NI clavier de
  * consigne : juste les tuiles de température multi-tête (mêmes paliers,
- * même géométrie que ecran_accueil_idle.c -- klipper_paliers.h) et une
+ * même géométrie que l'ancien idle -- klipper_paliers.h) et une
  * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer,
  * réel dès cette tâche -- Températures/Extruder/Ventilateurs/Imprimer/
  * Réglages, sous-projets FUTURS donc no-op scopé pour l'instant, voir
@@ -13,13 +13,13 @@
  * la navigation (quel écran s'empile au démarrage) arrivent en tâche 6 --
  * ce fichier ne s'en préoccupe pas : `construire()` reçoit un `parent`
  * plein cadre comme n'importe quel autre écran (voir ecran.h), exactement
- * comme ecran_accueil_idle.c/ecran_deplacer.c aujourd'hui.
+ * comme ecran_deplacer.c.
  *
  * `ecran_accueil_hub_ctx_t` est exposé ici plutôt qu'opaque, même raison que
- * ecran_deplacer_ctx_t/ecran_accueil_idle_ctx_t (voir leurs en-têtes
- * respectifs) : host-test/tests/test_ecran_accueil_hub.c relit les
- * libellés/couleurs via lv_label_get_text()/lv_obj_get_style_text_color()
- * pour prouver ce que mettre_a_jour() écrit sans jamais regarder un pixel. */
+ * ecran_deplacer_ctx_t (voir son en-tête) : host-test/tests/
+ * test_ecran_accueil_hub.c relit les libellés/couleurs via
+ * lv_label_get_text()/lv_obj_get_style_text_color() pour prouver ce que
+ * mettre_a_jour() écrit sans jamais regarder un pixel. */
 #pragma once
 
 #include <stdbool.h>
@@ -29,12 +29,13 @@
 #include "etat_klipper.h"
 #include "lvgl.h"
 
-/* Une cellule de température : copie EXACTE de ecran_accueil_idle_cellule_t
- * (voir son commentaire dans ecran_accueil_idle.h) -- dupliquée ici
- * DÉLIBÉRÉMENT plutôt qu'extraite en helper partagé, parce que
- * ecran_accueil_idle.c sera SUPPRIMÉ en tâche 7 (voir task-5-brief.md,
- * section "Réutilisation (DRY)") : la duplication est transitoire, un
- * partage aurait dû être défait un jalon plus tard pour rien. */
+/* Une cellule de température : copie EXACTE de la structure équivalente de
+ * l'ancien ecran_accueil_idle.c -- dupliquée ici DÉLIBÉRÉMENT plutôt
+ * qu'extraite en helper partagé, parce que l'ancien idle devait être
+ * SUPPRIMÉ en tâche 7 (voir task-5-brief.md, section "Réutilisation (DRY)",
+ * et task-7-brief.md pour la suppression effective) : la duplication était
+ * transitoire, un partage aurait dû être défait un jalon plus tard pour
+ * rien. */
 typedef struct {
     lv_obj_t *racine;
     lv_obj_t *nom;
@@ -43,8 +44,8 @@ typedef struct {
 } ecran_accueil_hub_cellule_t;
 
 /* Une par extrudeur possible plus le plateau (voir KLIPPER_EXTRUDEURS_MAX
- * dans etat_klipper.h) -- même raisonnement que
- * ECRAN_ACCUEIL_IDLE_CELLULES_MAX : le pool est dimensionné au pire cas
+ * dans etat_klipper.h) -- même raisonnement que dans l'ancien
+ * ecran_accueil_idle.c : le pool est dimensionné au pire cas
  * (palier COMPACT, 8 têtes) une fois pour toutes. */
 #define ECRAN_ACCUEIL_HUB_CELLULES_MAX (KLIPPER_EXTRUDEURS_MAX + 1)
 

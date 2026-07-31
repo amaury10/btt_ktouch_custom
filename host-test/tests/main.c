@@ -21,11 +21,6 @@ void suite_navigation(void);
 void suite_habillage(void);
 void suite_widgets(void);
 void suite_ecran_accueil(void);
-void suite_ecran_accueil_idle(void);
-void suite_ecran_accueil_idle_jog(void);
-void suite_ecran_accueil_idle_home(void);
-void suite_ecran_accueil_idle_temp(void);
-void suite_ecran_accueil_idle_macros(void);
 void suite_ecran_deplacer(void);
 void suite_ecran_accueil_hub(void);
 void suite_accueil_choix(void);
@@ -107,7 +102,6 @@ int main(void)
      * (aucun etat process-wide partage). */
     suite_rail();
     suite_ecran_accueil();
-    suite_ecran_accueil_idle();
     suite_clavier();
     suite_ecran_configuration();
     /* Doit rester APRES suite_ecran_configuration() : sa derniere section
@@ -135,31 +129,6 @@ int main(void)
      * garde d'ordre que les autres : suite_ecran_macros() verifie elle-meme
      * les deux avant de s'appuyer dessus (voir son commentaire de tete). */
     suite_ecran_macros();
-
-    /* Tache 4 (jalon 3b) : trace du seam pad de jog -> ui_commander(). Meme
-     * garde d'ordonnancement que suite_ecran_macros() ci-dessus -- DOIT
-     * rester APRES suite_commandes() (boucle simulee demarree) ET
-     * suite_ecran_configuration() (habillage construit), voir le
-     * commentaire de tete de suite_ecran_accueil_idle_jog(). */
-    suite_ecran_accueil_idle_jog();
-
-    /* Tache 5 (jalon 3b) : boutons de homing + confirmation. Meme garde
-     * d'ordonnancement que suite_ecran_accueil_idle_jog() juste au-dessus
-     * (boucle simulee demarree par suite_commandes()) -- voir le commentaire
-     * de tete de suite_ecran_accueil_idle_home() dans test_ecran_accueil_idle.c. */
-    suite_ecran_accueil_idle_home();
-
-    /* Tache 6 (jalon 3b) : consignes de temperature manuelles + prereglages.
-     * Meme garde d'ordonnancement que suite_ecran_accueil_idle_jog()/_home()
-     * ci-dessus -- voir le commentaire de tete de
-     * suite_ecran_accueil_idle_temp() dans test_ecran_accueil_idle.c. */
-    suite_ecran_accueil_idle_temp();
-
-    /* Tache 7 (jalon 3b) : bouton Macros (visibilite + navigation vers
-     * ECRAN_MACROS). Meme garde d'ordonnancement que les trois suites
-     * ci-dessus -- voir le commentaire de tete de
-     * suite_ecran_accueil_idle_macros() dans test_ecran_accueil_idle.c. */
-    suite_ecran_accueil_idle_macros();
 
     /* Tache 4 (refonte accueil/deplacer) : l'ecran Deplacer (jog en grand +
      * pas + vitesse + home). Meme garde d'ordonnancement que les suites

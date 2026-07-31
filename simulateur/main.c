@@ -60,7 +60,7 @@
 #include "clavier.h"
 #include "confirmation.h"
 #include "ecran_accueil.h"
-#include "ecran_accueil_idle.h"
+#include "ecran_accueil_hub.h"
 #include "ecran_configuration.h"
 #include "ecran_jouet.h"
 #include "ecran_macros.h"
@@ -280,7 +280,7 @@ int main(int argc, char **argv)
      * la topologie precedente empilait ECRAN_ACCUEIL avant meme de choisir
      * un backend. accueil_choix.h (accueil_impression_actif()) a besoin
      * d'un premier etat REEL pour trancher entre ECRAN_ACCUEIL (impression)
-     * et ECRAN_ACCUEIL_IDLE (repos) ; seul le backend, une fois demarre,
+     * et ECRAN_ACCUEIL_HUB (repos) ; seul le backend, une fois demarre,
      * peut le fournir -- voir le commentaire du cycle d'amorce plus bas. */
     const backend_desc_t *backend;
     if (app == APP_JOUET) {
@@ -340,18 +340,19 @@ int main(int argc, char **argv)
          * Klipper -- les deux applications ne partagent aucun ecran. */
         navigation_empiler(&ECRAN_JOUET);
     } else {
-        /* Tache 3 (jalon 3b) : le choix idle/impression, calcule sur l'etat
-         * que le cycle d'amorce ci-dessus vient de rendre disponible (ou
-         * sur l'etat nul de depart si cette amorce a ete sautee, voir son
+        /* Tache 3 (jalon 3b), mis a jour tache 7 (accueil-hub remplace
+         * l'idle) : le choix hub/impression, calcule sur l'etat que le
+         * cycle d'amorce ci-dessus vient de rendre disponible (ou sur
+         * l'etat nul de depart si cette amorce a ete sautee, voir son
          * commentaire) -- accueil_impression_actif() est le MEME helper pur
          * qu'appellera un futur app_main.c pour la bascule vivante (differee,
          * voir task-3-brief.md), exerce ici pour de vrai des le demarrage :
          * un `--scenario 1` demarre donc sur ECRAN_ACCUEIL, un `--scenario 0`
-         * (ou tout scenario "repos", 10/11/12) sur ECRAN_ACCUEIL_IDLE, ce qui
+         * (ou tout scenario "repos", 10/11/12) sur ECRAN_ACCUEIL_HUB, ce qui
          * prouve les DEUX ecrans et le helper de choix depuis ce seul
          * fichier. ui_etat_instantane() rendant faux (boucle pas demarree,
          * echec de source_etat_sim_demarrer() ci-dessus) retombe sur
-         * l'accueil idle -- le choix le plus sur, meme politique que
+         * l'accueil-hub -- le choix le plus sur, meme politique que
          * app_main.c (voir son commentaire). */
         etat_klipper_t etat_amorce;
         uint32_t generation_amorce = 0;
@@ -360,7 +361,7 @@ int main(int argc, char **argv)
         if (ui_etat_instantane(&etat_amorce, sizeof(etat_amorce), &generation_amorce, &liaison_amorce)) {
             impression = accueil_impression_actif(&etat_amorce);
         }
-        navigation_empiler(impression ? &ECRAN_ACCUEIL : &ECRAN_ACCUEIL_IDLE);
+        navigation_empiler(impression ? &ECRAN_ACCUEIL : &ECRAN_ACCUEIL_HUB);
 
         /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
          * l'accueil (jamais seul), exactement la topologie que app_main.c
@@ -535,52 +536,55 @@ int main(int argc, char **argv)
              * exactement comme une saisie tactile l'aurait laissée. */
             clavier_ouvrir("Printer address", "192.168.1.42", CLAVIER_TEXTE, demo_clavier_rappel, NULL);
         } else if (app == APP_ACCUEIL && scenario == 13) {
-            /* Tâche 5 (jalon 3b) : dialogue de confirmation de homing
-             * par-dessus ECRAN_ACCUEIL_IDLE (empilé plus haut par la logique
-             * idle/impression commune, `backend_factice_scenario(13)`
-             * produit le MÊME état repos + axes entièrement référencés que le
+            /* Tâche 5 (jalon 3b), mis à jour tâche 7 (retrait de l'ancien
+             * accueil idle) : dialogue de confirmation de homing par-dessus
+             * ECRAN_ACCUEIL_HUB (empilé plus haut par la logique
+             * hub/impression commune, `backend_factice_scenario(13)` produit
+             * le MÊME état repos + axes entièrement référencés que le
              * scénario 10 -- voir son commentaire dans backend_factice.c --
              * pour que "Home X" ait effectivement de quoi confirmer). Comme
              * le scénario 6 ci-dessus pour "Cancel print?" : rien ici ne
-             * simule de tactile (voir le commentaire de tête de ce fichier),
-             * donc pas de vrai clic sur le bouton "Home X" réel de
-             * ecran_accueil_idle.c -- navigation.h ne rend jamais le
-             * contexte d'un écran empilé à cet appelant (les écrans cachent
-             * leurs widgets dans leur propre contexte, voir
-             * ecran_accueil_idle.h), atteindre le VRAI bouton depuis ce
-             * fichier serait donc plus retors que la valeur ajoutée : appel
-             * DIRECT à confirmation_ouvrir_ex(), avec les MÊMES constantes
-             * partagées (ECRAN_ACCUEIL_IDLE_HOME_*, ecran_accueil_idle.h) que
-             * home_bouton_cb() -- jamais une copie tapée à la main qui
-             * pourrait diverger, exactement le choix documenté par le
-             * commentaire de tête de ces constantes.
+             * simule de tactile (voir le commentaire de tête de ce fichier).
+             * Avant la tâche 7, cet appel réutilisait les constantes
+             * partagées de l'ancien ecran_accueil_idle.c (ECRAN_ACCUEIL_IDLE_
+             * HOME_*, mêmes chaînes que le vrai bouton "Home X" de cet
+             * écran) pour ne jamais diverger d'une copie tapée à la main --
+             * ce fichier a disparu en tâche 7 et ni ECRAN_ACCUEIL_HUB (aucun
+             * jog/homing) ni ECRAN_DEPLACER (aucune confirmation avant Home,
+             * voir ecran_deplacer.h) n'exposent d'équivalent : ce scénario de
+             * démo n'a donc plus de bouton réel à représenter fidèlement,
+             * d'où les littéraux ci-dessous (mêmes valeurs que l'ancien
+             * ECRAN_ACCUEIL_IDLE_HOME_X/_MESSAGE/_ACTION/_DECLINER).
              *
              * Aucun afficheur_pomper() supplémentaire ici : exactement comme
              * les scénarios 5/6/8 ci-dessus, l'unique pompe plus bas rend d'un
-             * coup l'accueil idle (~70 widgets) ET le dialogue. Une version de
-             * cette tâche avait cru devoir pré-rendre l'écran de fond seul
-             * d'abord (le process se bloquait sinon à 100 % de CPU dans
-             * lv_tlsf_malloc) : c'était le symptôme d'un pool LVGL trop petit,
-             * pas d'un ordre de rendu à respecter -- LV_MEM_SIZE relevé à
-             * 256 Ko dans lv_conf.h (voir son commentaire pour le mécanisme
-             * exact). Le pré-rendu masquait le blocage mais laissait la modale
-             * à 0x0, jamais visible ; il a donc été retiré. */
-            confirmation_ouvrir_ex(ECRAN_ACCUEIL_IDLE_HOME_TITRES[ECRAN_ACCUEIL_IDLE_HOME_X],
-                                    ECRAN_ACCUEIL_IDLE_HOME_MESSAGE, ECRAN_ACCUEIL_IDLE_HOME_ACTION, true,
-                                    ECRAN_ACCUEIL_IDLE_HOME_DECLINER, demo_confirmation_rappel, NULL);
+             * coup l'accueil-hub ET le dialogue. Une version de cette tâche
+             * avait cru devoir pré-rendre l'écran de fond seul d'abord (le
+             * process se bloquait sinon à 100 % de CPU dans lv_tlsf_malloc) :
+             * c'était le symptôme d'un pool LVGL trop petit, pas d'un ordre
+             * de rendu à respecter -- LV_MEM_SIZE relevé à 256 Ko dans
+             * lv_conf.h (voir son commentaire pour le mécanisme exact). Le
+             * pré-rendu masquait le blocage mais laissait la modale à 0x0,
+             * jamais visible ; il a donc été retiré. */
+            confirmation_ouvrir_ex("Home X?", "The axis will move to its endstop.", "Home", true, "Cancel",
+                                    demo_confirmation_rappel, NULL);
         } else if (app == APP_ACCUEIL && scenario == 14) {
-            /* Tache 6 (jalon 3b) : clavier numerique de temperature
-             * par-dessus ECRAN_ACCUEIL_IDLE, meme schema que le scenario 13
-             * pour le homing juste au-dessus -- MEME constante partagee
-             * (ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE, ecran_accueil_idle.h) que
-             * le vrai tap sur une cellule (cellule_bouton_cb(),
-             * ecran_accueil_idle.c), jamais une chaine "Nozzle target" tapee
-             * a la main ici qui pourrait un jour diverger. Valeur initiale
+            /* Tache 6 (jalon 3b), mis a jour tache 7 (retrait de l'ancien
+             * accueil idle) : clavier numerique de temperature par-dessus
+             * ECRAN_ACCUEIL_HUB, meme schema que le scenario 13 pour le
+             * homing juste au-dessus. Avant la tache 7, ce titre reutilisait
+             * la constante partagee de l'ancien ecran_accueil_idle.c
+             * (ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE, meme chaine que le vrai
+             * tap sur une cellule) -- ce fichier a disparu en tache 7 et
+             * ECRAN_ACCUEIL_HUB n'a NI clic sur ses cellules NI clavier de
+             * consigne (voir ecran_accueil_hub.c), donc plus de bouton reel
+             * a representer fidelement : litteral ci-dessous ("Nozzle
+             * target", meme valeur que l'ancienne constante). Valeur initiale
              * "210" en dur (pas de tactile simule pour lire une vraie
              * consigne courante depuis ce fichier, meme limite documentee au
              * scenario 13 pour le homing) : plausible pour le scenario 10
              * dont ce cas herite l'etat (buse a 0, voir backend_factice.c). */
-            clavier_ouvrir(ECRAN_ACCUEIL_IDLE_TEMP_TITRE_BUSE, "210", CLAVIER_NUMERIQUE, demo_clavier_rappel, NULL);
+            clavier_ouvrir("Nozzle target", "210", CLAVIER_NUMERIQUE, demo_clavier_rappel, NULL);
         }
 
         /* Un cycle de pompe LVGL suffit à laisser rendre l'écran une

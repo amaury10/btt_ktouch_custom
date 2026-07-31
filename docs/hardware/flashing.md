@@ -81,11 +81,11 @@ jalon 1, pas la mire elle-même :
   premier démarrage, pas une panne.
 - **Appareil déjà configuré** : écran d'accueil Klipper directement — l'accueil
   IMPRESSION (tuiles de température, progression, boutons Pause/Cancel/E-STOP)
-  si une impression est en cours au démarrage, sinon l'accueil IDLE (tuiles de
-  température par palier d'outils, position XYZ, pad de jog/homing, bouton
-  Macros) quand la machine est au repos — c'est ce dernier que rencontrera
+  si une impression est en cours au démarrage, sinon l'ACCUEIL-HUB (tuiles de
+  température par palier d'outils, grille de menu, dont Déplacer pour le
+  jog/homing) quand la machine est au repos — c'est ce dernier que rencontrera
   l'utilisateur au démarrage dans l'immense majorité des cas (voir
-  `accueil_choix.h` pour le critère, et `ecran_accueil_idle.c` pour l'écran
+  `accueil_choix.h` pour le critère, et `ecran_accueil_hub.c` pour l'écran
   lui-même). Sans l'écran de configuration par-dessus dans les deux cas.
 - **Écran ou tactile en panne** (`pt_display_init()` en échec, ou GT911
   muet) : l'appareil reste diagnosticable à distance (WiFi, `/log`, `/state`,
