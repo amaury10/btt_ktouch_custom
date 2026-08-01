@@ -4,7 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "core/etat_klipper.h"
+#include "etat_klipper.h" /* KLIPPER_EXTRUDEURS_MAX -- sans prefixe core/, meme
+                            * convention que tout le reste du depot (ecran_*.h,
+                            * habillage.c) : core/ est deja dans le chemin
+                            * d'inclusion des trois cibles (le prefixe core/
+                            * cassait le build simulateur, dont le path pointe
+                            * directement sur firmware/main/core). */
 
 /* Formate `valeur` en millimètres avec au plus 2 décimales, sans zéro de fin
  * superflu ni point isolé ("10.00" -> "10", "-0.10" -> "-0.1", "1.25" ->
