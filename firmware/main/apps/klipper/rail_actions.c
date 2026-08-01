@@ -98,7 +98,18 @@ void rail_action_klipper(rail_action_t action, void *ctx)
         }
         break;
     }
-    case RAIL_MACROS:
+    case RAIL_MACROS: {
+        /* Garde anti-re-empilement (revue finale de branche, finding I1) : le
+         * rail etant persistant et Macros atteignable DEPUIS Macros lui-meme,
+         * re-taper le bouton (pourtant deja surligne "actif") empilerait des
+         * copies de ECRAN_MACROS jusqu'a la borne de profondeur, forcant
+         * ensuite plusieurs "Retour" pour en sortir. No-op si Macros est deja
+         * au sommet -- l'utilisateur voit alors le bouton comme un simple
+         * indicateur d'ecran courant, pas comme un empileur. */
+        const char *courant = navigation_id_courant();
+        if (courant != NULL && strcmp(courant, ECRAN_MACROS.id) == 0) {
+            break;
+        }
         /* Empile l'ecran macros par-dessus l'accueil. Echec (pile pleine)
          * delibrement ignore, meme choix que menu_deplacer_cb() dans
          * ecran_accueil_hub.c : rien d'utile a journaliser de plus qu'un
@@ -106,6 +117,7 @@ void rail_action_klipper(rail_action_t action, void *ctx)
          * usage normal. */
         navigation_empiler(&ECRAN_MACROS);
         break;
+    }
     case RAIL_STOP:
         /* Arret d'urgence PROTEGE par une confirmation (destructif = true :
          * bouton rouge, aucun etat par defaut) -- l'envoi reel de M112 se

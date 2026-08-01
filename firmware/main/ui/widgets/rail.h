@@ -42,8 +42,8 @@ typedef struct {
  * large) dans `parent`, et les range dans `r` (déjà alloué par l'appelant,
  * voir le commentaire de tête). `boutons[i]` est toujours le bouton de
  * l'action `i` (donc `boutons[RAIL_STOP]` est le bouton STOP, quel que soit
- * l'ordre de création interne) -- STOP est rouge et affiché en bas de la
- * colonne, visuellement séparé des trois autres. Un clic sur `boutons[i]`
+ * l'ordre de création interne) -- STOP est rouge et affiché en TÊTE (haut) de
+ * la colonne, visuellement distinct des trois autres. Un clic sur `boutons[i]`
  * appelle `sur_action(i, ctx)` si `sur_action` n'est pas NULL (NULL est
  * autorisé à la création -- un clic ne fait alors simplement rien, même
  * garde que `cible`/`s` dans bouton_pas_cb() de selecteur_pas.c) ; ce widget

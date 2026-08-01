@@ -137,6 +137,11 @@ void suite_integration_rail(void)
     VERIFIER(navigation_profondeur() == 2);
     VERIFIER_TEXTE(navigation_id_courant(), ECRAN_MACROS.id);
     VERIFIER(rail->racine != NULL); /* le rail persiste aussi par-dessus Macros */
+    /* Re-taper Macros alors qu'on y est deja : NE re-empile PAS (garde I1,
+     * revue finale) -- la profondeur reste 2, aucune copie accumulee. */
+    lv_obj_send_event(rail->boutons[RAIL_MACROS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), ECRAN_MACROS.id);
     /* Retour a l'accueil pour la suite (STOP se teste depuis n'importe ou, mais
      * on repart d'un etat connu). */
     lv_obj_send_event(rail->boutons[RAIL_ACCUEIL], LV_EVENT_CLICKED, NULL);

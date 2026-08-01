@@ -14,14 +14,12 @@
  * redimensionne de toute facon a la hauteur utile de l'ecran (meme droit que
  * progression_t/selecteur_pas_t, voir leur commentaire de tete) : quatre
  * boutons de BOUTON_HAUTEUR_DEFAUT px + trois ecarts de ECART_BOUTONS px.
- * Contrairement a selecteur_pas.c/selecteur_choix.c (rangee HORIZONTALE, RAS
+ * Contrairement a selecteur_pas.c/selecteur_choix.c (rangee HORIZONTALE,
  * boutons en flex_grow pour repartir la LARGEUR), les boutons ici ont une
- * hauteur FIXE plutot qu'un flex_grow sur la hauteur : necessaire pour que
- * STOP (positionne independamment du flux flex, voir rail_creer()) ait un
- * ecart croissant au-dessus de lui plutot que d'etre colle au bouton Macros
- * -- l'effet "margin-top:auto" demande par le brief n'existe que si les trois
- * premiers restent compacts en haut plutot que de se dilater pour remplir
- * `racine`. */
+ * hauteur FIXE plutot qu'un flex_grow sur la hauteur : les quatre restent
+ * compacts en haut de la colonne (STOP en tete, voir rail_creer()),
+ * l'eventuel espace libre tombant en bas quand l'appelant agrandit `racine`
+ * -- plutot que de se dilater chacun pour remplir toute la hauteur. */
 #define RACINE_LARGEUR_DEFAUT   58
 #define BOUTON_HAUTEUR_DEFAUT   80
 #define ECART_BOUTONS            8
@@ -130,24 +128,21 @@ void rail_creer(rail_t *r, lv_obj_t *parent, void (*sur_action)(rail_action_t, v
         lv_obj_add_event_cb(b, bouton_rail_cb, LV_EVENT_CLICKED, r);
     }
 
-    /* STOP pousse en bas de la colonne : sorti du flux flex
-     * (LV_OBJ_FLAG_IGNORE_LAYOUT) puis aligne explicitement sur le bas de
-     * `racine` -- emulation de "margin-top:auto" (CSS), qu'aucune propriete
-     * de lv_flex ne fournit telle quelle (voir simulateur/lvgl/src/layouts/
-     * flex/lv_flex.c, aucune notion de marge "auto"). Les trois premiers
-     * restent geres par le flex column normal, empiles compactement en haut
-     * (voir le commentaire de RACINE_HAUTEUR_DEFAUT plus haut sur pourquoi
-     * ils ne sont volontairement PAS en flex_grow) ; seul STOP est
-     * positionne independamment, avec pour consequence que l'ecart entre le
-     * groupe de navigation et STOP grandit avec la hauteur de `racine` --
-     * exactement le comportement voulu par le brief, plutot qu'un ecart fixe
-     * de ECART_BOUTONS comme entre les trois premiers. La largeur LV_PCT(100)
-     * deja posee ci-dessus reste valide : IGNORE_LAYOUT ne retire l'objet que
-     * du calcul de POSITION par l'algorithme flex, pas de la resolution
-     * normale de ses propres dimensions. */
-    lv_obj_t *stop = r->boutons[RAIL_STOP];
-    lv_obj_add_flag(stop, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_align(stop, LV_ALIGN_BOTTOM_MID, 0, 0);
+    /* STOP en TETE de colonne (haut du rail) plutot qu'en bas : le bandeau de
+     * notification, ancre en bas de l'ecran sur toute la largeur (voir
+     * habillage.c), recouvrait sinon le bouton d'arret d'urgence pendant ses
+     * 4 s -- inacceptable pour LE controle de securite. lv_obj_move_to_index(
+     * ..., 0) le replace comme PREMIER enfant du flex column : les enfants
+     * sont rendus dans l'ordre de creation, STOP passe donc tout en haut,
+     * suivi d'Accueil/Home/Macros. Il reste dans le flux flex normal (pas
+     * d'IGNORE_LAYOUT/align comme avant) : les quatre boutons sont alors
+     * simplement empiles compactement en haut, l'espace libre eventuel tombant
+     * en bas, la ou le bandeau peut le recouvrir sans masquer aucun bouton.
+     * STOP demeure visuellement distinct par son rouge (bg_color ci-dessus),
+     * et son declenchement passe de toute facon par une confirmation (voir
+     * rail_actions.c) : sa proximite avec Accueil ne risque donc pas un arret
+     * d'urgence sur simple effleurement. */
+    lv_obj_move_to_index(r->boutons[RAIL_STOP], 0);
 }
 
 void rail_marquer_actif(rail_t *r, rail_action_t action)
