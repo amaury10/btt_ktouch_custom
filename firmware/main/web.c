@@ -6,6 +6,8 @@
  *   GET  /state   JSON : état de la liaison avec l'hôte, génération et
  *                 dernier état Klipper connu (voir gestion_state() plus bas)
  *   GET  /log     texte brut, contenu du journal réseau (netlog_snapshot())
+ *   GET  /revert  page HTML avec un bouton qui déclenche le POST (pratique
+ *                 depuis un navigateur : Firefox, sans outil POST)
  *   POST /revert  bascule vers l'autre slot et redémarre
  *
  * Délibérément AUCUNE route de mise à jour. Ce firmware tourne depuis app1
@@ -20,9 +22,14 @@
  * rescue.c. L'itération sur le pinout repasse par /revert puis par le
  * /update du firmware d'origine (voir docs/hardware/flashing.md).
  *
- * /revert est en POST délibérément : en GET, n'importe quelle requête d'un
- * navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait
- * l'appareil. */
+ * La BASCULE elle-même reste en POST délibérément : en GET, n'importe quelle
+ * requête d'un navigateur (préchargement d'URL, restauration d'onglet au
+ * démarrage), d'un aspirateur de liens ou d'un scanner réseau redémarrerait
+ * l'appareil. Le GET /revert, lui, ne fait que SERVIR une page avec un bouton —
+ * il ne redémarre jamais rien de lui-même ; c'est le clic sur le bouton qui
+ * envoie le POST. On garde ainsi la propriété de sécurité d'origine tout en
+ * permettant de déclencher la bascule depuis un simple navigateur (Firefox),
+ * sans outil capable de POST. */
 
 #include "web.h"
 
@@ -86,7 +93,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/status\">/status</a> — état (JSON)</li>"
         "<li><a href=\"/state\">/state</a> — état Klipper courant (JSON)</li>"
         "<li><a href=\"/log\">/log</a> — journal réseau</li>"
-        "<li>POST /revert — bascule vers l'autre slot et redémarre</li>"
+        "<li><a href=\"/revert\">/revert</a> — bouton de redémarrage (bascule OTA)</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
@@ -361,6 +368,33 @@ static esp_err_t gestion_log(httpd_req_t *req)
     return httpd_resp_send(req, instantane, longueur);
 }
 
+static esp_err_t gestion_revert_page(httpd_req_t *req)
+{
+    /* GET /revert : sert une page HTML avec un bouton qui, lui, fait le
+     * POST /revert. Permet de déclencher la bascule depuis un navigateur
+     * (Firefox) sans outil capable d'émettre un POST. Un GET ne redémarre
+     * JAMAIS l'appareil (voir la justification de sécurité en tête de fichier) :
+     * un préchargement, un scanner ou un aspirateur de liens qui frappe cette
+     * route ne fait que récupérer ce HTML inoffensif. La page est
+     * auto-portée (aucune ressource externe) pour rester joignable sur un
+     * réseau isolé. */
+    static const char page[] =
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Redemarrer la K-Touch</title></head>"
+        "<body style=\"font-family:sans-serif;max-width:32em;margin:2em auto;padding:0 1em\">"
+        "<h1>Redemarrer sur l'autre firmware</h1>"
+        "<p>Bascule vers l'autre slot OTA puis redemarre — a utiliser apres un "
+        "flash pour demarrer le nouveau firmware, ou pour revenir au firmware "
+        "d'origine.</p>"
+        "<form method=\"POST\" action=\"/revert\">"
+        "<button type=\"submit\" style=\"font-size:1.2em;padding:.6em 1.2em\">"
+        "Redemarrer maintenant</button></form>"
+        "</body></html>";
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+}
+
 static esp_err_t gestion_revert(httpd_req_t *req)
 {
     /* La bascule proprement dite (vérification SHA-256 de l'image cible,
@@ -407,6 +441,9 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_log = {
         .uri = "/log", .method = HTTP_GET, .handler = gestion_log, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_revert_page = {
+        .uri = "/revert", .method = HTTP_GET, .handler = gestion_revert_page, .user_ctx = NULL,
+    };
     static const httpd_uri_t route_revert = {
         .uri = "/revert", .method = HTTP_POST, .handler = gestion_revert, .user_ctx = NULL,
     };
@@ -415,6 +452,7 @@ esp_err_t web_start(void)
     enregistrer_route(serveur, &route_status);
     enregistrer_route(serveur, &route_state);
     enregistrer_route(serveur, &route_log);
+    enregistrer_route(serveur, &route_revert_page);
     enregistrer_route(serveur, &route_revert);
 
     ESP_LOGI(TAG, "serveur HTTP demarre");

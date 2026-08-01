@@ -159,11 +159,17 @@ Le serveur écoute sur le port 80, à l'adresse IP journalisée au démarrage
 | `/status` | GET | JSON : slot en cours, version, adresse IP, temps depuis le démarrage, mémoire libre, tactile disponible ou non, compteur de démarrages |
 | `/state` | GET | JSON : état de la liaison avec l'hôte Klipper, génération de l'état, et le dernier état connu — `extrudeurs` (jusqu'à 8, tableau des seuls présents avec leur `index` d'origine), `nb_extrudeurs`, `outil_actif`, `plateau`, `ventilateurs`, position XYZ et axes référencés, vitesse/flux en %, décalage Z (babystep), `macros` (tableau de noms) et `macros_tronquees`, fichier, progression, temps restant, impression en cours/en pause |
 | `/log` | GET | texte brut, contenu du journal réseau en RAM (dernières lignes de log) |
+| `/revert` | GET | page HTML avec un bouton « Redémarrer » (déclenche le POST) — pratique depuis un navigateur |
 | `/revert` | POST | bascule vers l'autre slot OTA et redémarre |
 
-`/revert` est en **POST** délibérément : en GET, n'importe quelle requête d'un
-navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait
-l'appareil.
+La **bascule** (`/revert`) est en **POST** délibérément : en GET, n'importe
+quelle requête d'un navigateur (préchargement d'URL, restauration d'onglet),
+d'un aspirateur de liens ou d'un scanner réseau redémarrerait l'appareil. Le
+**GET `/revert`** ne redémarre donc rien lui-même : il sert une petite page avec
+un bouton « Redémarrer » qui, lui, envoie le POST — ce qui permet de déclencher
+la bascule depuis un simple navigateur (Firefox : ouvrir `http://<ip>/revert`
+puis cliquer) sans outil capable de POST, tout en gardant la protection
+ci-dessus contre les redémarrages accidentels.
 
 Le compteur de démarrages rapporté par `/status` est un instantané pris une
 seule fois au démarrage (juste après `rescue_count_boot()`), pas une valeur
