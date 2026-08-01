@@ -9,13 +9,15 @@
  * brief), puis une grille de 6 cases de menu (3 colonnes x 2 lignes) en
  * dessous.
  *
- * ÉCART délibéré par rapport à l'ancien ecran_accueil_idle.c : PAS de clic sur les
- * cellules de température ici (pas de LV_OBJ_FLAG_CLICKABLE, pas de
- * clavier.h) -- au palier COMPACT, l'ancien idle ouvrait le clavier
- * numérique directement depuis la cellule tapée ; ce hub renvoie plutôt
- * vers la case de menu « Températures » (sous-projet futur, no-op scopé
- * pour l'instant) pour ce réglage détaillé. Le hub n'a NI jog NI homing NI
- * préréglages : uniquement les tuiles + la grille de menu (task-5-brief.md).
+ * ÉCART délibéré par rapport à l'ancien ecran_accueil_idle.c : les cellules de
+ * température ne réagissent PAS comme avant -- au palier COMPACT, l'ancien
+ * idle ouvrait le clavier numérique directement depuis la cellule tapée ;
+ * ici (sous-projet 2, tâche 2) un tap sur une tuile OU sur la case de menu
+ * « Températures » empile ECRAN_TEMPERATURES (ecran_temperatures.h), qui
+ * porte lui-même le réglage détaillé (clavier + préréglages) -- aucun
+ * ciblage par chauffe fait ici, le panneau gère ça seul. Le hub n'a NI jog
+ * NI homing NI préréglages : uniquement les tuiles + la grille de menu
+ * (task-5-brief.md).
  *
  * Libellés de menu SANS accent ("Deplacer", pas "Déplacer") bien que le
  * brief les nomme avec accents en prose : aucun texte affiché à l'écran
@@ -29,6 +31,7 @@
 #include <stdio.h>
 
 #include "ecran_deplacer.h" /* ECRAN_DEPLACER */
+#include "ecran_temperatures.h" /* ECRAN_TEMPERATURES */
 #include "klipper_paliers.h"
 #include "navigation.h" /* navigation_empiler() */
 #include "tuile.h" /* ui_format_temperature() */
@@ -214,9 +217,10 @@ static void cellule_creer(ecran_accueil_hub_cellule_t *c, lv_obj_t *parent)
 
 /* --- Grille de menu ------------------------------------------------------
  *
- * Seule DEPLACER a un rappel de clic reel (navigation_empiler(&ECRAN_DEPLACER)) ;
- * les cinq autres n'ont AUCUN rappel attache (voir le commentaire de tete de
- * ecran_accueil_hub.h) -- un no-op scope, pas un ecran bricole. */
+ * DEPLACER et TEMPERATURES ont chacune un rappel de clic reel
+ * (navigation_empiler()) ; les quatre autres n'ont AUCUN rappel attache (voir
+ * le commentaire de tete de ecran_accueil_hub.h) -- un no-op scope, pas un
+ * ecran bricole. */
 static void menu_deplacer_cb(lv_event_t *e)
 {
     (void)e;
@@ -226,6 +230,17 @@ static void menu_deplacer_cb(lv_event_t *e)
      * passe" -- la pile est bornee a NAVIGATION_PROFONDEUR_MAX (navigation.h)
      * et un hub-vers-deplacer est toujours une profondeur 1->2, jamais pres
      * de cette borne en usage normal. */
+}
+
+/* Meme idiome que menu_deplacer_cb() ci-dessus, meme echec ignore pour la
+ * meme raison -- rappel PARTAGE entre la case de menu "Temperatures" et
+ * chaque tuile de temperature (voir cellule_creer()/la boucle de creation
+ * dans ecran_accueil_hub_construire()) : aucun ciblage par chauffe requis,
+ * les deux points d'entree ouvrent simplement le meme panneau. */
+static void ouvrir_temperatures_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_TEMPERATURES);
 }
 
 static const struct {
@@ -253,10 +268,16 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
 
     /* --- tuiles de temperature : pool au pire cas, masquees tant que
      * mettre_a_jour() n'a pas tourne -- meme politique que cellule_creer()
-     * dans l'ancien ecran_accueil_idle.c. -------------------------------- */
+     * dans l'ancien ecran_accueil_idle.c. Chaque tuile est rendue cliquable
+     * (LV_OBJ_FLAG_CLICKABLE : `racine` est un lv_obj_t nu via
+     * lv_obj_create(), pas un lv_button_create(), donc le flag ne coule pas
+     * de source comme pour les boutons de la grille de menu plus bas) et
+     * partage ouvrir_temperatures_cb() -- voir son commentaire. -----------*/
     for (size_t i = 0; i < ECRAN_ACCUEIL_HUB_CELLULES_MAX; i++) {
         cellule_creer(&ctx->cellules[i], parent);
         lv_obj_add_flag(ctx->cellules[i].racine, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(ctx->cellules[i].racine, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(ctx->cellules[i].racine, ouvrir_temperatures_cb, LV_EVENT_CLICKED, NULL);
     }
 
     /* --- grille de menu, 6 cases a taille fixe (voir MENU_* en tete de
@@ -301,11 +322,14 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
         ctx->menu_boutons[i] = bouton;
     }
 
-    /* Seule DEPLACER navigue reellement (voir le commentaire de tete de ce
-     * bloc) -- ordre de creation FIXE (boucle ci-dessus), donc
-     * ECRAN_ACCUEIL_HUB_MENU_DEPLACER == 0 est bien le premier bouton cree,
-     * meme convention que rail_t.boutons[i]. */
+    /* DEPLACER et TEMPERATURES naviguent reellement (voir le commentaire de
+     * tete de ce bloc) -- ordre de creation FIXE (boucle ci-dessus), donc
+     * ECRAN_ACCUEIL_HUB_MENU_DEPLACER == 0 / ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES
+     * == 1 sont bien les deux premiers boutons crees, meme convention que
+     * rail_t.boutons[i]. */
     lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_DEPLACER], menu_deplacer_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES], ouvrir_temperatures_cb,
+                         LV_EVENT_CLICKED, NULL);
 }
 
 static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)

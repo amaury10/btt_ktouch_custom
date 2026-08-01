@@ -50,10 +50,14 @@ typedef struct {
 #define ECRAN_ACCUEIL_HUB_CELLULES_MAX (KLIPPER_EXTRUDEURS_MAX + 1)
 
 /* Grille de 6 cases de menu, ORDRE FIXE -- résolution d'ambiguïté déjà
- * tranchée par task-5-brief.md : seule DEPLACER navigue réellement
- * (ECRAN_DEPLACER, tâche 4) ; les cinq autres pointent vers des écrans de
- * sous-projets FUTURS -- no-op scopé (aucun rappel de clic attaché, voir
- * ecran_accueil_hub.c), PAS un écran placeholder bricolé. */
+ * tranchée par task-5-brief.md : DEPLACER (ECRAN_DEPLACER, tâche 4) et
+ * TEMPERATURES (ECRAN_TEMPERATURES, sous-projet 2 tâche 2) naviguent
+ * réellement ; les quatre autres pointent vers des écrans de sous-projets
+ * FUTURS -- no-op scopé (aucun rappel de clic attaché, voir
+ * ecran_accueil_hub.c), PAS un écran placeholder bricolé. Les tuiles de
+ * température (`cellules[i].racine`) naviguent elles aussi vers
+ * ECRAN_TEMPERATURES au tap, même rappel partagé -- voir
+ * ouvrir_temperatures_cb() dans ecran_accueil_hub.c. */
 #define ECRAN_ACCUEIL_HUB_MENU_DEPLACER     0
 #define ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES 1
 #define ECRAN_ACCUEIL_HUB_MENU_EXTRUDER     2
@@ -72,7 +76,8 @@ typedef struct ecran_accueil_hub_ctx_s {
      * `rail_t.boutons[i]` (rail.h, tâche 3). Contenu statique (aucun champ
      * de contexte par bouton, contrairement aux jog/home/preset_infos des
      * autres écrans) : ces boutons n'ont besoin de relire aucun état au
-     * moment du clic, DEPLACER n'ayant qu'à empiler ECRAN_DEPLACER. */
+     * moment du clic, DEPLACER et TEMPERATURES n'ayant qu'à empiler
+     * respectivement ECRAN_DEPLACER et ECRAN_TEMPERATURES. */
     lv_obj_t *zone_menu;
     lv_obj_t *menu_boutons[ECRAN_ACCUEIL_HUB_MENU_NB];
 } ecran_accueil_hub_ctx_t;

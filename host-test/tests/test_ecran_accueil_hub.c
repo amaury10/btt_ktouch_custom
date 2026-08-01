@@ -184,4 +184,29 @@ void suite_ecran_accueil_hub(void)
     VERIFIER(bouton_reglages != NULL);
     lv_obj_send_event(bouton_reglages, LV_EVENT_CLICKED, NULL);
     VERIFIER(navigation_profondeur() == 1);
+
+    /* ---------------------------------------------------------------------
+     * Sous-projet 2, tache 2 : la case de menu "Temperatures" ET une tuile
+     * de temperature naviguent desormais vers ECRAN_TEMPERATURES -- meme
+     * technique de parcours/clic que "Deplacer" ci-dessus. ---------------- */
+    lv_obj_t *bouton_temperatures = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES);
+    VERIFIER(bouton_temperatures != NULL);
+    lv_obj_send_event(bouton_temperatures, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "temperatures");
+
+    navigation_depiler();
+    VERIFIER(navigation_profondeur() == 1);
+
+    /* Tuile de temperature (premiere cellule) : cree AVANT zone_menu dans
+     * ecran_accueil_hub_construire() (voir la boucle en tete de fonction),
+     * donc premier enfant de `conteneur`. */
+    lv_obj_t *tuile_0 = lv_obj_get_child(conteneur, 0);
+    VERIFIER(tuile_0 != NULL);
+    lv_obj_send_event(tuile_0, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "temperatures");
+
+    navigation_depiler();
+    VERIFIER(navigation_profondeur() == 1);
 }
