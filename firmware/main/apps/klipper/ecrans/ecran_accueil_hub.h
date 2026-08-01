@@ -4,8 +4,8 @@
  * à l'ancien idle, ce hub n'a NI jog NI homing NI préréglages NI clavier de
  * consigne : juste les tuiles de température multi-tête (mêmes paliers,
  * même géométrie que l'ancien idle -- klipper_paliers.h) et une
- * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer
- * et Températures naviguent réellement ; Extruder/Ventilateurs/Imprimer/
+ * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer,
+ * Températures et Extruder naviguent réellement ; Ventilateurs/Imprimer/
  * Réglages restent des sous-projets FUTURS, no-op scopé pour l'instant, voir
  * ecran_accueil_hub.c).
  *
@@ -50,11 +50,12 @@ typedef struct {
 #define ECRAN_ACCUEIL_HUB_CELLULES_MAX (KLIPPER_EXTRUDEURS_MAX + 1)
 
 /* Grille de 6 cases de menu, ORDRE FIXE -- résolution d'ambiguïté déjà
- * tranchée par task-5-brief.md : DEPLACER (ECRAN_DEPLACER, tâche 4) et
- * TEMPERATURES (ECRAN_TEMPERATURES, sous-projet 2 tâche 2) naviguent
- * réellement ; les quatre autres pointent vers des écrans de sous-projets
- * FUTURS -- no-op scopé (aucun rappel de clic attaché, voir
- * ecran_accueil_hub.c), PAS un écran placeholder bricolé. Les tuiles de
+ * tranchée par task-5-brief.md : DEPLACER (ECRAN_DEPLACER, tâche 4),
+ * TEMPERATURES (ECRAN_TEMPERATURES, sous-projet 2 tâche 2) et EXTRUDER
+ * (ECRAN_EXTRUDER, sous-projet 3 tâche 2) naviguent réellement ; les trois
+ * autres pointent vers des écrans de sous-projets FUTURS -- no-op scopé
+ * (aucun rappel de clic attaché, voir ecran_accueil_hub.c), PAS un écran
+ * placeholder bricolé. Les tuiles de
  * température (`cellules[i].racine`) naviguent elles aussi vers
  * ECRAN_TEMPERATURES au tap, même rappel partagé -- voir
  * ouvrir_temperatures_cb() dans ecran_accueil_hub.c. */

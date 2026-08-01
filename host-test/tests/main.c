@@ -24,6 +24,7 @@ void suite_ecran_accueil(void);
 void suite_ecran_deplacer(void);
 void suite_ecran_accueil_hub(void);
 void suite_ecran_temperatures(void);
+void suite_ecran_extruder(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -151,6 +152,14 @@ int main(void)
      * construit + boucle simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_temperatures() dans test_ecran_temperatures.c. */
     suite_ecran_temperatures();
+
+    /* Sous-projet 3 (decoupage KlipperScreen), tache 2 : l'ecran Extruder
+     * (extrude/retract sur la buse active + longueur/vitesse) -- meme garde
+     * d'ordonnancement que suite_ecran_deplacer()/suite_ecran_accueil_hub()/
+     * suite_ecran_temperatures() ci-dessus (habillage construit + boucle
+     * simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_extruder() dans test_ecran_extruder.c. */
+    suite_ecran_extruder();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage
