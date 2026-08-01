@@ -34,6 +34,7 @@ void suite_jouet(void);
 void suite_web_macros(void);
 void suite_ecran_macros(void);
 void suite_ecran_fichiers(void);
+void suite_ecran_reglages_wifi(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
@@ -180,6 +181,14 @@ int main(void)
      * commentaire de tete de suite_ecran_fichiers() dans
      * test_ecran_fichiers.c. */
     suite_ecran_fichiers();
+
+    /* Sous-projet 7 (reglages WiFi a l'ecran), tache 4 : l'ecran de reglages
+     * WiFi (balayage mocke -> liste -> mot de passe -> reconfiguration). DOIT
+     * rester APRES suite_ecran_configuration() (habillage construit : la garde
+     * EN_COURS notifie via habillage_notifier()) -- meme famille de garde
+     * d'ordonnancement que les autres suites d'ecran. La facade wifi_* vient de
+     * wifi_mock.c (voir wifi_mock.h). */
+    suite_ecran_reglages_wifi();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage

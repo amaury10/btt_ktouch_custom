@@ -40,6 +40,12 @@ set(WIDGETS_DIR ${UI_DIR}/widgets)
 # dans le harnais de tests hôte (voir host-test/CMakeLists.txt).
 set(KLIPPER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main/apps/klipper)
 set(ECRANS_DIR ${KLIPPER_DIR}/ecrans)
+# firmware/main : wifi.h y vit (façade WiFi consommée par ecran_reglages_wifi.c,
+# sous-projet 7 tâche 4). Le simulateur ne compile PAS le vrai wifi.c (esp_wifi) :
+# il fournit à la place le mock wifi_mock.c, partagé avec host-test (voir
+# host-test/tests/wifi_mock.{c,h}), jamais une deuxième copie qui pourrait diverger.
+set(MAIN_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../firmware/main)
+set(WIFI_MOCK_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../host-test/tests)
 # backend_jouet.{c,h} / ecran_jouet.{c,h} (tache 11) vivent sous exemples/,
 # HORS de firmware/main/apps/ : ce n'est pas une application du firmware,
 # c'est le modele que --app jouet demontre pour un fork non-Klipper -- voir
@@ -106,6 +112,8 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c
+    ${ECRANS_DIR}/ecran_reglages_wifi.c
+    ${WIFI_MOCK_DIR}/wifi_mock.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c
     ${KLIPPER_DIR}/moonraker_parse.c
@@ -114,6 +122,6 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/klipper_paliers.c
     ${KLIPPER_DIR}/accueil_choix.c
 )
-target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${KLIPPER_DIR} ${ESP_ERR_SHIM_DIR} ${CJSON_DIR} ${SDL2_INCLUDE_DIRS})
+target_include_directories(ktouch-sim PRIVATE . vendor ${CORE_DIR} ${UI_DIR} ${WIDGETS_DIR} ${ECRANS_DIR} ${EXEMPLES_DIR} ${KLIPPER_DIR} ${MAIN_DIR} ${WIFI_MOCK_DIR} ${ESP_ERR_SHIM_DIR} ${CJSON_DIR} ${SDL2_INCLUDE_DIRS})
 target_link_libraries(ktouch-sim PRIVATE lvgl cjson ${SDL2_LIBRARIES} m)
 target_compile_options(ktouch-sim PRIVATE -Wall -Wextra -Werror)

@@ -67,6 +67,7 @@
 #include "ecran_fichiers.h"
 #include "ecran_jouet.h"
 #include "ecran_macros.h"
+#include "ecran_reglages_wifi.h"
 #include "ecran_temperatures.h"
 #include "ecran_ventilateurs.h"
 #include "etat_klipper.h"
@@ -288,6 +289,7 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "extruder") == 0)     ecran_demande = &ECRAN_EXTRUDER;
             else if (strcmp(valeur, "ventilateurs") == 0) ecran_demande = &ECRAN_VENTILATEURS;
             else if (strcmp(valeur, "fichiers") == 0)     ecran_demande = &ECRAN_FICHIERS;
+            else if (strcmp(valeur, "wifi") == 0)         ecran_demande = &ECRAN_REGLAGES_WIFI;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {

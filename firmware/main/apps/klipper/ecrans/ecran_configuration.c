@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ecran_reglages_wifi.h"
 #include "habillage.h"
 #include "hote_parse.h"
 #include "navigation.h"
@@ -38,6 +39,16 @@
 #define DROPDOWN_Y        (TITRE_Y2 + TITRE_HAUTEUR + 8)
 #define DROPDOWN_LARGEUR   360
 #define DROPDOWN_HAUTEUR    48
+
+/* Bouton « WiFi » : ouvre l'écran de réglages WiFi (sous-projet 7, tâche 4).
+ * Placé sur la MÊME rangée que le sélecteur de type de machine mais à droite
+ * (le sélecteur ne fait que DROPDOWN_LARGEUR de large, laissant la moitié
+ * droite libre), donc au-dessus du bouton Save sans rien bousculer. Hauteur
+ * >= 44 px comme toute cible tactile. */
+#define BOUTON_WIFI_LARGEUR 200
+#define BOUTON_WIFI_HAUTEUR  48
+#define BOUTON_WIFI_Y       DROPDOWN_Y
+#define BOUTON_WIFI_X       (LARGEUR_CONTENU - MARGE - BOUTON_WIFI_LARGEUR)
 
 #define BOUTON_ENREGISTRER_LARGEUR  220
 #define BOUTON_ENREGISTRER_HAUTEUR   70
@@ -85,6 +96,17 @@ _Static_assert(MARGE + DROPDOWN_LARGEUR + MARGE <= LARGEUR_CONTENU,
                 "le selecteur de machine deborde de la largeur du contenu");
 _Static_assert(DROPDOWN_Y + DROPDOWN_HAUTEUR <= BOUTON_ENREGISTRER_Y,
                 "le selecteur de machine chevauche le bouton Save");
+/* Le bouton WiFi partage la rangee du selecteur : il ne doit ni le chevaucher
+ * horizontalement, ni deborder de la largeur, ni descendre sur le bouton Save,
+ * ni tomber dans la bande du bandeau de notification (coordonnees ABSOLUES). */
+_Static_assert(MARGE + DROPDOWN_LARGEUR + 20 <= BOUTON_WIFI_X,
+                "le bouton WiFi chevauche le selecteur de type de machine");
+_Static_assert(BOUTON_WIFI_X + BOUTON_WIFI_LARGEUR + MARGE <= LARGEUR_CONTENU,
+                "le bouton WiFi deborde de la largeur du contenu");
+_Static_assert(BOUTON_WIFI_Y + BOUTON_WIFI_HAUTEUR <= BOUTON_ENREGISTRER_Y,
+                "le bouton WiFi chevauche le bouton Save");
+_Static_assert(BARRE_HAUTEUR_ECRAN + BOUTON_WIFI_Y + BOUTON_WIFI_HAUTEUR <= BANDEAU_Y_ECRAN,
+                "le bouton WiFi chevauche la bande du bandeau de notification");
 _Static_assert(BOUTON_ENREGISTRER_Y + BOUTON_ENREGISTRER_HAUTEUR <= HAUTEUR_CONTENU,
                 "le bouton Save deborde de la hauteur du contenu");
 /* Le garde-fou qui manquait avant la revue de la tache 8, round 1, Q9 :
@@ -227,6 +249,15 @@ static void ecran_configuration_bouton_modifier_cb(lv_event_t *e)
                     ecran_configuration_rappel_clavier, ctx);
 }
 
+static void ecran_configuration_bouton_wifi_cb(lv_event_t *e)
+{
+    (void)e;
+    /* Empile l'écran de réglages WiFi PAR-DESSUS la configuration : l'écran de
+     * config reste dans la pile, un dépilement y revient (jamais un cul-de-sac,
+     * même raison que le Save de cet écran, voir le commentaire du sim). */
+    navigation_empiler(&ECRAN_REGLAGES_WIFI);
+}
+
 static void ecran_configuration_bouton_enregistrer_cb(lv_event_t *e)
 {
     ecran_configuration_ctx_t *ctx = lv_event_get_user_data(e);
@@ -338,6 +369,20 @@ static void ecran_configuration_construire(lv_obj_t *parent, void *contexte)
     lv_dropdown_set_options(ctx->dropdown_type, "Klipper / Moonraker");
     lv_obj_set_size(ctx->dropdown_type, DROPDOWN_LARGEUR, DROPDOWN_HAUTEUR);
     lv_obj_set_pos(ctx->dropdown_type, MARGE, DROPDOWN_Y);
+
+    lv_obj_t *bouton_wifi = lv_button_create(parent);
+    lv_obj_set_size(bouton_wifi, BOUTON_WIFI_LARGEUR, BOUTON_WIFI_HAUTEUR);
+    lv_obj_set_pos(bouton_wifi, BOUTON_WIFI_X, BOUTON_WIFI_Y);
+    lv_obj_set_style_bg_color(bouton_wifi, lv_color_hex(COULEUR_BOUTON), 0);
+    lv_obj_set_style_border_width(bouton_wifi, 0, 0);
+    lv_obj_set_style_shadow_width(bouton_wifi, 0, 0);
+    lv_obj_set_style_radius(bouton_wifi, 8, 0);
+    lv_obj_t *label_wifi = lv_label_create(bouton_wifi);
+    lv_obj_set_style_text_font(label_wifi, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(label_wifi, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
+    lv_label_set_text(label_wifi, "WiFi");
+    lv_obj_center(label_wifi);
+    lv_obj_add_event_cb(bouton_wifi, ecran_configuration_bouton_wifi_cb, LV_EVENT_CLICKED, NULL);
 
     ctx->bouton_enregistrer = lv_button_create(parent);
     lv_obj_set_size(ctx->bouton_enregistrer, BOUTON_ENREGISTRER_LARGEUR, BOUTON_ENREGISTRER_HAUTEUR);
