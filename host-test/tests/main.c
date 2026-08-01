@@ -23,6 +23,7 @@ void suite_widgets(void);
 void suite_ecran_accueil(void);
 void suite_ecran_deplacer(void);
 void suite_ecran_accueil_hub(void);
+void suite_ecran_temperatures(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -141,6 +142,15 @@ int main(void)
      * suite_ecran_deplacer() juste au-dessus -- voir le commentaire de tete
      * de suite_ecran_accueil_hub() dans test_ecran_accueil_hub.c. */
     suite_ecran_accueil_hub();
+
+    /* Sous-projet 2 (decoupage KlipperScreen), tache 1 : l'ecran Temperatures
+     * (tuiles reglables + rangee de prereglages) -- reprend la section
+     * temperatures de l'ancien ecran_accueil_idle.c (supprime tache 7 de la
+     * refonte accueil/deplacer). Meme garde d'ordonnancement que
+     * suite_ecran_deplacer()/suite_ecran_accueil_hub() ci-dessus (habillage
+     * construit + boucle simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_temperatures() dans test_ecran_temperatures.c. */
+    suite_ecran_temperatures();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage

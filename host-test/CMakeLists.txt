@@ -128,6 +128,7 @@ add_executable(tests
     tests/test_ecran_accueil.c
     tests/test_ecran_deplacer.c
     tests/test_ecran_accueil_hub.c
+    tests/test_ecran_temperatures.c
     tests/test_accueil_choix.c
     tests/test_clavier.c
     tests/test_ecran_configuration.c
@@ -167,6 +168,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_accueil.c
     ${ECRANS_DIR}/ecran_deplacer.c
     ${ECRANS_DIR}/ecran_accueil_hub.c
+    ${ECRANS_DIR}/ecran_temperatures.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${SIM_DIR}/source_etat_sim.c
