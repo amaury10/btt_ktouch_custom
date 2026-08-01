@@ -33,6 +33,7 @@ void suite_commandes(void);
 void suite_jouet(void);
 void suite_web_macros(void);
 void suite_ecran_macros(void);
+void suite_ecran_fichiers(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
@@ -171,6 +172,14 @@ int main(void)
      * simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_ventilateurs() dans test_ecran_ventilateurs.c. */
     suite_ecran_ventilateurs();
+
+    /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
+     * (grille paginee de noms + confirmation + demarrage d'impression) --
+     * meme garde d'ordonnancement que les autres suites d'ecran ci-dessus
+     * (habillage construit + boucle simulee demarree) -- voir le
+     * commentaire de tete de suite_ecran_fichiers() dans
+     * test_ecran_fichiers.c. */
+    suite_ecran_fichiers();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage

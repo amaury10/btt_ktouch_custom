@@ -30,9 +30,9 @@
 
 #include <stdio.h>
 
-#include "ecran_accueil.h" /* ECRAN_ACCUEIL */
 #include "ecran_deplacer.h" /* ECRAN_DEPLACER */
 #include "ecran_extruder.h" /* ECRAN_EXTRUDER */
+#include "ecran_fichiers.h" /* ECRAN_FICHIERS */
 #include "ecran_temperatures.h" /* ECRAN_TEMPERATURES */
 #include "ecran_ventilateurs.h" /* ECRAN_VENTILATEURS */
 #include "klipper_paliers.h"
@@ -268,14 +268,19 @@ static void ouvrir_ventilateurs_cb(lv_event_t *e)
 
 /* Meme idiome que menu_deplacer_cb()/ouvrir_temperatures_cb()/
  * ouvrir_extruder_cb()/ouvrir_ventilateurs_cb() ci-dessus, meme echec ignore
- * pour la meme raison -- sous-projet 5, tache 1 : la case de menu "Imprimer"
- * navigue desormais reellement vers ECRAN_ACCUEIL (l'ecran de statut
- * d'impression -- tuiles temperature, progression, Pause/Cancel/E-STOP --
- * voir ecran_accueil.h). Seule REGLAGES reste encore no-op. */
+ * pour la meme raison -- sous-projet 6, tache 3 : la case de menu "Imprimer"
+ * navigue desormais vers ECRAN_FICHIERS (le navigateur de fichiers -- liste
+ * paginee, tap -> confirmation -> demarrage d'impression, voir
+ * ecran_fichiers.h), et non plus vers ECRAN_ACCUEIL (l'ecran de statut
+ * d'impression, sous-projet 5 tache 1). Semantique KlipperScreen : "Imprimer"
+ * demarre une impression (browser) ; le STATUT, lui, s'affiche desormais
+ * automatiquement via la bascule vivante repos<->impression (sous-projet 5,
+ * inchangee) -- ECRAN_ACCUEIL reste atteint par elle, jamais par cette case
+ * de menu. Seule REGLAGES reste encore no-op. */
 static void ouvrir_imprimer_cb(lv_event_t *e)
 {
     (void)e;
-    navigation_empiler(&ECRAN_ACCUEIL);
+    navigation_empiler(&ECRAN_FICHIERS);
 }
 
 static const struct {

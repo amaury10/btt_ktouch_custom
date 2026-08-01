@@ -105,6 +105,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_ventilateurs.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
+    ${ECRANS_DIR}/ecran_fichiers.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c
     ${KLIPPER_DIR}/moonraker_parse.c

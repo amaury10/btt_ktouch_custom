@@ -64,6 +64,7 @@
 #include "ecran_configuration.h"
 #include "ecran_deplacer.h"
 #include "ecran_extruder.h"
+#include "ecran_fichiers.h"
 #include "ecran_jouet.h"
 #include "ecran_macros.h"
 #include "ecran_temperatures.h"
@@ -277,15 +278,16 @@ int main(int argc, char **argv)
             /* Ecran empile PAR-DESSUS l'accueil pour la capture (le pendant, en
              * mode capture, d'un tap reel sur une case de menu -- rien ne simule
              * le tactile en capture). Valeurs reconnues : "macros", "deplacer",
-             * "temperatures", "extruder", "ventilateurs" -- toute autre retombe
-             * sur l'accueil seul (ecran_demande reste NULL), meme politique
-             * defensive que --app. */
+             * "temperatures", "extruder", "ventilateurs", "fichiers" -- toute
+             * autre retombe sur l'accueil seul (ecran_demande reste NULL), meme
+             * politique defensive que --app. */
             const char *valeur = argv[++i];
             if (strcmp(valeur, "macros") == 0)            ecran_demande = &ECRAN_MACROS;
             else if (strcmp(valeur, "deplacer") == 0)     ecran_demande = &ECRAN_DEPLACER;
             else if (strcmp(valeur, "temperatures") == 0) ecran_demande = &ECRAN_TEMPERATURES;
             else if (strcmp(valeur, "extruder") == 0)     ecran_demande = &ECRAN_EXTRUDER;
             else if (strcmp(valeur, "ventilateurs") == 0) ecran_demande = &ECRAN_VENTILATEURS;
+            else if (strcmp(valeur, "fichiers") == 0)     ecran_demande = &ECRAN_FICHIERS;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {

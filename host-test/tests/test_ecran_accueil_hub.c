@@ -238,15 +238,16 @@ void suite_ecran_accueil_hub(void)
     VERIFIER(navigation_profondeur() == 1);
 
     /* ---------------------------------------------------------------------
-     * Sous-projet 5 (integration Imprimer), tache 1 : la case de menu
-     * "Imprimer" navigue desormais vers ECRAN_ACCUEIL (id "accueil", l'ecran
-     * de statut d'impression) -- meme technique de parcours/clic que
+     * Sous-projet 6 (browser de fichiers), tache 3 : la case de menu
+     * "Imprimer" navigue desormais vers ECRAN_FICHIERS (id "fichiers", le
+     * navigateur de fichiers) -- recablee depuis ECRAN_ACCUEIL (sous-projet 5,
+     * tache 1) -- meme technique de parcours/clic que
      * "Deplacer"/"Temperatures"/"Extruder"/"Ventilateurs" ci-dessus. -------- */
     lv_obj_t *bouton_imprimer = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_IMPRIMER);
     VERIFIER(bouton_imprimer != NULL);
     lv_obj_send_event(bouton_imprimer, LV_EVENT_CLICKED, NULL);
     VERIFIER(navigation_profondeur() == 2);
-    VERIFIER_TEXTE(navigation_id_courant(), "accueil");
+    VERIFIER_TEXTE(navigation_id_courant(), "fichiers");
 
     navigation_depiler();
     VERIFIER(navigation_profondeur() == 1);
