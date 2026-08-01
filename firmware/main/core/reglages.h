@@ -42,3 +42,17 @@ esp_err_t   reglages_definir_hote(const backend_hote_t *hote);
 
 const char *reglages_backend(void);      /* "moonraker" par défaut */
 esp_err_t   reglages_definir_backend(const char *nom);
+
+/* Identifiants WiFi saisis par l'utilisateur depuis l'écran de configuration
+ * (sous-projet 7), rangés dans NOTRE espace de noms NVS « ktouch » — jamais
+ * dans la NVS WiFi d'esp_wifi (partition partagée avec le firmware d'origine,
+ * qui y garde ses propres identifiants ; voir wifi.c, WIFI_STORAGE_RAM). C'est
+ * précisément l'intérêt de stocker ici : nos identifiants survivent aux
+ * redémarrages sans jamais toucher, ni a fortiori écraser, ceux de l'origine.
+ * wifi.c lit reglages_wifi() en priorité sur toute autre source (Kconfig,
+ * NVS héritée) au démarrage. Recopie SSID (32 octets + NUL) et mot de passe
+ * (63 octets + NUL, la longueur maximale d'une clé WPA2-PSK) dans les tampons
+ * fournis par l'appelant ; rend vrai seulement si un SSID non vide a déjà été
+ * enregistré (jamais réputé « configuré » sur un SSID vide). */
+bool        reglages_wifi(char *ssid, size_t taille_ssid, char *pass, size_t taille_pass);
+esp_err_t   reglages_definir_wifi(const char *ssid, const char *pass);

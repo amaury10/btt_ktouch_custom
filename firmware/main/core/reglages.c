@@ -24,6 +24,21 @@ static const char *TAG = "reglages";
 
 #define REGLAGES_CLE_BACKEND "backend"
 
+/* Clés NVS pour les identifiants WiFi saisis à l'écran (sous-projet 7) —
+ * limitées à 15 caractères par nvs.h, les deux passent ("wifi_ssid" = 9,
+ * "wifi_pass" = 9). Rangées dans REGLAGES_ESPACE_NOMS ("ktouch"), jamais dans
+ * la NVS WiFi d'esp_wifi : voir le commentaire de reglages_wifi() dans le
+ * .h. */
+#define REGLAGES_CLE_WIFI_SSID "wifi_ssid"
+#define REGLAGES_CLE_WIFI_PASS "wifi_pass"
+
+/* Tailles alignées sur wifi_sta_config_t (esp_wifi_types.h) : 32 octets de
+ * SSID + NUL, 63 octets de mot de passe (longueur maximale d'une clé
+ * WPA2-PSK) + NUL. Recopiées ici plutôt qu'incluses depuis esp_wifi.h : ce
+ * fichier reste compilable sans le SDK WiFi, comme le reste de core/. */
+#define REGLAGES_WIFI_SSID_MAX 33
+#define REGLAGES_WIFI_PASS_MAX 64
+
 /* Alias sur la constante de hote_parse.h : une seule source de vérité pour le
  * port par défaut, partagée entre l'analyse pure (hote_parse.c) et le reste
  * de ce fichier (cache initial, migration depuis les anciennes clés). */
@@ -51,6 +66,11 @@ static backend_hote_t g_hote = {
     .port = REGLAGES_PORT_DEFAUT,
 };
 static char g_backend[REGLAGES_BACKEND_LONGUEUR_MAX] = REGLAGES_BACKEND_DEFAUT;
+
+/* WiFi : vide par défaut, comme g_hote.adresse — reglages_wifi() rend faux
+ * tant qu'aucun SSID n'a été enregistré. */
+static char g_wifi_ssid[REGLAGES_WIFI_SSID_MAX] = "";
+static char g_wifi_pass[REGLAGES_WIFI_PASS_MAX] = "";
 
 /* Secours de migration : relit les deux anciennes clés séparées quand
  * REGLAGES_CLE_HOTE est absente. `handle` est déjà ouvert par l'appelant. */
@@ -166,13 +186,34 @@ esp_err_t reglages_charger(void)
         }
     }
 
+    size_t taille_wifi_ssid = sizeof(g_wifi_ssid);
+    esp_err_t erreur_wifi_ssid = nvs_get_str(handle, REGLAGES_CLE_WIFI_SSID, g_wifi_ssid, &taille_wifi_ssid);
+    if (erreur_wifi_ssid != ESP_OK) {
+        g_wifi_ssid[0] = '\0';
+        if (erreur_wifi_ssid != ESP_ERR_NVS_NOT_FOUND) {
+            JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; valeur par defaut",
+                           REGLAGES_CLE_WIFI_SSID, esp_err_to_name(erreur_wifi_ssid));
+        }
+    }
+
+    size_t taille_wifi_pass = sizeof(g_wifi_pass);
+    esp_err_t erreur_wifi_pass = nvs_get_str(handle, REGLAGES_CLE_WIFI_PASS, g_wifi_pass, &taille_wifi_pass);
+    if (erreur_wifi_pass != ESP_OK) {
+        g_wifi_pass[0] = '\0';
+        if (erreur_wifi_pass != ESP_ERR_NVS_NOT_FOUND) {
+            JOURNAL_ALERTE(TAG, "lecture de %s impossible (%s) ; valeur par defaut",
+                           REGLAGES_CLE_WIFI_PASS, esp_err_to_name(erreur_wifi_pass));
+        }
+    }
+
     /* nvs_open() a réussi : fermer le handle sans y toucher davantage. Rien
      * ici n'écrit dans la NVS ni ne l'efface — reglages_charger() ne fait que
      * lire. */
     nvs_close(handle);
 
-    JOURNAL_INFO(TAG, "reglages charges (hote=%s port=%u backend=%s)",
-                 g_hote.adresse, (unsigned)g_hote.port, g_backend);
+    JOURNAL_INFO(TAG, "reglages charges (hote=%s port=%u backend=%s wifi_ssid=%s)",
+                 g_hote.adresse, (unsigned)g_hote.port, g_backend,
+                 g_wifi_ssid[0] != '\0' ? g_wifi_ssid : "(aucun)");
     return ESP_OK;
 }
 
@@ -291,5 +332,71 @@ esp_err_t reglages_definir_backend(const char *nom)
 
     strlcpy(g_backend, nom, sizeof(g_backend));
     JOURNAL_INFO(TAG, "backend enregistre (%s)", g_backend);
+    return ESP_OK;
+}
+
+bool reglages_wifi(char *ssid, size_t taille_ssid, char *pass, size_t taille_pass)
+{
+    if (ssid != NULL && taille_ssid > 0) {
+        strlcpy(ssid, g_wifi_ssid, taille_ssid);
+    }
+    if (pass != NULL && taille_pass > 0) {
+        strlcpy(pass, g_wifi_pass, taille_pass);
+    }
+    return g_wifi_ssid[0] != '\0';
+}
+
+esp_err_t reglages_definir_wifi(const char *ssid, const char *pass)
+{
+    /* Un SSID vide n'est jamais persisté : reglages_wifi() ne doit jamais
+     * rendre vrai sur une chaîne vide, sans quoi wifi.c appliquerait un SSID
+     * vide en priorité sur son propre secours Kconfig. */
+    if (ssid == NULL || ssid[0] == '\0') {
+        JOURNAL_ALERTE(TAG, "SSID vide ; ecriture wifi refusee");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(ssid) >= sizeof(g_wifi_ssid)) {
+        JOURNAL_ALERTE(TAG, "SSID trop long (%u octets, max %u)",
+                       (unsigned)strlen(ssid), (unsigned)sizeof(g_wifi_ssid) - 1u);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    /* pass NULL == réseau ouvert, exactement comme une chaîne vide : aucune
+     * des deux ne doit faire échouer l'écriture. */
+    if (pass == NULL) {
+        pass = "";
+    }
+    if (strlen(pass) >= sizeof(g_wifi_pass)) {
+        JOURNAL_ALERTE(TAG, "mot de passe wifi trop long (%u octets, max %u)",
+                       (unsigned)strlen(pass), (unsigned)sizeof(g_wifi_pass) - 1u);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t erreur = nvs_open(REGLAGES_ESPACE_NOMS, NVS_READWRITE, &handle);
+    if (erreur != ESP_OK) {
+        JOURNAL_ERREUR(TAG, "nvs_open a echoue lors de l'ecriture du wifi (%s)", esp_err_to_name(erreur));
+        return erreur;
+    }
+
+    erreur = nvs_set_str(handle, REGLAGES_CLE_WIFI_SSID, ssid);
+    if (erreur == ESP_OK) {
+        erreur = nvs_set_str(handle, REGLAGES_CLE_WIFI_PASS, pass);
+    }
+    if (erreur == ESP_OK) {
+        erreur = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (erreur != ESP_OK) {
+        JOURNAL_ERREUR(TAG, "ecriture du wifi impossible (%s)", esp_err_to_name(erreur));
+        return erreur;
+    }
+
+    /* Le mot de passe n'est jamais journalisé — /log est exposé en HTTP,
+     * lisible par quiconque est sur le réseau (même raison que wifi.c). */
+    strlcpy(g_wifi_ssid, ssid, sizeof(g_wifi_ssid));
+    strlcpy(g_wifi_pass, pass, sizeof(g_wifi_pass));
+    JOURNAL_INFO(TAG, "wifi enregistre (SSID=%s)", g_wifi_ssid);
     return ESP_OK;
 }

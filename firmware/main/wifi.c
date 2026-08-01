@@ -83,6 +83,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 
+#include "reglages.h"
 #include "rescue.h"
 
 static const char *TAG = "wifi";
@@ -103,7 +104,7 @@ static bool a_une_raison;
 
 static uint32_t tentatives_connexion;
 
-typedef enum { SOURCE_AUCUNE, SOURCE_NVS, SOURCE_CONFIG } source_identifiants_t;
+typedef enum { SOURCE_AUCUNE, SOURCE_NVS, SOURCE_CONFIG, SOURCE_REGLAGES } source_identifiants_t;
 static source_identifiants_t source_courante = SOURCE_AUCUNE;
 static char ssid_utilise[33] = ""; /* wifi_sta_config_t.ssid fait 32 octets + NUL */
 
@@ -235,7 +236,26 @@ esp_err_t wifi_start(void)
      * Kconfig n'est renseigné, on se rabat sur la configuration héritée de
      * la NVS partagée — nettoyée de tout épinglage avant d'être appliquée. */
     wifi_config_t config_cible = {0};
-    if (CONFIG_KTOUCH_WIFI_SSID[0] != '\0') {
+    char reglages_ssid[33];
+    char reglages_pass[64];
+    if (reglages_wifi(reglages_ssid, sizeof(reglages_ssid), reglages_pass, sizeof(reglages_pass))) {
+        /* Identifiants saisis par l'utilisateur depuis l'écran de
+         * configuration (sous-projet 7), rangés dans NOTRE espace de noms NVS
+         * « ktouch » — jamais dans la NVS WiFi d'esp_wifi. Prioritaires sur
+         * tout le reste : un utilisateur qui a saisi ses identifiants à
+         * l'écran ne doit jamais les voir ignorés au profit d'une valeur de
+         * compilation (Kconfig) ou d'un réglage hérité du firmware d'origine.
+         * Une configuration neuve, mise à zéro, comme pour la branche Kconfig
+         * ci-dessous : aucun BSSID/canal épinglé. */
+        strlcpy((char *)config_cible.sta.ssid, reglages_ssid, sizeof(config_cible.sta.ssid));
+        strlcpy((char *)config_cible.sta.password, reglages_pass, sizeof(config_cible.sta.password));
+        config_cible.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+        config_cible.sta.pmf_cfg.capable = true;
+
+        source_courante = SOURCE_REGLAGES;
+        strlcpy(ssid_utilise, reglages_ssid, sizeof(ssid_utilise));
+        ESP_LOGI(TAG, "identifiants reglages retenus, SSID '%s'", reglages_ssid);
+    } else if (CONFIG_KTOUCH_WIFI_SSID[0] != '\0') {
         strlcpy((char *)config_cible.sta.ssid, CONFIG_KTOUCH_WIFI_SSID, sizeof(config_cible.sta.ssid));
         strlcpy((char *)config_cible.sta.password, CONFIG_KTOUCH_WIFI_PASSWORD, sizeof(config_cible.sta.password));
         /* Un seuil à zéro équivaut à WIFI_AUTH_OPEN, et certains points
@@ -345,6 +365,7 @@ const char *wifi_credential_source(char *ssid_out, size_t len)
         strlcpy(ssid_out, ssid_utilise, len);
     }
     switch (source_courante) {
+        case SOURCE_REGLAGES: return "reglages";
         case SOURCE_CONFIG: return "cfg";
         case SOURCE_NVS: return "nvs";
         default: return "aucun";
