@@ -180,6 +180,13 @@ void rescue_disarm(void)
         esp_timer_stop(minuteur);
         esp_timer_delete(minuteur);
         minuteur = NULL;
-        ESP_LOGI(TAG, "sauvetage desarme : le reseau repond");
+        /* Message volontairement neutre sur la CAUSE du désarmement : deux
+         * appelants distincts existent désormais (IP_EVENT_STA_GOT_IP dans
+         * wifi.c -- "le réseau répond" est vrai dans ce cas -- et la fin de
+         * l'initialisation dans app_main.c, où le réseau peut très bien ne
+         * pas encore avoir répondu). Chacun journalise déjà son propre
+         * contexte juste avant d'appeler rescue_disarm() ; ce doublon ici
+         * confirmerait une cause qui n'est pas toujours la bonne. */
+        ESP_LOGI(TAG, "sauvetage desarme");
     }
 }

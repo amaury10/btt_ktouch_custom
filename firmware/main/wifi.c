@@ -61,9 +61,17 @@
  *
  * Une coupure passagère (WIFI_EVENT_STA_DISCONNECTED) relance simplement
  * esp_wifi_connect() : ce n'est qu'une absence prolongée de réseau, jugée par
- * le minuteur de rescue.c, qui doit déclencher le sauvetage. Le seul endroit
- * qui désarme ce minuteur est le gestionnaire de IP_EVENT_STA_GOT_IP,
- * ci-dessous. */
+ * le minuteur de rescue.c, qui doit déclencher le sauvetage.
+ *
+ * Le gestionnaire de IP_EVENT_STA_GOT_IP ci-dessous désarme ce minuteur dès
+ * qu'une IP est obtenue -- c'était autrefois le SEUL endroit qui le faisait.
+ * Depuis le fix du multi-reboot au démarrage (jalon 3b, sous-projet 7), ce
+ * n'est plus le cas : app_main.c désarme aussi le sauvetage, une fois tous
+ * ses étages d'initialisation risqués passés (voir le commentaire à la fin
+ * d'app_main() pour le détail et le compromis assumé). Les deux appellent
+ * rescue_disarm()+rescue_reset_boot_count(), idempotents ; celui d'ici reste
+ * le premier des deux à survenir si le réseau répond avant la fin de
+ * l'initialisation, ce qui est le cas courant, mais n'est plus le seul. */
 
 #include "wifi.h"
 
@@ -153,9 +161,13 @@ static void sur_evenement(void *arg, esp_event_base_t base, int32_t id, void *do
         derniere_erreur[0] = '\0';
         a_une_raison = false;
         ESP_LOGI(TAG, "adresse IP : %s", adresse_ip);
-        /* Seul endroit du firmware qui désarme le sauvetage et qui remet le
-         * compteur de démarrages à zéro : une connexion réussie prouve que ce
-         * firmware est viable. */
+        /* Une connexion réussie prouve que ce firmware est viable : désarme
+         * le sauvetage et remet le compteur de démarrages à zéro. N'est plus
+         * le seul endroit à le faire depuis le fix du multi-reboot au
+         * démarrage (voir le commentaire en tête de ce fichier et celui à la
+         * fin d'app_main()) -- appeler ces deux fonctions ici alors qu'elles
+         * ont déjà tourné depuis app_main.c est un doublon sans effet
+         * (idempotentes), pas une erreur. */
         rescue_disarm();
         rescue_reset_boot_count();
     }

@@ -252,8 +252,18 @@ void app_main(void)
      * avant quoi que ce soit d'autre. Une panne à n'importe quel étage
      * ultérieur (NVS, WiFi, écran, tactile, serveur HTTP) doit rester
      * rattrapable ; un sauvetage armé après coup ne protégerait pas contre
-     * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
-     * depuis le gestionnaire de IP_EVENT_STA_GOT_IP, dans wifi.c. */
+     * l'étage qui a justement échoué.
+     *
+     * Contrat (revu ici même, voir le désarmement plus bas juste avant la
+     * boucle principale) : le sauvetage couvre les étages d'INITIALISATION,
+     * pas l'attente normale d'un réseau qui n'est pas encore monté. Il reste
+     * armé jusqu'à ce que ce firmware ait prouvé qu'il est sain -- soit
+     * parce que tous les étages risqués ci-dessous (NVS, WiFi, serveur HTTP,
+     * réglages/backend/boucle, écran/habillage) ont réussi et que la boucle
+     * principale s'apprête à tourner (voir rescue_disarm() plus bas), soit,
+     * plus tôt, parce que IP_EVENT_STA_GOT_IP a été reçu (wifi.c). Le premier
+     * des deux qui survient désarme ; les deux appellent aussi
+     * rescue_reset_boot_count(). */
     ESP_ERROR_CHECK(rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS));
 
     ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
@@ -297,9 +307,12 @@ void app_main(void)
     }
 
     /* Un échec ici n'est volontairement pas fatal : c'est justement le cas
-     * que le sauvetage automatique couvre. Si le WiFi ne se connecte
-     * jamais, rescue_disarm() n'est jamais appelé et le minuteur armé plus
-     * haut rebasculera sur l'autre slot à l'échéance. */
+     * que le sauvetage automatique couvre. wifi_start() en échec (par
+     * opposition à une simple absence de réseau) laisse le sauvetage armé
+     * jusqu'à l'échéance, faute d'atteindre le point de désarmement plus bas
+     * (voir rescue_disarm() en fin de fonction) : c'est voulu, un WiFi qui ne
+     * démarre même pas est le signe d'un mauvais flash, pas d'un réseau qui
+     * tarde. */
     erreur = wifi_start();
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "wifi_start a echoue : %s ; le sauvetage automatique reste actif", esp_err_to_name(erreur));
@@ -583,6 +596,46 @@ void app_main(void)
         }
 
         ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
+
+        /* Fix (jalon 3b, sous-projet 7 tâche 1) : désarmer le sauvetage ICI,
+         * une fois le firmware prouvé sain, plutôt que de compter
+         * uniquement sur IP_EVENT_STA_GOT_IP (wifi.c). Tous les étages
+         * risqués qui précèdent dans cette fonction -- NVS, wifi_start(),
+         * web_start(), réglages/choix du backend/boucle_demarrer(), et enfin
+         * pt_display_init() plus haut ainsi que la construction de l'écran/
+         * habillage ci-dessus (habillage_construire(), le premier
+         * habillage_pomper(), la création du minuteur d'interface) -- ont
+         * réussi ; la boucle principale ci-dessous s'apprête à prendre le
+         * relais. Ce point n'est atteint QUE dans la branche où
+         * pt_display_init() a réussi (ce bloc else) : si l'écran avait
+         * échoué (voir le if (erreur_affichage != ESP_OK) ci-dessus), on
+         * n'arriverait jamais ici et le sauvetage resterait armé -- c'est ce
+         * qui préserve sa protection contre un vrai mauvais flash (panique,
+         * PSRAM, init écran/WiFi qui échoue).
+         *
+         * Avant ce correctif, un firmware par ailleurs totalement sain mais
+         * démarré à froid sans réseau immédiatement disponible (routeur ou
+         * imprimante pas encore monté) restait épinglé sur le seul
+         * désarmement de wifi.c : le minuteur de rescue.c (rescue_arm() plus
+         * haut, ~CONFIG_KTOUCH_RESCUE_TIMEOUT_MS) rebasculait alors de slot
+         * OTA et redémarrait avant d'avoir laissé sa chance au réseau, et le
+         * firmware d'origine récupéré par la bascule se heurtait au même
+         * problème de réseau -- un ping-pong entre les deux slots jusqu'à ce
+         * que le réseau réponde enfin. rescue_reset_boot_count() ci-dessous
+         * remet aussi à zéro le compteur RTC (RESCUE_DEMARRAGES_MAX, en tête
+         * de cette fonction) : un firmware sain ne l'accumule plus non plus.
+         *
+         * Compromis assumé : un firmware sain qui ne rejoindra JAMAIS le
+         * WiFi (mauvais identifiants, par exemple) ne se rebascule plus tout
+         * seul une fois ce point atteint -- il retente indéfiniment sans
+         * jamais redémarrer. C'est corrigé par la saisie WiFi à l'écran
+         * (sous-projet en cours), pas par le sauvetage. Le désarmement sur
+         * IP_EVENT_STA_GOT_IP (wifi.c) reste en place, inchangé : il devient
+         * simplement, dans le cas courant, le premier des deux à survenir --
+         * redondant avec celui-ci mais inoffensif (rescue_disarm() et
+         * rescue_reset_boot_count() sont idempotents). */
+        rescue_disarm();
+        rescue_reset_boot_count();
     }
 
     while (true) {
