@@ -22,6 +22,13 @@
 #define KLIPPER_MACROS_MAX      48
 #define KLIPPER_MACRO_NOM_MAX   32
 
+/* Fichiers gcode listés depuis Moonraker (server.files.list) -- voir
+ * rpc_lire_fichiers() dans moonraker_rpc.h. Réutilise KLIPPER_FICHIER_MAX
+ * (défini ci-dessus pour `fichier`, le fichier en cours d'impression) comme
+ * longueur d'une entrée : même contrainte de nommage Moonraker des deux
+ * côtés, pas de raison d'avoir deux constantes de longueur distinctes. */
+#define KLIPPER_FICHIERS_MAX    32
+
 /* Plafond d'affichage du temps restant estimé : 99 h 59 min 59 s. Au-delà,
  * l'estimation n'a plus de sens (impression malformée ou début aberrant) et
  * un afficheur peut représenter cette valeur sans cas particulier. */
@@ -62,6 +69,15 @@ typedef struct {
     char    macros[KLIPPER_MACROS_MAX][KLIPPER_MACRO_NOM_MAX];
     uint8_t nb_macros;
     bool    macros_tronquees;
+
+    /* Liste des fichiers gcode disponibles (root "gcodes" de Moonraker) ;
+     * chaque entrée est un CHEMIN relatif à cette racine, éventuellement
+     * avec des '/' pour un sous-dossier (ex. "sub/b.gcode") -- pas un simple
+     * nom de fichier. Entrées au-delà de nb_fichiers sont vides et sans
+     * signification, comme macros au-delà de nb_macros. */
+    char    fichiers[KLIPPER_FICHIERS_MAX][KLIPPER_FICHIER_MAX];
+    uint8_t nb_fichiers;      /* 0 = liste jamais reçue ou vide */
+    bool    fichiers_tronques; /* true si Moonraker en avait plus que KLIPPER_FICHIERS_MAX */
 
     char     fichier[KLIPPER_FICHIER_MAX];
     float    progression;                  /* 0.0 à 1.0 */

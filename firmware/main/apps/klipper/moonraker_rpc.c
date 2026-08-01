@@ -789,6 +789,80 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur)
 }
 
 /* ------------------------------------------------------------------------
+ * Liste des fichiers gcode
+ * ---------------------------------------------------------------------- */
+
+/* Traite un élément du tableau `result` de `server.files.list` : l'ajoute à
+ * `e->fichiers` si c'est bien un objet portant un champ `.path` chaîne et que
+ * le chemin tient dans le tampon fixe. Même structure que
+ * traiter_candidat_macro() ci-dessus, une différence près : la source est un
+ * OBJET (pas une chaîne nue), dont on extrait `.path`. */
+static void traiter_candidat_fichier(etat_klipper_t *e, const cJSON *item)
+{
+    if (!cJSON_IsObject(item)) {
+        return;
+    }
+    const cJSON *chemin = cJSON_GetObjectItemCaseSensitive(item, "path");
+    if (!cJSON_IsString(chemin) || chemin->valuestring == NULL) {
+        return;
+    }
+    const char *nom = chemin->valuestring;
+    size_t len = strlen(nom);
+    if (len == 0) {
+        return;
+    }
+    if (len >= KLIPPER_FICHIER_MAX) {
+        /* Trop long pour tenir avec le '\0' : IGNORE, jamais tronque -- un
+         * chemin tronque pourrait designer un AUTRE fichier existant (meme
+         * raisonnement que traiter_candidat_macro() pour les noms de macro
+         * trop longs). Ne positionne pas `fichiers_tronques`, qui documente
+         * specifiquement le depassement du COMPTE (KLIPPER_FICHIERS_MAX),
+         * pas une longueur de chemin. */
+        return;
+    }
+    if (e->nb_fichiers >= KLIPPER_FICHIERS_MAX) {
+        e->fichiers_tronques = true;
+        return;
+    }
+    memcpy(e->fichiers[e->nb_fichiers], nom, len + 1);
+    e->nb_fichiers++;
+}
+
+bool rpc_lire_fichiers(etat_klipper_t *etat, const char *json, size_t longueur)
+{
+    if (etat == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL) {
+        return false;
+    }
+
+    const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    if (!cJSON_IsArray(resultat)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Instantane COMPLET (pas une fusion partielle) -- travaille sur une
+     * copie, ecrite en bloc a la fin, meme discipline que rpc_lire_macros(). */
+    etat_klipper_t local = *etat;
+    local.nb_fichiers = 0;
+    local.fichiers_tronques = false;
+    memset(local.fichiers, 0, sizeof(local.fichiers));
+
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, resultat) {
+        traiter_candidat_fichier(&local, item);
+    }
+
+    *etat = local;
+    cJSON_Delete(racine);
+    return true;
+}
+
+/* ------------------------------------------------------------------------
  * Correspondance action -> méthode JSON-RPC (transport WebSocket)
  * ---------------------------------------------------------------------- */
 

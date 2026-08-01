@@ -117,4 +117,19 @@ void suite_klipper_gcode(void)
     /* tampon trop court : false */
     char court3[8];
     VERIFIER(klipper_gcode_ventilateur(court3, sizeof(court3), 50) == false);
+
+    /* --- imprimer fichier --- */
+    VERIFIER(klipper_gcode_imprimer_fichier(g, sizeof(g), "a.gcode") == true);
+    VERIFIER_TEXTE(g, "SDCARD_PRINT_FILE FILENAME=a.gcode");
+    VERIFIER(klipper_gcode_imprimer_fichier(g, sizeof(g), "sub/b.gcode") == true);
+    VERIFIER_TEXTE(g, "SDCARD_PRINT_FILE FILENAME=sub/b.gcode");
+    /* nom NULL : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_imprimer_fichier(g, sizeof(g), NULL) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    /* nom vide : false */
+    VERIFIER(klipper_gcode_imprimer_fichier(g, sizeof(g), "") == false);
+    /* tampon trop court : false */
+    char court4[8];
+    VERIFIER(klipper_gcode_imprimer_fichier(court4, sizeof(court4), "a.gcode") == false);
 }

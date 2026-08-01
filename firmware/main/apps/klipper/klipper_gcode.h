@@ -76,3 +76,17 @@ bool klipper_gcode_activer_outil(char *sortie, size_t taille, uint8_t indice);
  * où `valeur` = (pct * 255 + 50) / 100 (arrondi entier au plus proche).
  * `pct` ∈ [0, 100] ; M106 S0 éteint le ventilateur (équivalent M107). */
 bool klipper_gcode_ventilateur(char *sortie, size_t taille, uint8_t pct);
+
+/* Démarre l'impression d'un fichier gcode déjà présent sur la carte SD
+ * virtuelle Moonraker, via la commande Klipper générique :
+ *   SDCARD_PRINT_FILE FILENAME=<nom>
+ * `nom` vient de la liste renvoyée par Moonraker (rpc_lire_fichiers, chemin
+ * déjà valide vis-à-vis du protocole -- éventuellement avec des '/' pour un
+ * sous-dossier, ex. "sub/b.gcode") : recopié TEL QUEL, cette fonction ne le
+ * valide pas au-delà de sa longueur (contrairement à
+ * klipper_gcode_consigne_temp() dont le paramètre `chauffeur` vient d'un nom
+ * d'objet Klipper qu'un appelant pourrait fabriquer à la main). Rend false
+ * SANS toucher `sortie` si `nom` est NULL ou vide, ou si le tampon est trop
+ * court -- jamais de troncature silencieuse rendue comme un succès (même
+ * politique que le reste de ce fichier). */
+bool klipper_gcode_imprimer_fichier(char *sortie, size_t taille, const char *nom);

@@ -279,3 +279,25 @@ bool klipper_gcode_ventilateur(char *sortie, size_t taille, uint8_t pct)
     memcpy(sortie, tampon, (size_t)ecrit + 1);
     return true;
 }
+
+bool klipper_gcode_imprimer_fichier(char *sortie, size_t taille, const char *nom)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    if (nom == NULL || nom[0] == '\0') {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "SDCARD_PRINT_FILE FILENAME=%s", nom);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}

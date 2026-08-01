@@ -90,5 +90,14 @@ void suite_contrat(void)
     printf("  sizeof(etat_klipper_t) = %zu\n", sizeof(etat_klipper_t));
 }
 
-_Static_assert(sizeof(etat_klipper_t) < 3072, "etat v2 : budget ~2,5 Ko depasse");
+/* Budget releve a ~4 Ko (etait ~2,5 Ko / 3072 avant) : jalon 3b, browser de
+ * fichiers gcode (task-1-brief.md) -- ajout de
+ * fichiers[KLIPPER_FICHIERS_MAX][KLIPPER_FICHIER_MAX] (32 x 64 = 2048
+ * octets), le meme choix de compromis "tampon fixe, memcmp-able" que
+ * `macros` ci-dessus, pas de raison de le traiter differemment. sizeof
+ * mesure a 3856 au moment de ce changement ; la marge restante (~240 octets)
+ * suffit a l'ESP32 (double tampon + copie sous mutex a chaque cycle, voir
+ * etat_klipper.h) mais laisse volontairement PEU de place a un futur ajout
+ * sans repasser ici. */
+_Static_assert(sizeof(etat_klipper_t) < 4096, "etat v2 : budget ~4 Ko depasse");
 _Static_assert(KLIPPER_EXTRUDEURS_MAX == 8, "dimensionnement acte au brainstorming jalon 3");

@@ -225,6 +225,30 @@ bool rpc_lire_reponse(const char *json, size_t longueur, bool *succes,
  * macro ainsi ignorée est silencieuse au niveau protocole. */
 bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur);
 
+/* Extrait la liste des fichiers gcode depuis une réponse `server.files.list`
+ * (`result`, tableau d'OBJETS -- PAS `result.objects`, tableau de chaînes,
+ * contrairement à rpc_lire_macros ci-dessus) : chaque élément porte un champ
+ * `.path` (chaîne, éventuellement avec des '/' pour un sous-dossier, ex.
+ * "sub/b.gcode") qui devient une entrée de `etat->fichiers`. Remplace
+ * ENTIÈREMENT `etat->fichiers`/`nb_fichiers`/`fichiers_tronques`
+ * (contrairement à rpc_fusionner_status, ce n'est pas une fusion partielle :
+ * chaque appel porte l'instantané complet connu de Moonraker à cet instant,
+ * même contrat que rpc_lire_macros). Rend false et ne touche RIEN à `*etat`
+ * si le JSON est illisible ou si `result` est absent ou n'est pas un
+ * tableau.
+ *
+ * Tronqué à KLIPPER_FICHIERS_MAX avec `fichiers_tronques = true` au-delà. Un
+ * `.path` d'au moins KLIPPER_FICHIER_MAX caractères est IGNORÉ (pas tronqué,
+ * même leçon que rpc_lire_macros sur les noms de macro trop longs -- un
+ * chemin tronqué désignerait potentiellement un AUTRE fichier existant) ;
+ * cette omission ne compte pas dans `nb_fichiers` et ne positionne PAS
+ * `fichiers_tronques` (qui documente spécifiquement le dépassement du
+ * COMPTE, pas une longueur de chemin). Un élément du tableau qui n'est pas
+ * un objet, ou sans champ `.path` de type chaîne, est ignoré (défensif,
+ * même esprit poison-par-champ que le reste de ce fichier) -- le reste de
+ * la liste continue d'être traité normalement. */
+bool rpc_lire_fichiers(etat_klipper_t *etat, const char *json, size_t longueur);
+
 /* Taille de tampon suffisante pour toute méthode rendue par
  * rpc_methode_commande() ci-dessous : la plus longue
  * ("printer.emergency_stop", 23 octets) plus marge, jusqu'à l'octet nul —
