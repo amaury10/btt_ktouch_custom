@@ -45,3 +45,65 @@ uint32_t wifi_connect_attempts(void);
  * et à /log, tous deux accessibles à quiconque est sur le réseau ou tient une
  * photo de l'appareil. */
 const char *wifi_credential_source(char *ssid_out, size_t len);
+
+/* Un réseau vu lors d'un balayage (wifi_scanner()). `ssid` fait 32 octets + NUL
+ * (la taille d'un SSID 802.11) ; `rssi` est la puissance reçue en dBm (négatif,
+ * plus proche de zéro = meilleur signal) ; `chiffre` est vrai dès que le réseau
+ * n'est pas ouvert (authmode ≠ WIFI_AUTH_OPEN). */
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    bool chiffre;
+} wifi_reseau_t;
+
+/* Balaye les réseaux WiFi à portée et remplit `sortie` (au plus `max` entrées)
+ * avec les réseaux trouvés, dédupliqués par SSID (on garde la meilleure
+ * puissance), triés par RSSI décroissant, les SSID cachés (vides) ignorés.
+ * `*nb` reçoit le nombre d'entrées écrites. Rend ESP_OK même si aucun réseau
+ * n'est trouvé (`*nb` = 0), une erreur esp_wifi_* si le balayage échoue.
+ *
+ * ATTENTION — CET APPEL EST BLOQUANT : esp_wifi_scan_start() est demandé en mode
+ * synchrone et ne rend la main qu'une fois le balayage terminé, soit plusieurs
+ * SECONDES. Il NE DOIT donc JAMAIS être appelé depuis un rappel LVGL (il gèlerait
+ * l'affichage) : l'appelant (écran de réglages) doit le lancer hors du fil LVGL,
+ * typiquement depuis une petite tâche dédiée qui reposte le résultat vers LVGL.
+ * Cette fonction ne fournit que la primitive bloquante ; la gestion du fil est à
+ * la charge de l'appelant. */
+esp_err_t wifi_scanner(wifi_reseau_t *sortie, size_t max, size_t *nb);
+
+/* Applique de NOUVEAUX identifiants WiFi À CHAUD, sans redémarrer, selon le
+ * principe « essayer PUIS persister » — conçu pour qu'un mot de passe erroné
+ * saisi à l'écran ne rende JAMAIS l'appareil injoignable :
+ *   - les nouveaux identifiants sont appliqués EN RAM uniquement
+ *     (esp_wifi_set_config, jamais la NVS WiFi d'esp_wifi) ;
+ *   - ils ne sont PERSISTÉS (via reglages_definir_wifi) qu'une fois la connexion
+ *     RÉELLEMENT établie (IP_EVENT_STA_GOT_IP reçu pendant qu'ils sont candidats) ;
+ *   - en cas d'échec (plusieurs tentatives sans IP), les identifiants PRÉCÉDENTS
+ *     (gardés en copie RAM) sont RESTAURÉS et rien n'est persisté — un simple
+ *     redémarrage relit alors les derniers identifiants qui ont réellement connecté.
+ * `pass` NULL ou vide = réseau ouvert. Rend ESP_OK si la reconfiguration a bien
+ * été armée (le RÉSULTAT — réussite ou échec — s'observe ensuite de façon non
+ * bloquante via wifi_reconfig_etat()), ou une erreur si les identifiants sont
+ * invalides / si l'application RAM a échoué (aucun changement dans ce cas). */
+esp_err_t wifi_reconfigurer(const char *ssid, const char *pass);
+
+/* État de la connexion pour l'écran : recopie le SSID courant dans `ssid_sortie`
+ * (au plus `taille` octets, chaîne vide si aucun) et pose `*connecte` à l'état de
+ * connexion. Le mot de passe n'est JAMAIS exposé. `ssid_sortie` et/ou `connecte`
+ * peuvent être NULL. */
+void wifi_etat(char *ssid_sortie, size_t taille, bool *connecte);
+
+/* Suivi non bloquant d'une reconfiguration à chaud (wifi_reconfigurer()) :
+ *   - INACTIF : aucune reconfiguration depuis le démarrage ;
+ *   - EN_COURS : reconfiguration armée, en attente d'une IP ;
+ *   - REUSSI  : la dernière reconfiguration a connecté et a été persistée ;
+ *   - ECHOUE  : la dernière reconfiguration a échoué ; les identifiants
+ *               précédents ont été restaurés, rien n'a été persisté. */
+typedef enum {
+    WIFI_RECONFIG_INACTIF,
+    WIFI_RECONFIG_EN_COURS,
+    WIFI_RECONFIG_REUSSI,
+    WIFI_RECONFIG_ECHOUE
+} wifi_reconfig_etat_t;
+
+wifi_reconfig_etat_t wifi_reconfig_etat(void);
