@@ -62,8 +62,12 @@
 #include "ecran_accueil.h"
 #include "ecran_accueil_hub.h"
 #include "ecran_configuration.h"
+#include "ecran_deplacer.h"
+#include "ecran_extruder.h"
 #include "ecran_jouet.h"
 #include "ecran_macros.h"
+#include "ecran_temperatures.h"
+#include "ecran_ventilateurs.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "hote_parse.h"
@@ -231,7 +235,7 @@ int main(int argc, char **argv)
      * capture (--macro <nom>) -- le pendant, en mode capture, d'un tap reel
      * sur un bouton de la grille (rien ne simule le tactile en mode capture,
      * voir le commentaire de tete de ce fichier). */
-    bool ecran_macros_demande = false;
+    const ecran_desc_t *ecran_demande = NULL; /* --ecran <nom> : ecran empile par-dessus l'accueil pour la capture */
     const char *macro_a_lancer = NULL;
     /* Tache 7 (jalon 3a) : --hote <adresse:port>, voir le commentaire pres
      * de demo_clavier_rappel() plus haut. */
@@ -254,10 +258,18 @@ int main(int argc, char **argv)
             const char *valeur = argv[++i];
             app = (strcmp(valeur, "jouet") == 0) ? APP_JOUET : APP_ACCUEIL;
         } else if (strcmp(argv[i], "--ecran") == 0 && i + 1 < argc) {
-            /* Seule valeur reconnue : "macros" -- toute autre retombe sur
-             * l'accueil seul, meme politique defensive que --app. */
+            /* Ecran empile PAR-DESSUS l'accueil pour la capture (le pendant, en
+             * mode capture, d'un tap reel sur une case de menu -- rien ne simule
+             * le tactile en capture). Valeurs reconnues : "macros", "deplacer",
+             * "temperatures", "extruder", "ventilateurs" -- toute autre retombe
+             * sur l'accueil seul (ecran_demande reste NULL), meme politique
+             * defensive que --app. */
             const char *valeur = argv[++i];
-            ecran_macros_demande = (strcmp(valeur, "macros") == 0);
+            if (strcmp(valeur, "macros") == 0)            ecran_demande = &ECRAN_MACROS;
+            else if (strcmp(valeur, "deplacer") == 0)     ecran_demande = &ECRAN_DEPLACER;
+            else if (strcmp(valeur, "temperatures") == 0) ecran_demande = &ECRAN_TEMPERATURES;
+            else if (strcmp(valeur, "extruder") == 0)     ecran_demande = &ECRAN_EXTRUDER;
+            else if (strcmp(valeur, "ventilateurs") == 0) ecran_demande = &ECRAN_VENTILATEURS;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {
@@ -376,12 +388,12 @@ int main(int argc, char **argv)
         ecran_config = (scenario == 7 || scenario == 8);
         if (ecran_config) {
             navigation_empiler(&ECRAN_CONFIGURATION);
-        } else if (ecran_macros_demande) {
-            /* Tache 6 : --ecran macros, jamais combine aux scenarios 7/8
-             * (configuration) dans les captures prevues -- un seul ecran
-             * empile par-dessus l'accueil a la fois, meme regle que
-             * ci-dessus. */
-            navigation_empiler(&ECRAN_MACROS);
+        } else if (ecran_demande != NULL) {
+            /* --ecran <nom> : empile l'ecran demande par-dessus l'accueil,
+             * jamais combine aux scenarios 7/8 (configuration) dans les
+             * captures prevues -- un seul ecran empile par-dessus l'accueil a
+             * la fois, meme regle que ci-dessus. */
+            navigation_empiler(ecran_demande);
         }
     }
 
