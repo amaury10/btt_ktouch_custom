@@ -121,7 +121,7 @@ void suite_ecran_accueil_hub(void)
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_DEPLACER], 0)),
                    "Deplacer");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES], 0)),
-                   "Temperatures\nA venir");
+                   "Temperatures");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_EXTRUDER], 0)),
                    "Extruder\nA venir");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS], 0)),

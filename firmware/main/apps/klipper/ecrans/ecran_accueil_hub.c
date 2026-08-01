@@ -245,10 +245,10 @@ static void ouvrir_temperatures_cb(lv_event_t *e)
 
 static const struct {
     const char *titre;
-    const char *sous_titre; /* "" pour Deplacer (seul lien reel), "A venir" pour les autres */
+    const char *sous_titre; /* "" pour les liens reels (Deplacer, Temperatures), "A venir" pour les cases encore no-op */
 } MENU_DEFS[ECRAN_ACCUEIL_HUB_MENU_NB] = {
     [ECRAN_ACCUEIL_HUB_MENU_DEPLACER]     = { "Deplacer",     "" },
-    [ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES] = { "Temperatures", "A venir" },
+    [ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES] = { "Temperatures", "" },
     [ECRAN_ACCUEIL_HUB_MENU_EXTRUDER]     = { "Extruder",     "A venir" },
     [ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS] = { "Ventilateurs", "A venir" },
     [ECRAN_ACCUEIL_HUB_MENU_IMPRIMER]     = { "Imprimer",     "A venir" },

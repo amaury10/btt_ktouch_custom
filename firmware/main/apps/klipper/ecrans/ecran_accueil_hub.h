@@ -4,9 +4,9 @@
  * à l'ancien idle, ce hub n'a NI jog NI homing NI préréglages NI clavier de
  * consigne : juste les tuiles de température multi-tête (mêmes paliers,
  * même géométrie que l'ancien idle -- klipper_paliers.h) et une
- * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer,
- * réel dès cette tâche -- Températures/Extruder/Ventilateurs/Imprimer/
- * Réglages, sous-projets FUTURS donc no-op scopé pour l'instant, voir
+ * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer
+ * et Températures naviguent réellement ; Extruder/Ventilateurs/Imprimer/
+ * Réglages restent des sous-projets FUTURS, no-op scopé pour l'instant, voir
  * ecran_accueil_hub.c).
  *
  * L'intégration dans une racine `[rail | conteneur-nav]` et le recâblage de
