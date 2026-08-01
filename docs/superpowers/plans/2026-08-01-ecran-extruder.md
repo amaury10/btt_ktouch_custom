@@ -66,19 +66,27 @@ SAVE/RESTORE + le formatage de distance à ≤2 décimales sans zéros superflus
   `etat_klipper_t`, `ui_commander`, `navigation_empiler`.
 - Produces : `extern const ecran_desc_t ECRAN_EXTRUDER;` (id `"extruder"`).
 
+**Décision de périmètre V1 (contrôleur) :** la **sélection d'outil actif est
+DIFFÉRÉE** à un suivi. Raison : `selecteur_choix` fige son nombre de boutons à
+la création, alors que `nb_extrudeurs` n'est connu qu'à `mettre_a_jour`
+(recréer le widget à chaud est fragile), et le multi-tête est spéculatif pour
+les machines cibles (1-2 têtes) et intestable sur vkp (1 tête). V1 opère sur la
+buse **active** rapportée par l'état ; `klipper_gcode_activer_outil` (T1) reste
+disponible pour le suivi. La ligne d'état affiche « Actif : T\<outil_actif\> ».
+
 - [ ] **Step 1 — test qui échoue** (`test_ecran_extruder.c`, modèle
   `test_ecran_deplacer.c`) : empiler avec 2 extrudeurs ; sélecteur longueur
   défaut 10, vitesse défaut Moyen ; clic Extruder → `SAVE.../M83/G1 E10 F300/RESTORE`
   (via `source_etat_sim_derniere_commande`) ; clic Rétracter → `G1 E-10` ;
-  changer longueur=50 puis Extruder → `G1 E50` ; choisir outil T1 →
-  `ACTIVATE_EXTRUDER EXTRUDER=extruder1` ; avec 1 seul extrudeur, le sélecteur
-  d'outil est masqué ; grisage sur `donnees_perimees` ; buse active affichée.
+  changer longueur=50 puis Extruder → `G1 E50` ; changer vitesse=Rapide puis
+  Extruder → `F600` ; grisage sur `donnees_perimees` ; buse active affichée
+  (nom + température, `Actif : T0`).
 - [ ] **Step 2 — lancer, voir échouer**.
-- [ ] **Step 3 — implémenter** `ecran_extruder.{h,c}` (sélecteur d'outil
-  conditionnel, tuile temp active lecture, sélecteurs longueur/vitesse via
-  `selecteur_choix`, boutons Extruder/Rétracter câblés au gcode T1) ; câbler
-  les 4 CMake/registres ; attacher un rappel à
-  `menu_boutons[ECRAN_ACCUEIL_HUB_MENU_EXTRUDER]` du hub →
+- [ ] **Step 3 — implémenter** `ecran_extruder.{h,c}` (tuile temp buse active
+  en lecture + ligne « Actif : T\<n\> », sélecteurs longueur/vitesse via
+  `selecteur_choix`, boutons Extruder/Rétracter câblés au gcode T1 ;
+  PAS de sélecteur d'outil en V1) ; câbler les 4 CMake/registres ; attacher un
+  rappel à `menu_boutons[ECRAN_ACCUEIL_HUB_MENU_EXTRUDER]` du hub →
   `navigation_empiler(&ECRAN_EXTRUDER)` (même idiome que `ouvrir_temperatures_cb`),
   et retirer son sous-titre « A venir » (`MENU_DEFS[EXTRUDER].sous_titre = ""`)
   + l'assertion de test correspondante dans `test_ecran_accueil_hub.c`.
