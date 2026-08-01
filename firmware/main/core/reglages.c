@@ -379,9 +379,27 @@ esp_err_t reglages_definir_wifi(const char *ssid, const char *pass)
         return erreur;
     }
 
-    erreur = nvs_set_str(handle, REGLAGES_CLE_WIFI_SSID, ssid);
+    /* Le mot de passe est écrit ET committé AVANT le SSID (deux commits
+     * distincts, pas un seul en fin de fonction). Le SSID est le TÉMOIN DE
+     * PRÉSENCE : reglages_wifi() ne rend vrai que sur un SSID non vide, et
+     * wifi.c applique alors nos identifiants EN PRIORITÉ sur son secours
+     * Kconfig. Si le SSID devenait durable avant le mot de passe, une coupure
+     * d'alimentation entre les deux laisserait un SSID valide avec un mot de
+     * passe vide -> connexion vouée à l'échec, sans repli Kconfig au sein de la
+     * session de boot, sur un appareil neuf jusque-là fonctionnel. En
+     * committant le mot de passe d'abord, une coupure dans la fenêtre laisse le
+     * SSID absent -> reglages_wifi() reste faux -> repli intact (revue T2,
+     * Important). Deux clés séparées plutôt qu'une clé fusionnée comme l'hôte
+     * (choix du brief) : ce résidu ne couvre pas une MISE À JOUR de deux clés
+     * déjà présentes, mais ce cas ne peut pas rendre reglages_wifi() faux à
+     * tort (le SSID reste non vide), au pire un mot de passe dépareillé
+     * corrigeable à l'écran. */
+    erreur = nvs_set_str(handle, REGLAGES_CLE_WIFI_PASS, pass);
     if (erreur == ESP_OK) {
-        erreur = nvs_set_str(handle, REGLAGES_CLE_WIFI_PASS, pass);
+        erreur = nvs_commit(handle);
+    }
+    if (erreur == ESP_OK) {
+        erreur = nvs_set_str(handle, REGLAGES_CLE_WIFI_SSID, ssid);
     }
     if (erreur == ESP_OK) {
         erreur = nvs_commit(handle);
