@@ -52,3 +52,21 @@ bool klipper_gcode_consigne_temp(char *sortie, size_t taille,
  *   M112
  * Fonction simple sans paramètres. */
 bool klipper_gcode_arret_urgence(char *sortie, size_t taille);
+
+/* Extrusion ou rétraction d'une distance donnée, en mode relatif, avec bordure
+ * SAVE/RESTORE_GCODE_STATE pour ne jamais laisser la machine en mode absolu :
+ *   SAVE_GCODE_STATE NAME=ktouch_extrude
+ *   M83
+ *   G1 E<distance signée> F<vitesse>
+ *   RESTORE_GCODE_STATE NAME=ktouch_extrude
+ * `distance_mm` signé (négatif = rétraction), non nul et fini, borné à ±200 mm ;
+ * `vitesse_mm_min` ∈ [1, 6000]. La distance est formatée avec au plus 2
+ * décimales, sans zéros de fin superflus. */
+bool klipper_gcode_extrude(char *sortie, size_t taille,
+                           float distance_mm, uint16_t vitesse_mm_min);
+
+/* Active un outil (extrudeur) par son indice, via la commande ACTIVATE_EXTRUDER.
+ * Pour indice 0, produit "ACTIVATE_EXTRUDER EXTRUDER=extruder" ; pour indice
+ * ≥ 1, produit "...EXTRUDER=extruder<indice>" (ex. indice=2 → "extruder2").
+ * `indice` < KLIPPER_EXTRUDEURS_MAX. */
+bool klipper_gcode_activer_outil(char *sortie, size_t taille, uint8_t indice);

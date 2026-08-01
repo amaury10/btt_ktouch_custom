@@ -1,5 +1,8 @@
 #include "petit_test.h"
 #include "klipper_gcode.h"
+#include "core/etat_klipper.h"
+
+#include <math.h>
 
 void suite_klipper_gcode(void)
 {
@@ -54,4 +57,43 @@ void suite_klipper_gcode(void)
     snprintf(g, sizeof(g), "sentinelle");
     VERIFIER(klipper_gcode_arret_urgence(g, 2) == false);
     VERIFIER_TEXTE(g, "sentinelle");
+
+    /* --- extrude --- */
+    /* distance positive entière : pas de décimale superflue */
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), 10.0f, 300) == true);
+    VERIFIER_TEXTE(g,
+        "SAVE_GCODE_STATE NAME=ktouch_extrude\nM83\nG1 E10 F300\nRESTORE_GCODE_STATE NAME=ktouch_extrude");
+    /* distance négative (rétraction) : signe conservé */
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), -10.0f, 300) == true);
+    VERIFIER_TEXTE(g,
+        "SAVE_GCODE_STATE NAME=ktouch_extrude\nM83\nG1 E-10 F300\nRESTORE_GCODE_STATE NAME=ktouch_extrude");
+    /* distance fractionnaire : formatage décimal sans zéros de fin */
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), 2.5f, 300) == true);
+    VERIFIER_TEXTE(g,
+        "SAVE_GCODE_STATE NAME=ktouch_extrude\nM83\nG1 E2.5 F300\nRESTORE_GCODE_STATE NAME=ktouch_extrude");
+    /* distance nulle, NaN, hors borne, vitesse hors borne : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), 0.0f, 300) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), nan(""), 300) == false);
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), 250.0f, 300) == false); /* > 200 */
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), 10.0f, 0) == false);
+    VERIFIER(klipper_gcode_extrude(g, sizeof(g), 10.0f, 7000) == false); /* > 6000 */
+    /* tampon trop court : false */
+    char court2[8];
+    VERIFIER(klipper_gcode_extrude(court2, sizeof(court2), 10.0f, 300) == false);
+
+    /* --- activer outil --- */
+    VERIFIER(klipper_gcode_activer_outil(g, sizeof(g), 0) == true);
+    VERIFIER_TEXTE(g, "ACTIVATE_EXTRUDER EXTRUDER=extruder");
+    VERIFIER(klipper_gcode_activer_outil(g, sizeof(g), 1) == true);
+    VERIFIER_TEXTE(g, "ACTIVATE_EXTRUDER EXTRUDER=extruder1");
+    VERIFIER(klipper_gcode_activer_outil(g, sizeof(g), 2) == true);
+    VERIFIER_TEXTE(g, "ACTIVATE_EXTRUDER EXTRUDER=extruder2");
+    /* indice >= KLIPPER_EXTRUDEURS_MAX : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_activer_outil(g, sizeof(g), KLIPPER_EXTRUDEURS_MAX) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_activer_outil(court, sizeof(court), 0) == false);
 }

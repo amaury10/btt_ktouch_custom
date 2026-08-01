@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "core/etat_klipper.h"
+
 /* Formate `valeur` en millimètres avec au plus 2 décimales, sans zéro de fin
  * superflu ni point isolé ("10.00" -> "10", "-0.10" -> "-0.1", "1.25" ->
  * "1.25"). `snprintf("%.2f")` produit toujours une décimale (précision
@@ -169,6 +171,72 @@ bool klipper_gcode_arret_urgence(char *sortie, size_t taille)
 
     char tampon[KLIPPER_GCODE_MAX];
     int ecrit = snprintf(tampon, sizeof(tampon), "M112");
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_extrude(char *sortie, size_t taille,
+                           float distance_mm, uint16_t vitesse_mm_min)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    /* isfinite() avant tout usage arithmétique de distance_mm : un NaN ou un
+     * infini franchirait la comparaison de borne suivante de façon
+     * imprévisible (NaN) ou la validerait à tort. */
+    if (!isfinite(distance_mm) || distance_mm == 0.0f) {
+        return false;
+    }
+    if (fabsf(distance_mm) > 200.0f) {
+        return false;
+    }
+    if (vitesse_mm_min < 1 || vitesse_mm_min > 6000) {
+        return false;
+    }
+
+    char distance_texte[16];
+    if (!formater_mm(distance_texte, sizeof(distance_texte), distance_mm)) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon),
+        "SAVE_GCODE_STATE NAME=ktouch_extrude\nM83\nG1 E%s F%u\nRESTORE_GCODE_STATE NAME=ktouch_extrude",
+        distance_texte, (unsigned)vitesse_mm_min);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_activer_outil(char *sortie, size_t taille, uint8_t indice)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    if (indice >= KLIPPER_EXTRUDEURS_MAX) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit;
+    if (indice == 0) {
+        ecrit = snprintf(tampon, sizeof(tampon), "ACTIVATE_EXTRUDER EXTRUDER=extruder");
+    } else {
+        ecrit = snprintf(tampon, sizeof(tampon), "ACTIVATE_EXTRUDER EXTRUDER=extruder%u", (unsigned)indice);
+    }
     if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
         return false;
     }
