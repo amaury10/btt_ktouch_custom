@@ -33,6 +33,7 @@
 #include "ecran_deplacer.h" /* ECRAN_DEPLACER */
 #include "ecran_extruder.h" /* ECRAN_EXTRUDER */
 #include "ecran_temperatures.h" /* ECRAN_TEMPERATURES */
+#include "ecran_ventilateurs.h" /* ECRAN_VENTILATEURS */
 #include "klipper_paliers.h"
 #include "navigation.h" /* navigation_empiler() */
 #include "tuile.h" /* ui_format_temperature() */
@@ -253,14 +254,24 @@ static void ouvrir_extruder_cb(lv_event_t *e)
     navigation_empiler(&ECRAN_EXTRUDER);
 }
 
+/* Meme idiome que menu_deplacer_cb()/ouvrir_temperatures_cb()/
+ * ouvrir_extruder_cb() ci-dessus, meme echec ignore pour la meme raison --
+ * sous-projet 4, tache 2 : la case de menu "Ventilateurs" navigue
+ * desormais reellement vers ECRAN_VENTILATEURS. */
+static void ouvrir_ventilateurs_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_VENTILATEURS);
+}
+
 static const struct {
     const char *titre;
-    const char *sous_titre; /* "" pour les liens reels (Deplacer, Temperatures, Extruder), "A venir" pour les cases encore no-op */
+    const char *sous_titre; /* "" pour les liens reels (Deplacer, Temperatures, Extruder, Ventilateurs), "A venir" pour les cases encore no-op */
 } MENU_DEFS[ECRAN_ACCUEIL_HUB_MENU_NB] = {
     [ECRAN_ACCUEIL_HUB_MENU_DEPLACER]     = { "Deplacer",     "" },
     [ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES] = { "Temperatures", "" },
     [ECRAN_ACCUEIL_HUB_MENU_EXTRUDER]     = { "Extruder",     "" },
-    [ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS] = { "Ventilateurs", "A venir" },
+    [ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS] = { "Ventilateurs", "" },
     [ECRAN_ACCUEIL_HUB_MENU_IMPRIMER]     = { "Imprimer",     "A venir" },
     [ECRAN_ACCUEIL_HUB_MENU_REGLAGES]     = { "Reglages",     "A venir" },
 };
@@ -342,6 +353,8 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
                          LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_EXTRUDER], ouvrir_extruder_cb, LV_EVENT_CLICKED,
                          NULL);
+    lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS], ouvrir_ventilateurs_cb,
+                         LV_EVENT_CLICKED, NULL);
 }
 
 static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)

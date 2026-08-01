@@ -5,7 +5,7 @@
  * consigne : juste les tuiles de température multi-tête (mêmes paliers,
  * même géométrie que l'ancien idle -- klipper_paliers.h) et une
  * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer,
- * Températures et Extruder naviguent réellement ; Ventilateurs/Imprimer/
+ * Températures, Extruder et Ventilateurs naviguent réellement ; Imprimer/
  * Réglages restent des sous-projets FUTURS, no-op scopé pour l'instant, voir
  * ecran_accueil_hub.c).
  *
@@ -51,9 +51,10 @@ typedef struct {
 
 /* Grille de 6 cases de menu, ORDRE FIXE -- résolution d'ambiguïté déjà
  * tranchée par task-5-brief.md : DEPLACER (ECRAN_DEPLACER, tâche 4),
- * TEMPERATURES (ECRAN_TEMPERATURES, sous-projet 2 tâche 2) et EXTRUDER
- * (ECRAN_EXTRUDER, sous-projet 3 tâche 2) naviguent réellement ; les trois
- * autres pointent vers des écrans de sous-projets FUTURS -- no-op scopé
+ * TEMPERATURES (ECRAN_TEMPERATURES, sous-projet 2 tâche 2), EXTRUDER
+ * (ECRAN_EXTRUDER, sous-projet 3 tâche 2) et VENTILATEURS
+ * (ECRAN_VENTILATEURS, sous-projet 4 tâche 2) naviguent réellement ; les
+ * deux autres pointent vers des écrans de sous-projets FUTURS -- no-op scopé
  * (aucun rappel de clic attaché, voir ecran_accueil_hub.c), PAS un écran
  * placeholder bricolé. Les tuiles de
  * température (`cellules[i].racine`) naviguent elles aussi vers

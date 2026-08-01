@@ -102,6 +102,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_accueil_hub.c
     ${ECRANS_DIR}/ecran_temperatures.c
     ${ECRANS_DIR}/ecran_extruder.c
+    ${ECRANS_DIR}/ecran_ventilateurs.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${EXEMPLES_DIR}/backend_jouet.c

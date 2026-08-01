@@ -125,7 +125,7 @@ void suite_ecran_accueil_hub(void)
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_EXTRUDER], 0)),
                    "Extruder");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS], 0)),
-                   "Ventilateurs\nA venir");
+                   "Ventilateurs");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_IMPRIMER], 0)),
                    "Imprimer\nA venir");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_REGLAGES], 0)),
@@ -219,6 +219,20 @@ void suite_ecran_accueil_hub(void)
     lv_obj_send_event(bouton_extruder, LV_EVENT_CLICKED, NULL);
     VERIFIER(navigation_profondeur() == 2);
     VERIFIER_TEXTE(navigation_id_courant(), "extruder");
+
+    navigation_depiler();
+    VERIFIER(navigation_profondeur() == 1);
+
+    /* ---------------------------------------------------------------------
+     * Sous-projet 4 (decoupage KlipperScreen), tache 2 : la case de menu
+     * "Ventilateurs" navigue desormais vers ECRAN_VENTILATEURS -- meme
+     * technique de parcours/clic que "Deplacer"/"Temperatures"/"Extruder"
+     * ci-dessus. --------------------------------------------------------- */
+    lv_obj_t *bouton_ventilateurs = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS);
+    VERIFIER(bouton_ventilateurs != NULL);
+    lv_obj_send_event(bouton_ventilateurs, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "ventilateurs");
 
     navigation_depiler();
     VERIFIER(navigation_profondeur() == 1);
