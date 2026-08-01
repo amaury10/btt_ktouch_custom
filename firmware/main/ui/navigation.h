@@ -59,6 +59,30 @@ void navigation_depiler(void);
  * navigation_profondeur() vaille 1 ou 0). */
 void navigation_accueil(void);
 
+/* Remplace l'écran du FOND de la pile par `desc`, sans jamais arracher
+ * l'utilisateur d'un sous-écran : ramène d'abord la pile à la profondeur 1
+ * (même effet que navigation_accueil() : dépile jusqu'au fond en appelant la
+ * vraie séquence de destruction pour chaque écran dépilé), puis, si le fond
+ * restant n'est pas DÉJÀ `desc` (comparaison sur l'id), détruit ce fond
+ * (même ordre exact que navigation_depiler() : detruire + conteneur LVGL +
+ * contexte) et construit `desc` à sa place (contexte neuf, conteneur plein
+ * cadre, construire). La pile reste à profondeur 1, `desc` au fond.
+ *
+ * Sert à la bascule vivante repos<->impression de l'écran de fond (voir
+ * habillage_definir_choix_accueil(), ui/habillage.h) : le fond suit l'état
+ * applicatif, mais UNIQUEMENT quand il est seul (profondeur 1) — l'appelant
+ * (habillage_pomper()) ne l'invoque jamais à profondeur > 1, où l'utilisateur
+ * est dans un sous-écran qui doit rester intact.
+ *
+ * Ne fait rien si `desc` est NULL ou si la pile est vide. Ne fait rien non
+ * plus, et n'incrémente PAS navigation_sequence() (voir plus bas), si le fond
+ * est déjà `desc` alors que la pile est déjà à profondeur 1 : un no-op strict,
+ * sans reconstruction ni repeinture superflue. Un remplacement réel, lui,
+ * incrémente navigation_sequence() (le sommet visible a changé) pour que
+ * l'habillage propage un premier mettre_a_jour au fond fraîchement construit
+ * au prochain pompage. */
+void navigation_remplacer_base(const ecran_desc_t *desc);
+
 /* Transmet `etat` et `donnees_perimees` au seul écran actuellement visible
  * (le sommet de la pile), via son rappel `mettre_a_jour` — jamais aux écrans
  * couverts en dessous (spécification 5.4). `etat` NULL n'est pas une

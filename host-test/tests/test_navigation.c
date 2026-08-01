@@ -93,6 +93,17 @@ static const ecran_desc_t ECRAN_C = {
     .construire = c_construire, .mettre_a_jour = NULL, .detruire = c_detruire,
 };
 
+/* Quatrième écran jouet, utilisé uniquement par le test de
+ * navigation_remplacer_base() (sous-projet 5, tâche 2). */
+static trace_simple_t g_trace_d;
+static void d_construire(lv_obj_t *parent, void *ctx) { (void)parent; (void)ctx; g_trace_d.construits++; }
+static void d_detruire(void *ctx) { (void)ctx; g_trace_d.detruits++; }
+
+static const ecran_desc_t ECRAN_D = {
+    .id = "d", .titre = "D", .taille_contexte = 0,
+    .construire = d_construire, .mettre_a_jour = NULL, .detruire = d_detruire,
+};
+
 void suite_navigation(void)
 {
     printf("suite : navigation\n");
@@ -236,4 +247,78 @@ void suite_navigation(void)
     lv_obj_t *fond = lv_obj_get_child(lv_screen_active(), 0);
     VERIFIER(fond != NULL);
     VERIFIER(!lv_obj_has_flag(fond, LV_OBJ_FLAG_HIDDEN));
+
+    /* ------------------------------------------------------------------
+     * navigation_remplacer_base() (sous-projet 5 KlipperScreen, tâche 2) :
+     * la primitive de bascule vivante du fond de pile. Remplace l'écran du
+     * fond après avoir ramené la pile à profondeur 1 (dépilement réel de
+     * tout sous-écran), sans reconstruction ni incrément de séquence quand
+     * le fond voulu est déjà en place. */
+    navigation_init(lv_screen_active());
+    memset(&g_trace_a, 0, sizeof(g_trace_a));
+    memset(&g_trace_b, 0, sizeof(g_trace_b));
+    memset(&g_trace_c, 0, sizeof(g_trace_c));
+    memset(&g_trace_d, 0, sizeof(g_trace_d));
+
+    /* pile vide : remplacer le fond ne fait rien (jamais de construction sur
+     * une pile inexistante -- il n'y a pas de fond à remplacer). */
+    navigation_remplacer_base(&ECRAN_A);
+    /* rien construit sur pile vide */ VERIFIER(g_trace_a.construits == 0);
+    /* pile toujours vide */ VERIFIER(navigation_profondeur() == 0);
+
+    /* Fond A -> B : A détruit (vraie séquence de destruction), B construit,
+     * pile toujours à profondeur 1. */
+    VERIFIER(navigation_empiler(&ECRAN_A) == ESP_OK);
+    /* A construit */ VERIFIER(g_trace_a.construits == 1);
+    navigation_remplacer_base(&ECRAN_B);
+    /* profondeur reste 1 */ VERIFIER(navigation_profondeur() == 1);
+    /* le fond est desormais B */ VERIFIER(strcmp(navigation_id_courant(), "b") == 0);
+    /* l'ancien fond A a ete detruit */ VERIFIER(g_trace_a.detruits == 1);
+    /* B a ete construit */ VERIFIER(g_trace_b.construits == 1);
+
+    /* Empile C par-dessus B (profondeur 2), puis remplace le fond par D :
+     * navigation_remplacer_base() doit d'abord DÉPILER C (le vrai
+     * dépilement, C detruit) avant de remplacer le fond B par D. */
+    VERIFIER(navigation_empiler(&ECRAN_C) == ESP_OK);
+    /* profondeur 2 */ VERIFIER(navigation_profondeur() == 2);
+    navigation_remplacer_base(&ECRAN_D);
+    /* revenu a profondeur 1 */ VERIFIER(navigation_profondeur() == 1);
+    /* le fond est desormais D */ VERIFIER(strcmp(navigation_id_courant(), "d") == 0);
+    /* le sous-ecran C a bien ete depile (detruit) */ VERIFIER(g_trace_c.detruits == 1);
+    /* l'ancien fond B a ete detruit */ VERIFIER(g_trace_b.detruits == 1);
+    /* D a ete construit */ VERIFIER(g_trace_d.construits == 1);
+
+    /* No-op : remplacer le fond par le MÊME id (D deja au fond, profondeur 1)
+     * ne reconstruit rien et n'incremente PAS la sequence. */
+    uint32_t seq_avant = navigation_sequence();
+    navigation_remplacer_base(&ECRAN_D);
+    /* profondeur inchangee */ VERIFIER(navigation_profondeur() == 1);
+    /* toujours D */ VERIFIER(strcmp(navigation_id_courant(), "d") == 0);
+    /* pas de reconstruction de D */ VERIFIER(g_trace_d.construits == 1);
+    /* pas de destruction de D */ VERIFIER(g_trace_d.detruits == 0);
+    /* sequence INCHANGEE (no-op strict) */ VERIFIER(navigation_sequence() == seq_avant);
+
+    /* Un vrai remplacement, lui, incremente la sequence (le sommet visible
+     * change -> l'habillage repeint au prochain pompage). */
+    navigation_remplacer_base(&ECRAN_A);
+    /* sequence incrementee d'exactement 1 */ VERIFIER(navigation_sequence() == seq_avant + 1);
+    /* le fond est desormais A */ VERIFIER(strcmp(navigation_id_courant(), "a") == 0);
+
+    /* desc NULL : no-op, jamais un plantage, sequence inchangee. */
+    seq_avant = navigation_sequence();
+    navigation_remplacer_base(NULL);
+    /* profondeur inchangee */ VERIFIER(navigation_profondeur() == 1);
+    /* toujours A */ VERIFIER(strcmp(navigation_id_courant(), "a") == 0);
+    /* sequence inchangee */ VERIFIER(navigation_sequence() == seq_avant);
+
+    /* Boucle de remplacements : la profondeur reste 1 a chaque tour et rien
+     * ne plante -- preuve minimale d'absence de fuite qui ferait tomber la
+     * pile (le harnais n'a pas de detecteur de fuite, mais ASan attraperait
+     * un usage-apres-liberation dans la sequence de destruction). */
+    for (int i = 0; i < 20; i++) {
+        navigation_remplacer_base((i % 2 == 0) ? &ECRAN_B : &ECRAN_A);
+        VERIFIER(navigation_profondeur() == 1);
+    }
+    /* le dernier tour (i==19, impair) a laisse A au fond */
+    VERIFIER(strcmp(navigation_id_courant(), "a") == 0);
 }

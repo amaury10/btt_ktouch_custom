@@ -219,6 +219,22 @@ static void demo_confirmation_rappel(bool confirme, void *contexte)
     (void)contexte;
 }
 
+/* Chooser de l'écran de fond injecté dans l'habillage (bascule vivante
+ * repos<->impression, sous-projet 5 tâche 2) : le MÊME comportement que
+ * choix_accueil_klipper() dans firmware/main/app_main.c -- hub au repos,
+ * accueil impression pendant une impression, via accueil_impression_actif()
+ * (accueil_choix.h). Enregistré ci-dessous pour que le simulateur exerce la
+ * bascule : le fond suit désormais l'état simulé (backend_factice scénarios)
+ * une fois la boucle démarrée, pas seulement le choix figé au démarrage.
+ * L'état arrive opaque de l'habillage générique ; ce point d'entrée
+ * (l'assemblage applicatif) le recaste vers etat_klipper_t. */
+static const ecran_desc_t *choix_accueil_klipper(const void *etat, void *ctx)
+{
+    (void)ctx;
+    return accueil_impression_actif((const etat_klipper_t *)etat) ? &ECRAN_ACCUEIL
+                                                                  : &ECRAN_ACCUEIL_HUB;
+}
+
 int main(int argc, char **argv)
 {
     const char *chemin_capture = NULL;
@@ -374,6 +390,16 @@ int main(int argc, char **argv)
             impression = accueil_impression_actif(&etat_amorce);
         }
         navigation_empiler(impression ? &ECRAN_ACCUEIL : &ECRAN_ACCUEIL_HUB);
+
+        /* Bascule vivante repos<->impression du fond (sous-projet 5, tâche 2) :
+         * enregistrée UNIQUEMENT pour l'application Klipper (--app accueil),
+         * jamais pour --app jouet dont l'état (etat_jouet_t) n'est pas un
+         * etat_klipper_t et qui n'a de toute façon aucune distinction
+         * idle/impression. À partir d'ici, chaque habillage_pomper() (celui de
+         * l'amorce ci-dessous, puis ceux des boucles de capture/fenêtre) fait
+         * suivre le fond à l'état simulé quand la pile est à profondeur 1 --
+         * exactement ce que fait app_main.c sur cible. */
+        habillage_definir_choix_accueil(choix_accueil_klipper, NULL);
 
         /* --scenario 7/8 (tâche 8) : empile ECRAN_CONFIGURATION PAR-DESSUS
          * l'accueil (jamais seul), exactement la topologie que app_main.c

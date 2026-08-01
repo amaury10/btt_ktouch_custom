@@ -39,6 +39,7 @@ void suite_selecteur_pas(void);
 void suite_selecteur_choix(void);
 void suite_rail(void);
 void suite_integration_rail(void);
+void suite_bascule_accueil(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -177,6 +178,14 @@ int main(void)
      * meme garde d'ordonnancement que suite_ecran_deplacer(), verifiee a
      * l'entree de la suite (voir test_integration_rail.c). */
     suite_integration_rail();
+
+    /* Sous-projet 5 (KlipperScreen), tache 2 : la bascule vivante
+     * repos<->impression du fond, exercee a travers habillage_pomper(). DOIT
+     * rester APRES suite_ecran_configuration() (habillage construit) ET
+     * suite_commandes() (boucle simulee demarree) -- meme garde
+     * d'ordonnancement que suite_integration_rail() ci-dessus, verifiee a
+     * l'entree de la suite (voir test_bascule_accueil.c). */
+    suite_bascule_accueil();
 
     /* Pure, independante de toute autre suite (voir web_macros.h) : aucune
      * contrainte d'ordre. */

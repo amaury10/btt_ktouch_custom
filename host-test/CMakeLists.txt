@@ -144,6 +144,7 @@ add_executable(tests
     tests/test_selecteur_choix.c
     tests/test_rail.c
     tests/test_integration_rail.c
+    tests/test_bascule_accueil.c
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c

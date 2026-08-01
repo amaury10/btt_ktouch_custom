@@ -54,6 +54,26 @@ void habillage_definir_ecran_reglages(const ecran_desc_t *desc);
 void habillage_definir_action_rail(void (*handler)(rail_action_t, void *), void *ctx,
                                    const char *id_accueil, const char *id_macros);
 
+/* Enregistre le CHOOSER (couche APPLICATION) de l'écran de fond : la bascule
+ * vivante repos<->impression. À chaque habillage_pomper(), SI un chooser est
+ * enregistré, que l'état applicatif est disponible ET que la pile est à
+ * profondeur 1 (un accueil seul au sommet, jamais un sous-écran par-dessus),
+ * l'habillage appelle `choisir(&etat, ctx)` et, si le descripteur rendu n'est
+ * pas déjà le fond courant, remplace le fond via navigation_remplacer_base()
+ * (voir navigation.h). `etat` est OPAQUE (`const void *`) : l'habillage reste
+ * générique, il ne connaît ni etat_klipper_t ni accueil_impression_actif() --
+ * l'application injecte ici le couplage Klipper (choix ECRAN_ACCUEIL /
+ * ECRAN_ACCUEIL_HUB), exactement comme habillage_definir_ecran_reglages() et
+ * habillage_definir_action_rail() injectent le leur.
+ *
+ * `choisir` NULL (par défaut) désactive toute bascule : le fond reste celui
+ * empilé au démarrage. Un chooser qui rend NULL pour un état donné laisse
+ * aussi le fond inchangé pour ce pompage-là (aucune bascule forcée vers un
+ * écran manquant). `choisir` et `ctx` doivent rester valides tant que
+ * l'habillage vit. */
+void habillage_definir_choix_accueil(const ecran_desc_t *(*choisir)(const void *etat, void *ctx),
+                                     void *ctx);
+
 /* Le rail persistant du shell (état de fichier, comme la barre d'état) : un
  * accesseur générique, exposé pour le surlignage applicatif et les tests
  * (parcours de `->racine`/`->boutons[]`). Toujours non-NULL ; ses champs ne

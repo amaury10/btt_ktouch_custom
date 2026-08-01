@@ -48,6 +48,16 @@ static lv_obj_t *g_bouton_retour;
  * config), aucune dependance en dur vers ECRAN_CONFIGURATION ici. */
 static lv_obj_t *g_bouton_reglages;
 static const ecran_desc_t *g_ecran_reglages;
+
+/* Chooser de l'écran de fond (bascule vivante repos<->impression) injecté par
+ * l'application, avec son contexte : mêmes statics de fichier que
+ * g_ecran_reglages/g_rail_handler, même politique (l'habillage reste
+ * générique, aucun couplage Klipper ici -- l'état vu par le chooser est
+ * opaque, `const void *`). NULL tant qu'aucun chooser n'est enregistré : pas
+ * de bascule. Voir habillage_definir_choix_accueil() (habillage.h) et son
+ * intégration dans habillage_pomper(). */
+static const ecran_desc_t *(*g_choix_accueil)(const void *etat, void *ctx);
+static void *g_choix_accueil_ctx;
 static lv_obj_t *g_titre;
 static lv_obj_t *g_pastille_liaison;
 static lv_obj_t *g_texte_liaison;
@@ -174,6 +184,13 @@ static void bouton_reglages_cb(lv_event_t *e)
 void habillage_definir_ecran_reglages(const ecran_desc_t *desc)
 {
     g_ecran_reglages = desc;
+}
+
+void habillage_definir_choix_accueil(const ecran_desc_t *(*choisir)(const void *etat, void *ctx),
+                                     void *ctx)
+{
+    g_choix_accueil = choisir;
+    g_choix_accueil_ctx = ctx;
 }
 
 /* Dispatch générique des clics du rail (passé à rail_creer()) : transmet à
@@ -514,6 +531,30 @@ void habillage_pomper(void)
 
     if (!disponible) {
         return;
+    }
+
+    /* Bascule vivante repos<->impression du fond (sous-projet 5, tâche 2).
+     * Placée ICI -- après la garde `disponible` (g_etat est à jour), mais
+     * AVANT le bloc de propagation ci-dessous -- pour que le fond fraîchement
+     * (re)construit reçoive son premier mettre_a_jour dans le MÊME cycle : le
+     * bloc lit navigation_sequence() APRÈS cette bascule, et
+     * navigation_remplacer_base() l'a incrémentée sur un vrai remplacement,
+     * ce qui déclenche la propagation vers le nouveau fond (sinon un cadre
+     * vide clignoterait jusqu'au pompage suivant). Deux gardes STRICTES : un
+     * chooser enregistré, ET la profondeur exactement 1 -- à profondeur > 1
+     * l'utilisateur est dans un sous-écran, on ne bascule JAMAIS (le
+     * sous-écran et son fond restent tels quels). L'état reste opaque
+     * (`&g_etat` passé en `const void *`) : aucun couplage Klipper ici, le
+     * choix concret vit dans l'application (voir habillage_definir_choix_
+     * accueil()). */
+    if (g_choix_accueil != NULL && navigation_profondeur() == 1) {
+        const ecran_desc_t *voulu = g_choix_accueil(&g_etat, g_choix_accueil_ctx);
+        if (voulu != NULL) {
+            const char *id = navigation_id_courant();
+            if (id == NULL || strcmp(id, voulu->id) != 0) {
+                navigation_remplacer_base(voulu);
+            }
+        }
     }
 
     /* navigation_sequence() ajoutée à la garde (défaut 1, revue live jalon

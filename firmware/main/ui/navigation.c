@@ -3,6 +3,7 @@
 #include "navigation.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "journal.h"
 
@@ -71,21 +72,21 @@ void navigation_init(lv_obj_t *conteneur)
     conteneur_racine = conteneur;
 }
 
-esp_err_t navigation_empiler(const ecran_desc_t *desc)
+/* Construit un écran au sommet de la pile : alloue son contexte, crée son
+ * conteneur LVGL plein cadre dans le conteneur racine, cache l'écran
+ * précédent (s'il y en a un) SANS le détruire, appelle `construire`, puis
+ * l'inscrit dans la pile et incrémente `profondeur`. N'incrémente PAS
+ * `sequence` (c'est à l'appelant de le faire une fois son propre changement
+ * de sommet réellement acté -- navigation_empiler() comme
+ * navigation_remplacer_base() ont chacun leur propre garde avant d'y arriver)
+ * et NE vérifie NI la profondeur maximale NI un conteneur racine NULL (idem :
+ * chaque appelant impose ses propres préconditions avant d'arriver ici). Rend
+ * ESP_ERR_NO_MEM si une allocation échoue, sans rien laisser dans la pile ni
+ * fuir de mémoire. Sur ce seul chemin d'échec l'écran précédent a déjà été
+ * caché : navigation_empiler() (seul appelant susceptible d'avoir un écran en
+ * dessous) le documente et l'accepte, voir son commentaire. */
+static esp_err_t empiler_construit(const ecran_desc_t *desc)
 {
-    if (desc == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (profondeur >= NAVIGATION_PROFONDEUR_MAX) {
-        JOURNAL_ALERTE(TAG, "pile pleine (%d), \"%s\" refuse", NAVIGATION_PROFONDEUR_MAX,
-                        desc->id != NULL ? desc->id : "?");
-        return ESP_ERR_NO_MEM;
-    }
-    if (conteneur_racine == NULL) {
-        JOURNAL_ERREUR(TAG, "navigation_empiler avant navigation_init");
-        return ESP_ERR_INVALID_STATE;
-    }
-
     /* `taille_contexte == 0` doit rendre un contexte NULL, jamais le retour
      * d'un calloc(1, 0) : la norme C laisse ce retour implémentation-
      * dépendante (NULL ou un pointeur non déréférençable mais valide pour
@@ -126,6 +127,29 @@ esp_err_t navigation_empiler(const ecran_desc_t *desc)
     pile[profondeur].contexte = contexte;
     pile[profondeur].racine = racine;
     profondeur++;
+
+    return ESP_OK;
+}
+
+esp_err_t navigation_empiler(const ecran_desc_t *desc)
+{
+    if (desc == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (profondeur >= NAVIGATION_PROFONDEUR_MAX) {
+        JOURNAL_ALERTE(TAG, "pile pleine (%d), \"%s\" refuse", NAVIGATION_PROFONDEUR_MAX,
+                        desc->id != NULL ? desc->id : "?");
+        return ESP_ERR_NO_MEM;
+    }
+    if (conteneur_racine == NULL) {
+        JOURNAL_ERREUR(TAG, "navigation_empiler avant navigation_init");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t erreur = empiler_construit(desc);
+    if (erreur != ESP_OK) {
+        return erreur;
+    }
 
     /* Le sommet visible vient de changer (le nouvel écran, jamais celui
      * caché juste au-dessus) : voir navigation_sequence(). */
@@ -185,6 +209,58 @@ void navigation_accueil(void)
     if (sommet_a_change) {
         sequence++;
     }
+}
+
+void navigation_remplacer_base(const ecran_desc_t *desc)
+{
+    if (desc == NULL || profondeur == 0) {
+        return;
+    }
+
+    /* Ramène d'abord la pile à la profondeur 1 : exactement la séquence de
+     * destruction de navigation_accueil() (detruire_sommet() pour chaque
+     * écran au-dessus du fond, puis redémasquage du fond, et une seule
+     * incrémentation de séquence si un sous-écran a réellement été dépilé).
+     * Après cet appel, profondeur vaut 1 (on est entré avec profondeur >= 1,
+     * et navigation_accueil() ne descend jamais en dessous de 1). */
+    navigation_accueil();
+
+    /* Le fond restant est déjà l'écran voulu : rien à remplacer, et surtout
+     * pas d'incrément de séquence superflu -- le sommet visible ne change
+     * pas. Comparé sur l'id, comme le fait déjà navigation_id_courant() pour
+     * l'habillage. */
+    const char *id_fond = pile[profondeur - 1].desc->id;
+    if (id_fond != NULL && desc->id != NULL && strcmp(id_fond, desc->id) == 0) {
+        return;
+    }
+
+    /* Remplace le fond : détruit l'écran du fond (detruire_sommet() applique
+     * la MÊME séquence exacte que navigation_depiler() -- detruire() +
+     * conteneur LVGL + contexte, dans cet ordre ; profondeur passe de 1 à 0)
+     * puis reconstruit `desc` à sa place via le même chemin que
+     * navigation_empiler() (empiler_construit() : contexte neuf, conteneur
+     * plein cadre, construire ; profondeur repasse à 1, aucun écran en
+     * dessous à cacher). */
+    detruire_sommet();
+    esp_err_t erreur = empiler_construit(desc);
+    if (erreur != ESP_OK) {
+        /* Le fond a été détruit mais sa reconstruction a échoué (allocation
+         * refusée) : la pile est vide plutôt que de porter un écran dont le
+         * contexte ou le conteneur manquerait. Journalisé -- le sommet visible
+         * A changé (l'ancien fond a disparu), donc on incrémente tout de même
+         * la séquence pour que l'habillage constate le changement au prochain
+         * pompage plutôt que de propager vers une pile qu'il croirait encore
+         * intacte. */
+        JOURNAL_ERREUR(TAG, "navigation_remplacer_base : reconstruction de \"%s\" a echoue",
+                        desc->id != NULL ? desc->id : "?");
+        sequence++;
+        return;
+    }
+
+    /* Remplacement réussi : le sommet visible (le nouveau fond) a changé --
+     * voir navigation_sequence(). L'habillage propagera un premier
+     * mettre_a_jour à ce fond fraîchement construit au prochain pompage. */
+    sequence++;
 }
 
 void navigation_mettre_a_jour(const void *etat, bool donnees_perimees)

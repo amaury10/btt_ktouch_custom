@@ -22,10 +22,12 @@
 #include "nvs_flash.h"
 #include "pandatouch_display.h"
 
+#include "accueil_choix.h"
 #include "backend.h"
 #include "backend_factice.h"
 #include "backend_moonraker.h"
 #include "boucle.h"
+#include "ecran_accueil.h"
 #include "ecran_accueil_hub.h"
 #include "ecran_configuration.h"
 #include "ecran_macros.h"
@@ -134,6 +136,21 @@ static void rafraichir_etat_ecran(void)
     char texte[192];
     snprintf(texte, sizeof(texte), "%s\n%s", ligne1, ligne2);
     lv_label_set_text(label_etat, texte);
+}
+
+/* Chooser de l'écran de fond injecté dans l'habillage (bascule vivante
+ * repos<->impression, sous-projet 5 tâche 2) : hub au repos, accueil
+ * impression pendant une impression -- accueil_impression_actif() est le MÊME
+ * helper pur (accueil_choix.h) qu'utilise le simulateur, appliqué ici à
+ * l'état réel de la boucle applicative. L'état arrive opaque (`const void *`)
+ * de l'habillage générique : ce fichier (couche application) le recaste vers
+ * etat_klipper_t, le seul site qui connaît ce type dans la chaîne de bascule.
+ * `ctx` inutilisé (le choix ne dépend que de l'état). */
+static const ecran_desc_t *choix_accueil_klipper(const void *etat, void *ctx)
+{
+    (void)ctx;
+    return accueil_impression_actif((const etat_klipper_t *)etat) ? &ECRAN_ACCUEIL
+                                                                  : &ECRAN_ACCUEIL_HUB;
 }
 
 static void build_test_pattern(void)
@@ -483,6 +500,13 @@ void app_main(void)
              * ci-dessus). */
             habillage_definir_action_rail(rail_action_klipper, NULL, ECRAN_ACCUEIL_HUB.id,
                                           ECRAN_MACROS.id);
+            /* Bascule vivante repos<->impression du fond : l'habillage
+             * consulte ce chooser à chaque pompage (voir
+             * habillage_definir_choix_accueil()). Le choix AU BOOT ci-dessous
+             * reste ECRAN_ACCUEIL_HUB (état réel pas encore connu, défaut sûr
+             * -- voir le commentaire de l'empilement) ; la bascule prend le
+             * relais dès le premier état reçu de la boucle applicative. */
+            habillage_definir_choix_accueil(choix_accueil_klipper, NULL);
             esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_HUB);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
