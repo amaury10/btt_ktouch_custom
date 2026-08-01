@@ -70,3 +70,9 @@ bool klipper_gcode_extrude(char *sortie, size_t taille,
  * ≥ 1, produit "...EXTRUDER=extruder<indice>" (ex. indice=2 → "extruder2").
  * `indice` < KLIPPER_EXTRUDEURS_MAX. */
 bool klipper_gcode_activer_outil(char *sortie, size_t taille, uint8_t indice);
+
+/* Pilote un ventilateur par pourcentage de vitesse, via la commande M106 :
+ *   M106 S<valeur>
+ * où `valeur` = (pct * 255 + 50) / 100 (arrondi entier au plus proche).
+ * `pct` ∈ [0, 100] ; M106 S0 éteint le ventilateur (équivalent M107). */
+bool klipper_gcode_ventilateur(char *sortie, size_t taille, uint8_t pct);

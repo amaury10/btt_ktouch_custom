@@ -96,4 +96,25 @@ void suite_klipper_gcode(void)
     VERIFIER_TEXTE(g, "sentinelle");
     /* tampon trop court : false */
     VERIFIER(klipper_gcode_activer_outil(court, sizeof(court), 0) == false);
+
+    /* --- ventilateur --- */
+    /* pct=50 : (50*255+50)/100 = 128 */
+    VERIFIER(klipper_gcode_ventilateur(g, sizeof(g), 50) == true);
+    VERIFIER_TEXTE(g, "M106 S128");
+    /* pct=100 : (100*255+50)/100 = 255 */
+    VERIFIER(klipper_gcode_ventilateur(g, sizeof(g), 100) == true);
+    VERIFIER_TEXTE(g, "M106 S255");
+    /* pct=0 : (0*255+50)/100 = 0 */
+    VERIFIER(klipper_gcode_ventilateur(g, sizeof(g), 0) == true);
+    VERIFIER_TEXTE(g, "M106 S0");
+    /* pct=25 : (25*255+50)/100 = 64 */
+    VERIFIER(klipper_gcode_ventilateur(g, sizeof(g), 25) == true);
+    VERIFIER_TEXTE(g, "M106 S64");
+    /* pct > 100 : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_ventilateur(g, sizeof(g), 101) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    /* tampon trop court : false */
+    char court3[8];
+    VERIFIER(klipper_gcode_ventilateur(court3, sizeof(court3), 50) == false);
 }

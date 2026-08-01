@@ -247,3 +247,30 @@ bool klipper_gcode_activer_outil(char *sortie, size_t taille, uint8_t indice)
     memcpy(sortie, tampon, (size_t)ecrit + 1);
     return true;
 }
+
+bool klipper_gcode_ventilateur(char *sortie, size_t taille, uint8_t pct)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    if (pct > 100) {
+        return false;
+    }
+
+    /* Calcul de la valeur PWM (0-255) à partir du pourcentage (0-100).
+     * Formule : (pct * 255 + 50) / 100 pour arrondir au plus proche.
+     * Utilise (int) pour éviter tout dépassement uint8 dans le calcul. */
+    uint8_t valeur = (uint8_t)(((int)pct * 255 + 50) / 100);
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "M106 S%u", (unsigned)valeur);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
