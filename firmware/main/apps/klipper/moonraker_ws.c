@@ -177,6 +177,16 @@ static uint32_t g_id_abonnement = 0;
  * verrou necessaire, meme raison que g_id_abonnement. */
 static uint32_t g_id_macros = 0;
 
+/* Tache 2, jalon "browser de fichiers" : meme convention que g_id_macros
+ * juste au-dessus -- id de la requete `server.files.list` EN COURS, mis a
+ * jour a CHAQUE (re)connexion (envoyer_identify_et_abonnement()), lu
+ * uniquement depuis la tache WS -- aucun verrou necessaire, meme raison que
+ * g_id_abonnement/g_id_macros. Contrairement aux macros, PAS de re-demande
+ * sur notify_klippy_ready (MVP : un fetch au connect suffit -- la liste de
+ * fichiers ne depend pas d'un redemarrage de Klippy comme le ferait une
+ * config de macros). */
+static uint32_t g_id_fichiers = 0;
+
 /* Drapeau "une requete macros doit partir des que g_verrou sera relache" --
  * voir son unique lecteur/ecrivain sous verrou (traiter_message_complet(),
  * cas RPC_MSG_KLIPPY_READY) et son unique consommateur HORS verrou
@@ -346,6 +356,35 @@ static void envoyer_requete_macros(void)
     }
 }
 
+/* Tache 2, jalon "browser de fichiers" : COPIE d'envoyer_requete_macros()
+ * ci-dessus, meme structure trait pour trait -- seules la methode
+ * (`server.files.list`) et les params (`{"root":"gcodes"}`, la racine des
+ * gcodes prets a imprimer -- rpc_construire_requete() recopie params_json
+ * tel quel, voir moonraker_rpc.h) different. Appelee a CHAQUE (re)connexion
+ * (voir envoyer_identify_et_abonnement() ci-dessous), JAMAIS sous g_verrou
+ * directement -- meme remarque que pour envoyer_requete_macros() : prochain_id()
+ * prend ce meme verrou en interne. Pas de re-demande sur notify_klippy_ready
+ * (voir le commentaire de g_id_fichiers) : MVP, un fetch au connect suffit. */
+static void envoyer_requete_fichiers(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "server.files.list", "{\"root\":\"gcodes\"}")) {
+        g_id_fichiers = id;
+        /* Meme controle du resultat de l'envoi qu'envoyer_requete_macros()
+         * ci-dessus (fix round 1, revue tache 6, M1 MEDIUM) -- voir son
+         * commentaire pour la consequence concrete d'un envoi silencieusement
+         * perdu. */
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de server.files.list echoue (id=%u)", (unsigned)id);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de server.files.list impossible");
+    }
+}
+
 /* À WEBSOCKET_EVENT_CONNECTED : identify PUIS abonnement PUIS macros
  * (critère 2 -- à CHAQUE reconnexion, jamais seulement la première).
  * Appelée depuis la tâche WS elle-même (le gestionnaire d'événement) :
@@ -390,6 +429,10 @@ static void envoyer_identify_et_abonnement(void)
     }
 
     envoyer_requete_macros();
+    /* Tache 2, jalon "browser de fichiers" : JUSTE APRES les macros, meme
+     * endroit, meme absence de verrou -- voir le commentaire de
+     * envoyer_requete_fichiers() ci-dessus. */
+    envoyer_requete_fichiers();
 }
 
 /* Traite un message JSON-RPC COMPLET (déjà réassemblé) -- appelée SOUS
@@ -430,6 +473,18 @@ static void traiter_message_complet(const char *json, size_t longueur)
              * complet, pas une fusion champ par champ). */
             etat_klipper_t copie = g_boite.etat;
             if (rpc_lire_macros(&copie, json, longueur)) {
+                boite_deposer(&g_boite, &copie);
+            }
+        } else if (id == g_id_fichiers && g_id_fichiers != 0) {
+            /* Tache 2, jalon "browser de fichiers" : reponse a
+             * server.files.list -- rpc_lire_fichiers() (tache 1). Meme base
+             * cumulative que les cas ci-dessus (fusion PARTIELLE du reste de
+             * l'etat ; rpc_lire_fichiers() lui-meme REMPLACE entierement
+             * fichiers[]/nb_fichiers/fichiers_tronques, voir son commentaire
+             * dans moonraker_rpc.h -- un instantane complet, pas une fusion
+             * champ par champ). */
+            etat_klipper_t copie = g_boite.etat;
+            if (rpc_lire_fichiers(&copie, json, longueur)) {
                 boite_deposer(&g_boite, &copie);
             }
         } else if (g_correlateur.en_cours && id == g_correlateur.id) {
@@ -788,6 +843,7 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_dernier_journal_fragmentation_us = 0;
     g_id_abonnement = 0;
     g_id_macros = 0;
+    g_id_fichiers = 0;
     g_macros_a_demander = false;
     g_id_suivant = 1;
     g_tampon_len = 0;

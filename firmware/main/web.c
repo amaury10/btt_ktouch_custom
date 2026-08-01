@@ -284,6 +284,22 @@ static esp_err_t gestion_state(httpd_req_t *req)
             cJSON_AddItemToObject(etat_json, "macros", cJSON_CreateStringArray(noms_macros, n));
             cJSON_AddBoolToObject(etat_json, "macros_tronquees", etat.macros_tronquees);
 
+            /* Tache 2, jalon "browser de fichiers" : `fichiers` en tableau de
+             * chaines, exactement comme `macros` ci-dessus, et pour la meme
+             * raison (borner `nb_fichiers` -- un producteur amont n'est pas
+             * garanti <= KLIPPER_FICHIERS_MAX, voir le commentaire du fix
+             * MAJOR juste au-dessus pour `macros`/`noms_macros` -- meme piege,
+             * meme defense). */
+            uint8_t n_fichiers = etat.nb_fichiers < KLIPPER_FICHIERS_MAX
+                                      ? etat.nb_fichiers
+                                      : (uint8_t)KLIPPER_FICHIERS_MAX;
+            const char *noms_fichiers[KLIPPER_FICHIERS_MAX];
+            for (uint8_t i = 0; i < n_fichiers; i++) {
+                noms_fichiers[i] = etat.fichiers[i];
+            }
+            cJSON_AddItemToObject(etat_json, "fichiers", cJSON_CreateStringArray(noms_fichiers, n_fichiers));
+            cJSON_AddBoolToObject(etat_json, "fichiers_tronques", etat.fichiers_tronques);
+
             cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
             cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);
             cJSON_AddNumberToObject(etat_json, "temps_restant_s", (double)etat.temps_restant_s);

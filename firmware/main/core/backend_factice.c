@@ -92,6 +92,22 @@ static void factice_nom_macro_8tetes(uint8_t indice_un, char *sortie, size_t tai
     snprintf(sortie, taille, "MACRO_%02u", (unsigned)indice_un);
 }
 
+/* Tache 2, jalon "browser de fichiers" : fichiers gcode factices, pour que le
+ * simulateur et le futur ecran (tache 3) aient une liste a afficher.
+ * Contrairement a g_macros_cr10/g_macros_u1 ci-dessus (specifiques a un
+ * scenario), ces fichiers sont peuples INCONDITIONNELLEMENT dans le preambule
+ * de backend_factice_rafraichir() (comme nb_extrudeurs=1/plateau.presente
+ * juste au-dessus) : le navigateur de fichiers n'a pas de raison de varier
+ * selon la machine simulee, contrairement aux macros qui illustrent des
+ * paliers materiels differents. "calibration/cube.gcode" exerce en plus le
+ * cas d'un chemin avec sous-dossier (voir rpc_lire_fichiers, moonraker_rpc.h,
+ * qui accepte des '/' dans `.path`). */
+static const char *const g_fichiers_factices[] = {
+    "benchy.gcode",
+    "calibration/cube.gcode",
+    "CE3_test.gcode",
+};
+
 /* Rend vrai si `nom` est une macro que CE backend connaît, tous scénarios
  * confondus (10, 11, 12 : les scénarios 0-9 n'annoncent aucune macro). Ne
  * dépend PAS du scénario actuellement sélectionné par
@@ -226,6 +242,15 @@ static esp_err_t backend_factice_rafraichir(void *etat)
     nouveau.extrudeurs[0].presente = true;
     nouveau.plateau.presente = true;
     nouveau.outil_actif = 0;
+
+    /* Tache 2, jalon "browser de fichiers" : voir le commentaire de
+     * g_fichiers_factices -- inconditionnel, aucun scenario ci-dessous ne
+     * touche fichiers[]/nb_fichiers. */
+    nouveau.nb_fichiers = sizeof(g_fichiers_factices) / sizeof(g_fichiers_factices[0]);
+    for (uint8_t i = 0; i < nouveau.nb_fichiers; i++) {
+        snprintf(nouveau.fichiers[i], KLIPPER_FICHIER_MAX, "%s", g_fichiers_factices[i]);
+    }
+    nouveau.fichiers_tronques = false;
 
     switch (g_scenario) {
     case 0:

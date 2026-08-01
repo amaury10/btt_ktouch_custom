@@ -25,6 +25,15 @@ void suite_backend_factice(void)
     VERIFIER_TEXTE(etat.etat, "standby");
     VERIFIER(!etat.impression_en_cours);
 
+    /* Tache 2, jalon "browser de fichiers" : fichiers factices peuples
+     * INCONDITIONNELLEMENT (aucun scenario ne les efface), verifie ici sur le
+     * scenario repos -- voir g_fichiers_factices dans backend_factice.c. */
+    VERIFIER(etat.nb_fichiers == 3);
+    VERIFIER_TEXTE(etat.fichiers[0], "benchy.gcode");
+    VERIFIER_TEXTE(etat.fichiers[1], "calibration/cube.gcode");
+    VERIFIER_TEXTE(etat.fichiers[2], "CE3_test.gcode");
+    VERIFIER(!etat.fichiers_tronques);
+
     /* Scenario impression : la progression doit avancer d'un appel a l'autre,
      * sinon le magasin d'etat ne detecterait aucun changement et l'interface
      * paraitrait figee. */
