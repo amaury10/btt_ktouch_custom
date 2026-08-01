@@ -128,10 +128,13 @@ static portMUX_TYPE verrou_reconfig = portMUX_INITIALIZER_UNLOCKED;
 
 /* Nombre de déconnexions consécutives (sans IP) tolérées sur les identifiants
  * candidats avant de restaurer les précédents. La déconnexion volontaire qui
- * lance la bascule (esp_wifi_disconnect() dans wifi_reconfigurer()) survient
- * AVANT l'armement (voir l'ordre set_config → disconnect → armement) : elle n'est
- * donc PAS comptée, et ce compteur ne mesure que de vrais échecs d'association
- * avec les nouveaux identifiants. */
+ * lance la bascule (esp_wifi_disconnect() dans wifi_reconfigurer()) survient dans
+ * l'ordre set_config → disconnect → armement : normalement elle est traitée par
+ * sys_evt AVANT l'armement (donc non comptée), mais si sys_evt prend du retard
+ * elle peut être traitée APRÈS l'armement et compter alors comme tentative n°1.
+ * Ce n'est pas un problème : un comptage anticipé ne fait que RESTAURER plus tôt
+ * vers des identifiants connus (le biais est du côté sûr). Le compteur mesure
+ * donc « au plus » les échecs d'association avec les nouveaux identifiants. */
 #define RECONFIG_MAX_TENTATIVES 3
 
 static volatile bool reconfig_en_attente;
@@ -255,7 +258,12 @@ static void sur_evenement(void *arg, esp_event_base_t base, int32_t id, void *do
             strlcpy(candidat_pass, reconfig_candidat_pass, sizeof(candidat_pass));
             strlcpy(ssid_utilise, reconfig_candidat_ssid, sizeof(ssid_utilise));
             reconfig_en_attente = false;
-            reconfig_etat = WIFI_RECONFIG_REUSSI;
+            /* On NE fixe PAS encore reconfig_etat : la connexion est établie mais
+             * la persistance n'a pas eu lieu. L'état final (REUSSI si la NVS a bien
+             * été écrite, CONNECTE_NON_PERSISTE si l'écriture a échoué) est posé
+             * hors verrou, une fois reglages_definir_wifi() revenu. reconfig_etat
+             * reste EN_COURS d'ici là : cela suffit à rejeter une reconfiguration
+             * concurrente pendant cette courte fenêtre. */
         }
         portEXIT_CRITICAL(&verrou_reconfig);
 
@@ -266,8 +274,13 @@ static void sur_evenement(void *arg, esp_event_base_t base, int32_t id, void *do
             if (erreur != ESP_OK) {
                 ESP_LOGE(TAG, "persistance des nouveaux identifiants wifi echouee : %s",
                          esp_err_to_name(erreur));
+                /* Connecté mais NON persisté : ne pas mentir à l'écran avec REUSSI.
+                 * Repli sûr — un reboot relira les identifiants précédents, jamais
+                 * un candidat qu'on n'a pas pu enregistrer. */
+                reconfig_etat = WIFI_RECONFIG_CONNECTE_NON_PERSISTE;
             } else {
                 ESP_LOGI(TAG, "nouveaux identifiants wifi persistes, SSID '%s'", candidat_ssid);
+                reconfig_etat = WIFI_RECONFIG_REUSSI;
             }
         }
 
@@ -530,6 +543,9 @@ esp_err_t wifi_scanner(wifi_reseau_t *sortie, size_t max, size_t *nb)
     uint16_t nb_lu = nb_ap;
     erreur = esp_wifi_scan_get_ap_records(&nb_lu, enregistrements);
     if (erreur != ESP_OK) {
+        /* En cas d'échec, esp_wifi_scan_get_ap_records() n'a pas forcément libéré
+         * la liste interne : la libérer explicitement, comme les autres branches. */
+        esp_wifi_clear_ap_list();
         free(enregistrements);
         return erreur;
     }
@@ -600,6 +616,27 @@ esp_err_t wifi_reconfigurer(const char *ssid, const char *pass)
         return ESP_ERR_INVALID_SIZE;
     }
 
+    /* REJET DE RÉENTRANCE (contrat : un seul appelant logique à la fois). Deux
+     * appels concurrents pourraient entrelacer leurs get_config → set_config (en
+     * RAM) puis leurs armements : l'un finirait par écrire dans `candidat` des
+     * identifiants DIFFÉRENTS de ceux réellement appliqués en RAM par l'autre, et
+     * GOT_IP persisterait alors, sur une connexion réussie, des identifiants qui
+     * n'ont PAS connecté -> reboot sur de mauvais identifiants -> appareil
+     * injoignable (précisément l'interdit du brief). On revendique donc le créneau
+     * de façon ATOMIQUE (check-and-set de reconfig_etat sous le même portMUX que
+     * l'armement) AVANT toute opération esp_wifi_* : tant qu'une reconfiguration
+     * est EN_COURS, tout autre appel est refusé, l'entrelacement disparaît.
+     * reconfig_etat sert de verrou logique ; en_attente n'est armé qu'à la fin. */
+    wifi_reconfig_etat_t etat_precedent;
+    portENTER_CRITICAL(&verrou_reconfig);
+    if (reconfig_etat == WIFI_RECONFIG_EN_COURS) {
+        portEXIT_CRITICAL(&verrou_reconfig);
+        return ESP_ERR_INVALID_STATE;
+    }
+    etat_precedent = reconfig_etat;
+    reconfig_etat = WIFI_RECONFIG_EN_COURS; /* créneau revendiqué */
+    portEXIT_CRITICAL(&verrou_reconfig);
+
     /* Copie RAM des identifiants ACTUELLEMENT appliqués, à restaurer en cas
      * d'échec. esp_wifi_get_config() rend la configuration station courante (en
      * RAM depuis WIFI_STORAGE_RAM). Copies bornées à la main : les champs ssid
@@ -608,6 +645,11 @@ esp_err_t wifi_reconfigurer(const char *ssid, const char *pass)
     esp_err_t erreur = esp_wifi_get_config(WIFI_IF_STA, &actuelle);
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_get_config a echoue : %s", esp_err_to_name(erreur));
+        /* Rien n'a été appliqué en RAM : on libère le créneau en rendant l'état
+         * antérieur (aucune reconfiguration réputée en cours). */
+        portENTER_CRITICAL(&verrou_reconfig);
+        reconfig_etat = etat_precedent;
+        portEXIT_CRITICAL(&verrou_reconfig);
         return erreur;
     }
     char precedent_ssid[33];
@@ -635,16 +677,22 @@ esp_err_t wifi_reconfigurer(const char *ssid, const char *pass)
     erreur = esp_wifi_set_config(WIFI_IF_STA, &candidate);
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "esp_wifi_set_config (candidat) a echoue : %s", esp_err_to_name(erreur));
+        /* Créneau libéré : l'armement n'a pas eu lieu, en_attente reste faux. */
+        portENTER_CRITICAL(&verrou_reconfig);
+        reconfig_etat = etat_precedent;
+        portEXIT_CRITICAL(&verrou_reconfig);
         return erreur;
     }
 
     /* ORDRE VOULU : set_config → disconnect → armement. La déconnexion volontaire
      * ci-dessous déclenche un WIFI_EVENT_STA_DISCONNECTED géré par sur_evenement()
      * sur la tâche sys_evt, qui reconnecte alors avec les NOUVEAUX identifiants.
-     * Comme l'armement (reconfig_en_attente) n'a pas encore eu lieu à cet instant,
-     * cette première déconnexion N'EST PAS comptée comme un échec candidat — et
-     * aucune IP obtenue avant l'armement ne peut être prise à tort pour une
-     * réussite candidate (direction sûre : on ne persiste jamais sans avoir armé). */
+     * L'armement (reconfig_en_attente) n'ayant pas encore eu lieu, cette
+     * déconnexion est normalement traitée sans être comptée ; si sys_evt tarde et
+     * la traite après l'armement, elle compte au pire comme tentative n°1 — sûr,
+     * car un comptage anticipé ne fait que restaurer plus tôt vers des identifiants
+     * connus. Et aucune IP obtenue avant l'armement ne peut être prise à tort pour
+     * une réussite candidate : on ne persiste jamais sans avoir armé en_attente. */
     erreur = esp_wifi_disconnect();
     if (erreur != ESP_OK) {
         /* La station n'était peut-être pas connectée : la boucle de reconnexion
@@ -653,20 +701,17 @@ esp_err_t wifi_reconfigurer(const char *ssid, const char *pass)
         ESP_LOGW(TAG, "esp_wifi_disconnect a echoue : %s", esp_err_to_name(erreur));
     }
 
-    /* Armement de l'état partagé sous verrou. Si une reconfiguration est DÉJÀ en
-     * attente, on NE réécrit PAS la copie « précédente » : la config courante est
-     * alors le candidat en échec, la garder comme point de restauration perdrait
-     * les derniers identifiants réellement bons. */
+    /* Armement de l'état partagé sous verrou. La réentrance étant rejetée plus
+     * haut, aucune reconfiguration ne peut être en attente ici : la copie
+     * « précédente » reflète bien les derniers identifiants réellement appliqués.
+     * reconfig_etat est déjà EN_COURS (créneau revendiqué). */
     portENTER_CRITICAL(&verrou_reconfig);
-    if (!reconfig_en_attente) {
-        strlcpy(reconfig_precedent_ssid, precedent_ssid, sizeof(reconfig_precedent_ssid));
-        strlcpy(reconfig_precedent_pass, precedent_pass, sizeof(reconfig_precedent_pass));
-    }
+    strlcpy(reconfig_precedent_ssid, precedent_ssid, sizeof(reconfig_precedent_ssid));
+    strlcpy(reconfig_precedent_pass, precedent_pass, sizeof(reconfig_precedent_pass));
     strlcpy(reconfig_candidat_ssid, ssid, sizeof(reconfig_candidat_ssid));
     strlcpy(reconfig_candidat_pass, pass, sizeof(reconfig_candidat_pass));
     reconfig_tentatives = 0;
     reconfig_en_attente = true;
-    reconfig_etat = WIFI_RECONFIG_EN_COURS;
     portEXIT_CRITICAL(&verrou_reconfig);
 
     ESP_LOGI(TAG, "reconfiguration wifi armee, SSID candidat '%s'", ssid);

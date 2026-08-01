@@ -84,7 +84,15 @@ esp_err_t wifi_scanner(wifi_reseau_t *sortie, size_t max, size_t *nb);
  * `pass` NULL ou vide = réseau ouvert. Rend ESP_OK si la reconfiguration a bien
  * été armée (le RÉSULTAT — réussite ou échec — s'observe ensuite de façon non
  * bloquante via wifi_reconfig_etat()), ou une erreur si les identifiants sont
- * invalides / si l'application RAM a échoué (aucun changement dans ce cas). */
+ * invalides / si l'application RAM a échoué (aucun changement dans ce cas).
+ *
+ * CONTRAT DE NON-RÉENTRANCE : un seul appelant logique à la fois. Si une
+ * reconfiguration est DÉJÀ en cours (wifi_reconfig_etat() == WIFI_RECONFIG_EN_COURS),
+ * l'appel est REFUSÉ et rend ESP_ERR_INVALID_STATE sans rien modifier. Cela évite
+ * que deux reconfigurations concurrentes n'entrelacent leurs applications RAM et
+ * ne fassent persister des identifiants différents de ceux réellement connectés.
+ * L'appelant (écran de réglages) ne doit donc lancer une nouvelle reconfiguration
+ * qu'une fois l'état revenu à REUSSI / CONNECTE_NON_PERSISTE / ECHOUE / INACTIF. */
 esp_err_t wifi_reconfigurer(const char *ssid, const char *pass);
 
 /* État de la connexion pour l'écran : recopie le SSID courant dans `ssid_sortie`
@@ -95,14 +103,19 @@ void wifi_etat(char *ssid_sortie, size_t taille, bool *connecte);
 
 /* Suivi non bloquant d'une reconfiguration à chaud (wifi_reconfigurer()) :
  *   - INACTIF : aucune reconfiguration depuis le démarrage ;
- *   - EN_COURS : reconfiguration armée, en attente d'une IP ;
- *   - REUSSI  : la dernière reconfiguration a connecté et a été persistée ;
+ *   - EN_COURS : reconfiguration armée (ou en cours de mise en place), en attente
+ *                d'une IP ; sert aussi de verrou logique contre la réentrance ;
+ *   - REUSSI  : la dernière reconfiguration a connecté ET a été persistée ;
+ *   - CONNECTE_NON_PERSISTE : la connexion a réussi mais l'écriture des réglages
+ *                (NVS) a échoué — les nouveaux identifiants sont actifs pour cette
+ *                session mais un reboot relira les précédents (repli sûr) ;
  *   - ECHOUE  : la dernière reconfiguration a échoué ; les identifiants
  *               précédents ont été restaurés, rien n'a été persisté. */
 typedef enum {
     WIFI_RECONFIG_INACTIF,
     WIFI_RECONFIG_EN_COURS,
     WIFI_RECONFIG_REUSSI,
+    WIFI_RECONFIG_CONNECTE_NON_PERSISTE,
     WIFI_RECONFIG_ECHOUE
 } wifi_reconfig_etat_t;
 
