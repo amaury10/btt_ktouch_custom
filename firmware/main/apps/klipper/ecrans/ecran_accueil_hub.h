@@ -5,9 +5,9 @@
  * consigne : juste les tuiles de température multi-tête (mêmes paliers,
  * même géométrie que l'ancien idle -- klipper_paliers.h) et une
  * grille de 6 cases de menu qui renvoient vers les écrans dédiés (Déplacer,
- * Températures, Extruder et Ventilateurs naviguent réellement ; Imprimer/
- * Réglages restent des sous-projets FUTURS, no-op scopé pour l'instant, voir
- * ecran_accueil_hub.c).
+ * Températures, Extruder, Ventilateurs et désormais Imprimer -- sous-projet
+ * 5, tâche 1 -- naviguent réellement ; Réglages reste un sous-projet FUTUR,
+ * no-op scopé pour l'instant, voir ecran_accueil_hub.c).
  *
  * L'intégration dans une racine `[rail | conteneur-nav]` et le recâblage de
  * la navigation (quel écran s'empile au démarrage) arrivent en tâche 6 --
@@ -52,12 +52,12 @@ typedef struct {
 /* Grille de 6 cases de menu, ORDRE FIXE -- résolution d'ambiguïté déjà
  * tranchée par task-5-brief.md : DEPLACER (ECRAN_DEPLACER, tâche 4),
  * TEMPERATURES (ECRAN_TEMPERATURES, sous-projet 2 tâche 2), EXTRUDER
- * (ECRAN_EXTRUDER, sous-projet 3 tâche 2) et VENTILATEURS
- * (ECRAN_VENTILATEURS, sous-projet 4 tâche 2) naviguent réellement ; les
- * deux autres pointent vers des écrans de sous-projets FUTURS -- no-op scopé
- * (aucun rappel de clic attaché, voir ecran_accueil_hub.c), PAS un écran
- * placeholder bricolé. Les tuiles de
- * température (`cellules[i].racine`) naviguent elles aussi vers
+ * (ECRAN_EXTRUDER, sous-projet 3 tâche 2), VENTILATEURS
+ * (ECRAN_VENTILATEURS, sous-projet 4 tâche 2) et IMPRIMER (ECRAN_ACCUEIL,
+ * sous-projet 5 tâche 1) naviguent réellement ; REGLAGES pointe encore vers
+ * un écran de sous-projet FUTUR -- no-op scopé (aucun rappel de clic
+ * attaché, voir ecran_accueil_hub.c), PAS un écran placeholder bricolé. Les
+ * tuiles de température (`cellules[i].racine`) naviguent elles aussi vers
  * ECRAN_TEMPERATURES au tap, même rappel partagé -- voir
  * ouvrir_temperatures_cb() dans ecran_accueil_hub.c. */
 #define ECRAN_ACCUEIL_HUB_MENU_DEPLACER     0

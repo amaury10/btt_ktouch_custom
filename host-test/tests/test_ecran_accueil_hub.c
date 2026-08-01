@@ -127,7 +127,7 @@ void suite_ecran_accueil_hub(void)
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS], 0)),
                    "Ventilateurs");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_IMPRIMER], 0)),
-                   "Imprimer\nA venir");
+                   "Imprimer");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_REGLAGES], 0)),
                    "Reglages\nA venir");
 
@@ -233,6 +233,20 @@ void suite_ecran_accueil_hub(void)
     lv_obj_send_event(bouton_ventilateurs, LV_EVENT_CLICKED, NULL);
     VERIFIER(navigation_profondeur() == 2);
     VERIFIER_TEXTE(navigation_id_courant(), "ventilateurs");
+
+    navigation_depiler();
+    VERIFIER(navigation_profondeur() == 1);
+
+    /* ---------------------------------------------------------------------
+     * Sous-projet 5 (integration Imprimer), tache 1 : la case de menu
+     * "Imprimer" navigue desormais vers ECRAN_ACCUEIL (id "accueil", l'ecran
+     * de statut d'impression) -- meme technique de parcours/clic que
+     * "Deplacer"/"Temperatures"/"Extruder"/"Ventilateurs" ci-dessus. -------- */
+    lv_obj_t *bouton_imprimer = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_IMPRIMER);
+    VERIFIER(bouton_imprimer != NULL);
+    lv_obj_send_event(bouton_imprimer, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "accueil");
 
     navigation_depiler();
     VERIFIER(navigation_profondeur() == 1);

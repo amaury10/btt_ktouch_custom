@@ -30,6 +30,7 @@
 
 #include <stdio.h>
 
+#include "ecran_accueil.h" /* ECRAN_ACCUEIL */
 #include "ecran_deplacer.h" /* ECRAN_DEPLACER */
 #include "ecran_extruder.h" /* ECRAN_EXTRUDER */
 #include "ecran_temperatures.h" /* ECRAN_TEMPERATURES */
@@ -219,9 +220,10 @@ static void cellule_creer(ecran_accueil_hub_cellule_t *c, lv_obj_t *parent)
 
 /* --- Grille de menu ------------------------------------------------------
  *
- * DEPLACER et TEMPERATURES ont chacune un rappel de clic reel
- * (navigation_empiler()) ; les quatre autres n'ont AUCUN rappel attache (voir
- * le commentaire de tete de ecran_accueil_hub.h) -- un no-op scope, pas un
+ * DEPLACER, TEMPERATURES, EXTRUDER, VENTILATEURS et desormais IMPRIMER
+ * (sous-projet 5, tache 1) ont chacune un rappel de clic reel
+ * (navigation_empiler()) ; seule REGLAGES n'a AUCUN rappel attache (voir le
+ * commentaire de tete de ecran_accueil_hub.h) -- un no-op scope, pas un
  * ecran bricole. */
 static void menu_deplacer_cb(lv_event_t *e)
 {
@@ -264,15 +266,27 @@ static void ouvrir_ventilateurs_cb(lv_event_t *e)
     navigation_empiler(&ECRAN_VENTILATEURS);
 }
 
+/* Meme idiome que menu_deplacer_cb()/ouvrir_temperatures_cb()/
+ * ouvrir_extruder_cb()/ouvrir_ventilateurs_cb() ci-dessus, meme echec ignore
+ * pour la meme raison -- sous-projet 5, tache 1 : la case de menu "Imprimer"
+ * navigue desormais reellement vers ECRAN_ACCUEIL (l'ecran de statut
+ * d'impression -- tuiles temperature, progression, Pause/Cancel/E-STOP --
+ * voir ecran_accueil.h). Seule REGLAGES reste encore no-op. */
+static void ouvrir_imprimer_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_ACCUEIL);
+}
+
 static const struct {
     const char *titre;
-    const char *sous_titre; /* "" pour les liens reels (Deplacer, Temperatures, Extruder, Ventilateurs), "A venir" pour les cases encore no-op */
+    const char *sous_titre; /* "" pour les liens reels (Deplacer, Temperatures, Extruder, Ventilateurs, Imprimer), "A venir" pour la case encore no-op (Reglages) */
 } MENU_DEFS[ECRAN_ACCUEIL_HUB_MENU_NB] = {
     [ECRAN_ACCUEIL_HUB_MENU_DEPLACER]     = { "Deplacer",     "" },
     [ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES] = { "Temperatures", "" },
     [ECRAN_ACCUEIL_HUB_MENU_EXTRUDER]     = { "Extruder",     "" },
     [ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS] = { "Ventilateurs", "" },
-    [ECRAN_ACCUEIL_HUB_MENU_IMPRIMER]     = { "Imprimer",     "A venir" },
+    [ECRAN_ACCUEIL_HUB_MENU_IMPRIMER]     = { "Imprimer",     "" },
     [ECRAN_ACCUEIL_HUB_MENU_REGLAGES]     = { "Reglages",     "A venir" },
 };
 
@@ -355,6 +369,8 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
                          NULL);
     lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS], ouvrir_ventilateurs_cb,
                          LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_IMPRIMER], ouvrir_imprimer_cb, LV_EVENT_CLICKED,
+                         NULL);
 }
 
 static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)

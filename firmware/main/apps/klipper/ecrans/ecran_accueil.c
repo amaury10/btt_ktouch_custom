@@ -1,11 +1,12 @@
 /* Implémentation : voir ecran_accueil.h pour le contrat.
  *
- * Mise en page (800x436, sous la barre d'état construite par habillage.c) :
- * deux tuiles de température en haut, le nom de fichier juste dessous, une
- * barre de progression pleine largeur, trois boutons en bas. Toutes les
- * constantes de position sont dérivées les unes des autres (voir les macros
- * ci-dessous) plutôt que recopiées, pour qu'un futur ajustement de l'une
- * d'entre elles ne désaligne pas silencieusement le reste de la colonne. */
+ * Mise en page (742x436, dans le conteneur de navigation à droite du rail
+ * persistant, sous la barre d'état construite par habillage.c) : deux tuiles
+ * de température en haut, le nom de fichier juste dessous, une barre de
+ * progression pleine largeur, trois boutons en bas. Toutes les constantes de
+ * position sont dérivées les unes des autres (voir les macros ci-dessous)
+ * plutôt que recopiées, pour qu'un futur ajustement de l'une d'entre elles ne
+ * désaligne pas silencieusement le reste de la colonne. */
 #include "ecran_accueil.h"
 
 #include <stdio.h>
@@ -19,19 +20,22 @@
 #include "navigation.h"
 #include "source_etat.h"
 
-#define LARGEUR_CONTENU 800
+#define LARGEUR_CONTENU 742 /* 800 - RAIL_LARGEUR (58), voir habillage.c */
 #define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
 
 #define MARGE          20
 /* Rangée symétrique : marge gauche + tuile + écart + tuile + marge droite,
  * les TROIS occurrences de MARGE (voir le _Static_assert plus bas). Fix
- * défaut 2 (revue live jalon 3a) : 380 pilait exactement le bord droit de
- * l'écran (MARGE + 380 + MARGE + 380 = 800, sans marge droite -- la tuile
- * Bed touchait le boîtier), passé inaperçu parce que l'ancien
+ * défaut 2 (revue live jalon 3a) : à 800px, 380 pilait exactement le bord
+ * droit de l'écran (MARGE + 380 + MARGE + 380 = 800, sans marge droite --
+ * la tuile Bed touchait le boîtier), passé inaperçu parce que l'ancien
  * _Static_assert ne comptait que DEUX MARGE au lieu de trois et laissait
- * donc passer une marge droite nulle sans jamais le signaler. 370 restitue
- * une marge droite de 20 px, identique à la marge gauche. */
-#define TUILE_LARGEUR 370
+ * donc passer une marge droite nulle sans jamais le signaler ; 370
+ * restituait une marge droite de 20 px, identique à la marge gauche.
+ * Sous-projet 5 (conversion 742, rail persistant -- voir LARGEUR_CONTENU
+ * ci-dessus) : (742 - 3*MARGE)/2 = 341 conserve exactement cette même
+ * symétrie, marge droite = marge gauche = 20 px. */
+#define TUILE_LARGEUR 341
 #define TUILE_HAUTEUR 140
 #define TUILE_Y        16
 
@@ -48,16 +52,22 @@
 #define TEMPS_DECALAGE_X 120
 
 #define BOUTONS_Y      (PROGRESSION_Y + PROGRESSION_HAUTEUR + 20)
-#define BOUTON_LARGEUR 230
+/* Sous-projet 5 (conversion 742, rail persistant -- voir LARGEUR_CONTENU
+ * ci-dessus) : 230 (hérité du contenu 800px) fait déborder la rangée des
+ * trois boutons (_Static_assert plus bas : MARGE + 3*BOUTON_LARGEUR +
+ * 2*BOUTON_ECART + MARGE = 20 + 690 + 70 + 20 = 800 > 742). 210 -- ajustement
+ * minimal, BOUTON_ECART inchangé -- ramène la somme à 740 <= 742 ; boutons
+ * toujours très largement >= 44px de cible tactile (210x70). */
+#define BOUTON_LARGEUR 210
 #define BOUTON_HAUTEUR  70
 #define BOUTON_ECART    35
 
 /* Tache 6 (jalon 3a) : bouton "Macros" -- une NOUVELLE rangee sous les trois
  * boutons de commande existants, jamais insere DANS cette rangee (les trois
- * boutons s'y partagent deja tout LARGEUR_CONTENU a l'octet pres, voir le
- * _Static_assert plus bas -- y ajouter un quatrieme aurait force a retoucher
- * une geometrie deja revue au jalon 2b). Pleine largeur, pour la doleance
- * n1 du projet : ce n'est pas un bouton parmi d'autres. */
+ * boutons s'y partagent deja quasiment tout LARGEUR_CONTENU -- 740/742px,
+ * voir le _Static_assert plus bas -- y ajouter un quatrieme aurait force a
+ * retoucher une geometrie deja revue au jalon 2b). Pleine largeur, pour la
+ * doleance n1 du projet : ce n'est pas un bouton parmi d'autres. */
 #define MACROS_BOUTON_Y       (BOUTONS_Y + BOUTON_HAUTEUR + 20)
 #define MACROS_BOUTON_HAUTEUR 60
 #define MACROS_BOUTON_LARGEUR (LARGEUR_CONTENU - 2 * MARGE)
@@ -88,8 +98,8 @@
  * silencieux) sans jamais le signaler -- exactement le défaut qui a laissé
  * Bed toucher le bord droit de l'écran pendant tout le jalon précédent.
  * Trois occurrences de MARGE (gauche, écart entre tuiles, droite) : une
- * régression future de TUILE_LARGEUR vers 380 (2 tuiles + 2 MARGE pilent
- * déjà les 800px, sans laisser de place à une troisième MARGE) fait échouer
+ * régression future de TUILE_LARGEUR vers 351 (2 tuiles + 2 MARGE pilent
+ * déjà les 742px, sans laisser de place à une troisième MARGE) fait échouer
  * cette assertion à la compilation plutôt que de laisser un pixel sortir du
  * cadre sans que personne ne le remarque avant une capture. */
 _Static_assert(3 * MARGE + 2 * TUILE_LARGEUR == LARGEUR_CONTENU,
