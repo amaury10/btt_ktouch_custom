@@ -111,6 +111,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_ventilateurs.c
     ${ECRANS_DIR}/ecran_reglage_fin.c
     ${ECRANS_DIR}/ecran_zcalibrate.c
+    ${ECRANS_DIR}/ecran_niveau_lit.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c

@@ -28,6 +28,7 @@ void suite_ecran_extruder(void);
 void suite_ecran_ventilateurs(void);
 void suite_ecran_reglage_fin(void);
 void suite_ecran_zcalibrate(void);
+void suite_ecran_niveau_lit(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -191,6 +192,14 @@ int main(void)
      * construit + boucle simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_zcalibrate() dans test_ecran_zcalibrate.c. */
     suite_ecran_zcalibrate();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 4 : l'ecran Bed Level
+     * (SCREWS_TILT_CALCULATE/Z_TILT_ADJUST/QUAD_GANTRY_LEVEL/M84, grille 2x2
+     * sans aucune valeur relue) -- meme garde d'ordonnancement que
+     * suite_ecran_zcalibrate() juste au-dessus (habillage construit + boucle
+     * simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_niveau_lit() dans test_ecran_niveau_lit.c. */
+    suite_ecran_niveau_lit();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --
