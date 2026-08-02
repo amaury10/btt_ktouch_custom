@@ -82,6 +82,7 @@
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "hote_parse.h"
+#include "klipper_temp_historique.h"
 #include "moonraker_pc.h"
 #include "navigation.h"
 #include "source_etat.h"
@@ -197,6 +198,44 @@ static void jouet_pomper(void)
     liaison_etat_t liaison = LIAISON_CONNEXION;
     if (ui_etat_instantane(&etat, sizeof(etat), &generation, &liaison)) {
         navigation_mettre_a_jour(&etat, habillage_donnees_perimees(liaison));
+    }
+}
+
+/* Tache 2 (graphes de temperature) : sur cible, un lv_timer independant
+ * (app_main.c, echantillon_temp_cb()) pousse un point d'historique toutes
+ * les 5 s, tourne en continu sur le fil LVGL. Ce simulateur n'a ni ce
+ * timer ni ce fil : en mode capture rien ne tourne apres le dernier
+ * cycle, et en mode fenetre la boucle plus bas est deja le seul "fil"
+ * disponible. On reproduit le meme echantillonnage ici en comptant les
+ * cycles simules (1 cycle = source_etat_sim_cycle() = ~1 s simulee, voir
+ * le commentaire de la boucle de capture plus bas) : un point tous les 5
+ * cycles, pour que --ecran accueil (tache 3) montre une courbe qui se
+ * remplit sans dependre d'un outil externe. */
+static int g_cycles_depuis_echantillon_temp = 0;
+
+static void echantillon_temp_sim(void)
+{
+    etat_klipper_t e;
+    if (ui_etat_instantane(&e, sizeof(e), NULL, NULL)) {
+        klipper_temp_historique_pousser(&e);
+    }
+}
+
+/* Enveloppe source_etat_sim_cycle() pour y greffer l'echantillonnage
+ * ci-dessus, aux TROIS sites qui font avancer la boucle simulee (amorce,
+ * boucle de capture, boucle fenetre) -- jamais pour --app jouet :
+ * etat_jouet_t n'a pas la taille de etat_klipper_t (voir jouet_pomper()
+ * ci-dessus), ui_etat_instantane() y rendrait simplement faux, garde
+ * explicite ici pour ne jamais compter sur cet echec silencieux. */
+static void cycle_simule_avec_echantillon(app_t app)
+{
+    source_etat_sim_cycle();
+    if (app != APP_ACCUEIL) {
+        return;
+    }
+    if (++g_cycles_depuis_echantillon_temp >= 5) {
+        g_cycles_depuis_echantillon_temp = 0;
+        echantillon_temp_sim();
     }
 }
 
@@ -397,7 +436,7 @@ int main(int argc, char **argv)
      * de secondes") reste exact, jamais cycles+1. */
     bool amorce_faite = false;
     if (app == APP_ACCUEIL && !(chemin_capture != NULL && cycles == 0)) {
-        source_etat_sim_cycle();
+        cycle_simule_avec_echantillon(app);
         amorce_faite = true;
     }
 
@@ -552,7 +591,7 @@ int main(int argc, char **argv)
          * `cycles` demandees (voir le commentaire de l'amorce). */
         int cycles_restants = cycles - (amorce_faite ? 1 : 0);
         for (int i = 0; i < cycles_restants; i++) {
-            source_etat_sim_cycle();
+            cycle_simule_avec_echantillon(app);
             habillage_pomper();
             if (app == APP_JOUET) {
                 /* Voir le commentaire de tête de ce fichier et celui de
@@ -692,7 +731,7 @@ int main(int argc, char **argv)
         usleep(16 * 1000);
         accumulateur_ms += 16;
         if (accumulateur_ms >= 1000) {
-            source_etat_sim_cycle();
+            cycle_simule_avec_echantillon(app);
             accumulateur_ms = 0;
         }
     }

@@ -33,6 +33,7 @@
 #include "ecran_macros.h"
 #include "habillage.h"
 #include "journal.h"
+#include "klipper_temp_historique.h"
 #include "navigation.h"
 #include "netlog.h"
 #include "rail_actions.h"
@@ -81,6 +82,20 @@ static void interface_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
     habillage_pomper();
+}
+
+/* Echantillonneur d'historique de temperature : toutes les 5 s, copie l'etat
+ * courant (meme accesseur verrouille que habillage_pomper) et pousse un point.
+ * Tourne en continu sur le fil LVGL, independamment de l'ecran affiche, pour
+ * que la courbe se remplisse meme hors accueil. */
+static void echantillon_temp_cb(lv_timer_t *t)
+{
+    (void)t;
+    etat_klipper_t e;                 /* ~1840 o sur la pile du fil LVGL, meme
+                                         budget que la copie de habillage_pomper */
+    if (boucle_etat_copier(&e, sizeof(e))) {
+        klipper_temp_historique_pousser(&e);
+    }
 }
 
 /* Reconstruit le texte (deux lignes) de la ligne d'état à partir de l'état
@@ -592,6 +607,12 @@ void app_main(void)
             if (minuteur_interface == NULL) {
                 JOURNAL_ALERTE(TAG, "lv_timer_create(interface) a echoue : rafraichissement "
                                "periodique indisponible, l'interface reste figee sur son premier etat");
+            }
+
+            lv_timer_t *minuteur_temp = lv_timer_create(echantillon_temp_cb, 5000, NULL);
+            if (minuteur_temp == NULL) {
+                JOURNAL_ALERTE(TAG, "lv_timer_create(echantillon temp) a echoue : historique de "
+                               "temperature indisponible");
             }
         }
 
