@@ -42,6 +42,7 @@ void suite_ecran_macros(void);
 void suite_ecran_fichiers(void);
 void suite_ecran_reglages_wifi(void);
 void suite_ecran_menu_reglages(void);
+void suite_ecran_actions(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
@@ -258,6 +259,16 @@ int main(void)
      * demarree) -- voir le commentaire de tete de suite_ecran_menu_reglages()
      * dans test_ecran_menu_reglages.c. */
     suite_ecran_menu_reglages();
+
+    /* Sous-projet "refonte IHM KlipperScreen", tache 2 : le sous-menu
+     * Actions (ECRAN_ACTIONS, id "actions") -- grille de 7 cases qui
+     * relient six panneaux deja construits (Move/Extrude/Fan/Temperature/
+     * Macros/Console) et envoie M84 directement (Disable Motors, sans
+     * confirmation). Meme garde d'ordonnancement que les autres suites
+     * d'ecran ci-dessus (habillage construit + boucle simulee demarree) --
+     * voir le commentaire de tete de suite_ecran_actions() dans
+     * test_ecran_actions.c. */
+    suite_ecran_actions();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage

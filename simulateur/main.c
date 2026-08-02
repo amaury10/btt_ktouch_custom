@@ -61,6 +61,7 @@
 #include "confirmation.h"
 #include "ecran_accueil.h"
 #include "ecran_accueil_hub.h"
+#include "ecran_actions.h"
 #include "ecran_configuration.h"
 #include "ecran_deplacer.h"
 #include "ecran_extruder.h"
@@ -293,9 +294,11 @@ int main(int argc, char **argv)
              * collision de noms), "power", "bed_mesh" (alias "bedmesh"),
              * "input_shaper" (alias "shaper"), "spoolman", "updater",
              * "console" -- ces six derniers sont les stubs de la tache 7
-             * (ecran_stub.h, backend absent) -- toute autre retombe sur
-             * l'accueil seul (ecran_demande reste NULL), meme politique
-             * defensive que --app. */
+             * (ecran_stub.h, backend absent) -- "actions" (le sous-menu
+             * Actions, refonte IHM KlipperScreen tache 2 -- ECRAN_ACTIONS,
+             * voir ecran_actions.h) -- toute autre retombe sur l'accueil
+             * seul (ecran_demande reste NULL), meme politique defensive que
+             * --app. */
             const char *valeur = argv[++i];
             if (strcmp(valeur, "macros") == 0)            ecran_demande = &ECRAN_MACROS;
             else if (strcmp(valeur, "deplacer") == 0)     ecran_demande = &ECRAN_DEPLACER;
@@ -318,6 +321,7 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "spoolman") == 0)     ecran_demande = &ECRAN_SPOOLMAN;
             else if (strcmp(valeur, "updater") == 0)      ecran_demande = &ECRAN_UPDATER;
             else if (strcmp(valeur, "console") == 0)      ecran_demande = &ECRAN_CONSOLE;
+            else if (strcmp(valeur, "actions") == 0)      ecran_demande = &ECRAN_ACTIONS;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {

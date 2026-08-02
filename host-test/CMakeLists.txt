@@ -147,6 +147,7 @@ add_executable(tests
     tests/test_ecran_fichiers.c
     tests/test_ecran_reglages_wifi.c
     tests/test_ecran_menu_reglages.c
+    tests/test_ecran_actions.c
     tests/wifi_mock.c
     tests/test_klipper_gcode.c
     tests/test_klipper_paliers.c
@@ -196,6 +197,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_fichiers.c
     ${ECRANS_DIR}/ecran_reglages_wifi.c
     ${ECRANS_DIR}/ecran_menu_reglages.c
+    ${ECRANS_DIR}/ecran_actions.c
     ${SIM_DIR}/source_etat_sim.c
     ${SIM_DIR}/plateforme_sim.c
     ${SIM_DIR}/source_reglages_sim.c
