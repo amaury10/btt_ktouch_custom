@@ -71,6 +71,7 @@
 #include "ecran_reglages_wifi.h"
 #include "ecran_temperatures.h"
 #include "ecran_ventilateurs.h"
+#include "ecran_zcalibrate.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "hote_parse.h"
@@ -281,8 +282,8 @@ int main(int argc, char **argv)
              * mode capture, d'un tap reel sur une case de menu -- rien ne simule
              * le tactile en capture). Valeurs reconnues : "macros", "deplacer",
              * "temperatures", "extruder", "ventilateurs", "fichiers", "wifi",
-             * "fin" -- toute autre retombe sur l'accueil seul (ecran_demande
-             * reste NULL), meme politique defensive que --app. */
+             * "fin", "zcal" -- toute autre retombe sur l'accueil seul
+             * (ecran_demande reste NULL), meme politique defensive que --app. */
             const char *valeur = argv[++i];
             if (strcmp(valeur, "macros") == 0)            ecran_demande = &ECRAN_MACROS;
             else if (strcmp(valeur, "deplacer") == 0)     ecran_demande = &ECRAN_DEPLACER;
@@ -292,6 +293,7 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "fichiers") == 0)     ecran_demande = &ECRAN_FICHIERS;
             else if (strcmp(valeur, "wifi") == 0)         ecran_demande = &ECRAN_REGLAGES_WIFI;
             else if (strcmp(valeur, "fin") == 0)          ecran_demande = &ECRAN_REGLAGE_FIN;
+            else if (strcmp(valeur, "zcal") == 0)         ecran_demande = &ECRAN_ZCALIBRATE;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {

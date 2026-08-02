@@ -27,6 +27,7 @@ void suite_ecran_temperatures(void);
 void suite_ecran_extruder(void);
 void suite_ecran_ventilateurs(void);
 void suite_ecran_reglage_fin(void);
+void suite_ecran_zcalibrate(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -183,6 +184,13 @@ int main(void)
      * construit + boucle simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_reglage_fin() dans test_ecran_reglage_fin.c. */
     suite_ecran_reglage_fin();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 3 : l'ecran Z Calibrate
+     * (PROBE_CALIBRATE/Z_ENDSTOP_CALIBRATE/TESTZ/ACCEPT/ABORT) -- meme garde
+     * d'ordonnancement que suite_ecran_reglage_fin() juste au-dessus (habillage
+     * construit + boucle simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_zcalibrate() dans test_ecran_zcalibrate.c. */
+    suite_ecran_zcalibrate();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --

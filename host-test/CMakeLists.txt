@@ -132,6 +132,7 @@ add_executable(tests
     tests/test_ecran_extruder.c
     tests/test_ecran_ventilateurs.c
     tests/test_ecran_reglage_fin.c
+    tests/test_ecran_zcalibrate.c
     tests/test_accueil_choix.c
     tests/test_clavier.c
     tests/test_ecran_configuration.c
@@ -180,6 +181,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_extruder.c
     ${ECRANS_DIR}/ecran_ventilateurs.c
     ${ECRANS_DIR}/ecran_reglage_fin.c
+    ${ECRANS_DIR}/ecran_zcalibrate.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c
