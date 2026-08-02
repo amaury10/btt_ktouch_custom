@@ -1,8 +1,10 @@
 #include "backend_factice.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "journal.h"
+#include "klipper_fichiers.h"
 
 /* Étiquette de journalisation : convention reprise du reste du firmware
  * (voir app_main.c, rescue.c), pour que /log reste lisible par module. */
@@ -107,6 +109,24 @@ static const char *const g_fichiers_factices[] = {
     "calibration/cube.gcode",
     "CE3_test.gcode",
 };
+
+/* Publie les fichiers factices dans le store dedie (klipper_fichiers.h) UNE
+ * fois au demarrage : la liste ne vit plus dans etat_klipper_t (sortie du
+ * champ `fichiers[]` pour liberer la RAM interne -- voir klipper_fichiers.h),
+ * ce n'est donc plus un champ de `etat` que rafraichir() remplirait, mais un
+ * store process-wide. Aucun scenario ne fait varier cette liste (le navigateur
+ * de fichiers ne depend pas de la machine simulee, contrairement aux macros). */
+static void factice_publier_fichiers(void)
+{
+    klipper_fichiers_t f;
+    memset(&f, 0, sizeof(f));
+    f.nb = (uint8_t)(sizeof(g_fichiers_factices) / sizeof(g_fichiers_factices[0]));
+    for (uint8_t i = 0; i < f.nb; i++) {
+        snprintf(f.noms[i], KLIPPER_FICHIER_MAX, "%s", g_fichiers_factices[i]);
+    }
+    f.tronques = false;
+    klipper_fichiers_definir(&f);
+}
 
 /* Rend vrai si `nom` est une macro que CE backend connaît, tous scénarios
  * confondus (10, 11, 12 : les scénarios 0-9 n'annoncent aucune macro). Ne
@@ -217,6 +237,10 @@ static esp_err_t backend_factice_demarrer(void *etat, const backend_hote_t *hote
      * oubli du contrat « demarrer ne fait que journaliser » : c'est un ajout
      * volontaire, au-delà du minimum. */
     memset(e, 0, sizeof(*e));
+    /* Tache 2, jalon "browser de fichiers" : les fichiers factices vivent
+     * desormais dans le store dedie (klipper_fichiers.h), pas dans `etat` --
+     * peuples UNE fois ici, au demarrage. */
+    factice_publier_fichiers();
     JOURNAL_INFO(TAG, "demarrage (hote=%s port=%u)",
                  hote != NULL ? hote->adresse : "?",
                  hote != NULL ? (unsigned)hote->port : 0u);
@@ -243,14 +267,10 @@ static esp_err_t backend_factice_rafraichir(void *etat)
     nouveau.plateau.presente = true;
     nouveau.outil_actif = 0;
 
-    /* Tache 2, jalon "browser de fichiers" : voir le commentaire de
-     * g_fichiers_factices -- inconditionnel, aucun scenario ci-dessous ne
-     * touche fichiers[]/nb_fichiers. */
-    nouveau.nb_fichiers = sizeof(g_fichiers_factices) / sizeof(g_fichiers_factices[0]);
-    for (uint8_t i = 0; i < nouveau.nb_fichiers; i++) {
-        snprintf(nouveau.fichiers[i], KLIPPER_FICHIER_MAX, "%s", g_fichiers_factices[i]);
-    }
-    nouveau.fichiers_tronques = false;
+    /* Tache 2, jalon "browser de fichiers" : les fichiers factices ne sont
+     * PLUS un champ de `etat` -- ils vivent dans le store dedie
+     * (klipper_fichiers.h), peuple une fois par backend_factice_demarrer()
+     * (voir factice_publier_fichiers()). Rien a faire ici. */
 
     switch (g_scenario) {
     case 0:

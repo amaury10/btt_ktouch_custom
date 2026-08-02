@@ -70,14 +70,12 @@ typedef struct {
     uint8_t nb_macros;
     bool    macros_tronquees;
 
-    /* Liste des fichiers gcode disponibles (root "gcodes" de Moonraker) ;
-     * chaque entrée est un CHEMIN relatif à cette racine, éventuellement
-     * avec des '/' pour un sous-dossier (ex. "sub/b.gcode") -- pas un simple
-     * nom de fichier. Entrées au-delà de nb_fichiers sont vides et sans
-     * signification, comme macros au-delà de nb_macros. */
-    char    fichiers[KLIPPER_FICHIERS_MAX][KLIPPER_FICHIER_MAX];
-    uint8_t nb_fichiers;      /* 0 = liste jamais reçue ou vide */
-    bool    fichiers_tronques; /* true si Moonraker en avait plus que KLIPPER_FICHIERS_MAX */
+    /* NOTE : la liste des fichiers gcode NE vit PLUS ici. Elle a été sortie
+     * vers un store dédié (apps/klipper/klipper_fichiers.h) : cet état est un
+     * POD copié partout (habillage, boîte WS, piles des tâches), et les ~2 Ko
+     * de `fichiers[]` dupliqués dans chaque copie épuisaient la RAM interne au
+     * point que la tâche WebSocket ne pouvait plus s'allouer. Voir
+     * klipper_fichiers.h. */
 
     char     fichier[KLIPPER_FICHIER_MAX];
     float    progression;                  /* 0.0 à 1.0 */

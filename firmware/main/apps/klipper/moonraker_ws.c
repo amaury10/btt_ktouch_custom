@@ -45,6 +45,7 @@
 #include "freertos/task.h"
 
 #include "journal.h"
+#include "klipper_fichiers.h"
 #include "moonraker_boite.h"
 #include "moonraker_rpc.h"
 
@@ -477,15 +478,16 @@ static void traiter_message_complet(const char *json, size_t longueur)
             }
         } else if (id == g_id_fichiers && g_id_fichiers != 0) {
             /* Tache 2, jalon "browser de fichiers" : reponse a
-             * server.files.list -- rpc_lire_fichiers() (tache 1). Meme base
-             * cumulative que les cas ci-dessus (fusion PARTIELLE du reste de
-             * l'etat ; rpc_lire_fichiers() lui-meme REMPLACE entierement
-             * fichiers[]/nb_fichiers/fichiers_tronques, voir son commentaire
-             * dans moonraker_rpc.h -- un instantane complet, pas une fusion
-             * champ par champ). */
-            etat_klipper_t copie = g_boite.etat;
-            if (rpc_lire_fichiers(&copie, json, longueur)) {
-                boite_deposer(&g_boite, &copie);
+             * server.files.list -- rpc_lire_fichiers() (tache 1). La liste de
+             * fichiers NE vit PLUS dans etat_klipper_t (sortie vers un store
+             * dedie, voir klipper_fichiers.h : les ~2 Ko dupliques dans chaque
+             * copie d'etat epuisaient la RAM interne et empechaient la creation
+             * de la tache WS). On ne copie donc PLUS g_boite.etat sur la pile
+             * pour les fichiers : juste un klipper_fichiers_t transitoire, et le
+             * depot va dans le store, PAS dans la boite d'etat. */
+            klipper_fichiers_t f;
+            if (rpc_lire_fichiers(&f, json, longueur)) {
+                klipper_fichiers_definir(&f);
             }
         } else if (g_correlateur.en_cours && id == g_correlateur.id) {
             bool succes = false;
@@ -857,24 +859,24 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     config.uri = url;
     config.disable_auto_reconnect = true; /* backoff exponentiel gere par CE fichier, pas la bibliotheque */
     /* Pile de la tache WS : le DEFAUT esp_websocket_client est 4 Ko, INSUFFISANT
-     * ici. ws_event_handler() -> traiter_message_complet() -> rpc_fusionner_*()/
-     * rpc_lire_fichiers() tournent tous DANS cette tache, et le handler ci-dessus
-     * pose un `etat_klipper_t copie = g_boite.etat` sur la pile (jusqu'a deux
-     * copies vivantes a la fois avec le local de rpc_fusionner_*), plus la
-     * recursion de cJSON_ParseWithLength() sur le payload.
+     * ici. ws_event_handler() -> traiter_message_complet() -> rpc_fusionner_*()
+     * tournent tous DANS cette tache, et le handler ci-dessus pose un
+     * `etat_klipper_t copie = g_boite.etat` sur la pile (jusqu'a deux copies
+     * vivantes a la fois avec le local de rpc_fusionner_*), plus la recursion
+     * de cJSON_ParseWithLength() sur le payload.
      *
-     * ATTENTION -- taille de l'etat DOUBLEE depuis le sous-projet navigateur de
-     * fichiers : sizeof(etat_klipper_t) est passe de 1808 a ~3856 octets (champ
-     * `fichiers[32][64]`, +2 Ko). Deux copies = ~7,7 Ko de pile, contre ~3,6 Ko
-     * avant. Les petites fixtures vkp tenaient dans 16 Ko, mais l'etat REEL
-     * complet d'une vraie imprimante (Freebox/CR-10/Snapmaker) faisait de nouveau
-     * deborder la pile -> crash + reboot PILE A LA CONNEXION Moonraker (constate
-     * sur le materiel reel). D'ou 32 Ko ici : marge confortable pour 2x3856 +
-     * cJSON profond sur un gros instantane. (Fix propre a venir : sortir
-     * `fichiers[]` de l'etat toujours-copie pour revenir a ~1808 octets.)
+     * 16 Ko suffit MAINTENANT que sizeof(etat_klipper_t) est revenu a ~1808
+     * octets : la liste `fichiers[]` (qui avait double la taille de l'etat a
+     * ~3856 octets) a ete sortie de l'etat vers un store dedie
+     * (klipper_fichiers.h) -- rpc_lire_fichiers() ne pose plus de copie de
+     * l'etat sur cette pile, juste un klipper_fichiers_t transitoire. Deux
+     * copies d'etat = ~3,6 Ko, largement dans 16 Ko avec cJSON profond sur un
+     * gros instantane. (C'est aussi la sortie de `fichiers[]` de l'etat
+     * toujours-copie qui a libere la RAM interne au point que cette tache peut
+     * de nouveau s'allouer -- fin de « Error create websocket task ».)
      * buffer_size : 4 Ko (defaut 1 Ko) reduit la fragmentation applicative des
      * grosses trames (le reassemblage g_tampon_msg la gere de toute facon). */
-    config.task_stack = 32768;
+    config.task_stack = 16384;
     config.buffer_size = 4096;
 
     g_client = esp_websocket_client_init(&config);

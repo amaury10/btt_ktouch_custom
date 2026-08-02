@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "backend.h"
+#include "klipper_fichiers.h"
 #include "moonraker_rpc.h"
 #include "petit_test.h"
 
@@ -809,77 +810,80 @@ static void section_lire_macros(void)
 
 static void section_lire_fichiers(void)
 {
+    /* rpc_lire_fichiers ecrit desormais dans un klipper_fichiers_t (le store,
+     * sorti de etat_klipper_t -- voir klipper_fichiers.h), pas dans l'etat. */
+
     /* liste nominale, 2 fichiers dont un dans un sous-dossier */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
         static const char *LISTE =
             "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":["
             "{\"path\":\"a.gcode\",\"modified\":1785605464.65,\"size\":10,\"permissions\":\"rw\"},"
             "{\"path\":\"sub/b.gcode\",\"modified\":1785605464.65,\"size\":20,\"permissions\":\"rw\"}"
             "]}";
-        VERIFIER(rpc_lire_fichiers(&e, LISTE, strlen(LISTE)));
-        VERIFIER(e.nb_fichiers == 2);
-        VERIFIER_TEXTE(e.fichiers[0], "a.gcode");
-        VERIFIER_TEXTE(e.fichiers[1], "sub/b.gcode");
-        VERIFIER(!e.fichiers_tronques);
+        VERIFIER(rpc_lire_fichiers(&f, LISTE, strlen(LISTE)));
+        VERIFIER(f.nb == 2);
+        VERIFIER_TEXTE(f.noms[0], "a.gcode");
+        VERIFIER_TEXTE(f.noms[1], "sub/b.gcode");
+        VERIFIER(!f.tronques);
     }
 
-    /* liste vide => nb_fichiers == 0, true */
+    /* liste vide => nb == 0, true */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
-        e.nb_fichiers = 7;   /* valeur temoin, doit etre remise a 0 */
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
+        f.nb = 7;   /* valeur temoin, doit etre remise a 0 */
         static const char *VIDE = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}";
-        VERIFIER(rpc_lire_fichiers(&e, VIDE, strlen(VIDE)));
-        VERIFIER(e.nb_fichiers == 0);
-        VERIFIER(!e.fichiers_tronques);
+        VERIFIER(rpc_lire_fichiers(&f, VIDE, strlen(VIDE)));
+        VERIFIER(f.nb == 0);
+        VERIFIER(!f.tronques);
     }
 
-    /* result absent => false, etat INTACT (sentinelle nb_fichiers=99) */
+    /* result absent => false, dest INTACT (sentinelle nb=99) */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
-        e.nb_fichiers = 99;
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
+        f.nb = 99;
         static const char *SANS_RESULT = "{\"jsonrpc\":\"2.0\",\"id\":1}";
-        VERIFIER(!rpc_lire_fichiers(&e, SANS_RESULT, strlen(SANS_RESULT)));
-        VERIFIER(e.nb_fichiers == 99);
+        VERIFIER(!rpc_lire_fichiers(&f, SANS_RESULT, strlen(SANS_RESULT)));
+        VERIFIER(f.nb == 99);
     }
 
-    /* result pas un tableau => false, etat INTACT */
+    /* result pas un tableau => false, dest INTACT */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
-        e.nb_fichiers = 99;
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
+        f.nb = 99;
         static const char *PAS_TABLEAU = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"a\":1}}";
-        VERIFIER(!rpc_lire_fichiers(&e, PAS_TABLEAU, strlen(PAS_TABLEAU)));
-        VERIFIER(e.nb_fichiers == 99);
+        VERIFIER(!rpc_lire_fichiers(&f, PAS_TABLEAU, strlen(PAS_TABLEAU)));
+        VERIFIER(f.nb == 99);
     }
 
-    /* JSON illisible => false, etat INTACT (temoin 0x5A, memcmp du struct ENTIER) */
+    /* JSON illisible => false, dest INTACT (temoin 0x5A, memcmp du struct ENTIER) */
     {
-        etat_klipper_t temoin;
+        klipper_fichiers_t temoin;
         memset(&temoin, 0x5A, sizeof(temoin));
-        etat_klipper_t e = temoin;
-        VERIFIER(!rpc_lire_fichiers(&e, "pas du json", 11));
-        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+        klipper_fichiers_t f = temoin;
+        VERIFIER(!rpc_lire_fichiers(&f, "pas du json", 11));
+        VERIFIER(memcmp(&f, &temoin, sizeof(f)) == 0);
 
-        e = temoin;
-        VERIFIER(!rpc_lire_fichiers(&e, "", 0));
-        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+        f = temoin;
+        VERIFIER(!rpc_lire_fichiers(&f, "", 0));
+        VERIFIER(memcmp(&f, &temoin, sizeof(f)) == 0);
 
-        e = temoin;
-        VERIFIER(!rpc_lire_fichiers(&e, NULL, 0));
-        VERIFIER(memcmp(&e, &temoin, sizeof(e)) == 0);
+        f = temoin;
+        VERIFIER(!rpc_lire_fichiers(&f, NULL, 0));
+        VERIFIER(memcmp(&f, &temoin, sizeof(f)) == 0);
 
         VERIFIER(!rpc_lire_fichiers(NULL, "{}", 2));
     }
 
     /* .path de KLIPPER_FICHIER_MAX caracteres ou plus : IGNORE (pas tronque),
-     * ne compte pas dans nb_fichiers, le reste de la liste continue */
+     * ne compte pas dans nb, le reste de la liste continue */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
         /* 70 'A' + ".gcode" : bien >= KLIPPER_FICHIER_MAX (64) */
         char chemin_long[80];
         memset(chemin_long, 'A', 70);
@@ -888,17 +892,17 @@ static void section_lire_fichiers(void)
         char liste[256];
         snprintf(liste, sizeof(liste),
                  "{\"result\":[{\"path\":\"%s\"},{\"path\":\"courte.gcode\"}]}", chemin_long);
-        VERIFIER(rpc_lire_fichiers(&e, liste, strlen(liste)));
-        VERIFIER(e.nb_fichiers == 1);
-        VERIFIER_TEXTE(e.fichiers[0], "courte.gcode");
-        VERIFIER(!e.fichiers_tronques);
+        VERIFIER(rpc_lire_fichiers(&f, liste, strlen(liste)));
+        VERIFIER(f.nb == 1);
+        VERIFIER_TEXTE(f.noms[0], "courte.gcode");
+        VERIFIER(!f.tronques);
     }
 
     /* element du tableau qui n'est pas un objet, ou objet sans .path chaine :
      * ignore, le reste continue */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
         static const char *POISON =
             "{\"result\":["
             "42,"
@@ -907,15 +911,15 @@ static void section_lire_fichiers(void)
             "{\"path\":123},"
             "{\"path\":\"valide.gcode\"}"
             "]}";
-        VERIFIER(rpc_lire_fichiers(&e, POISON, strlen(POISON)));
-        VERIFIER(e.nb_fichiers == 1);
-        VERIFIER_TEXTE(e.fichiers[0], "valide.gcode");
+        VERIFIER(rpc_lire_fichiers(&f, POISON, strlen(POISON)));
+        VERIFIER(f.nb == 1);
+        VERIFIER_TEXTE(f.noms[0], "valide.gcode");
     }
 
-    /* > KLIPPER_FICHIERS_MAX entrees => nb == MAX, fichiers_tronques == true */
+    /* > KLIPPER_FICHIERS_MAX entrees => nb == MAX, tronques == true */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
 
         char liste[4096];
         size_t pos = (size_t)snprintf(liste, sizeof(liste), "{\"result\":[");
@@ -926,23 +930,23 @@ static void section_lire_fichiers(void)
         pos += (size_t)snprintf(liste + pos, sizeof(liste) - pos, "]}");
         VERIFIER(pos < sizeof(liste));
 
-        VERIFIER(rpc_lire_fichiers(&e, liste, pos));
-        VERIFIER(e.nb_fichiers == KLIPPER_FICHIERS_MAX);
-        VERIFIER(e.fichiers_tronques);
+        VERIFIER(rpc_lire_fichiers(&f, liste, pos));
+        VERIFIER(f.nb == KLIPPER_FICHIERS_MAX);
+        VERIFIER(f.tronques);
     }
 
     /* remplace ENTIEREMENT la liste precedente (instantane complet, pas une
      * fusion) */
     {
-        etat_klipper_t e;
-        memset(&e, 0, sizeof(e));
-        e.nb_fichiers = 3;
-        strcpy(e.fichiers[0], "vieux.gcode");
+        klipper_fichiers_t f;
+        memset(&f, 0, sizeof(f));
+        f.nb = 3;
+        strcpy(f.noms[0], "vieux.gcode");
 
         static const char *LISTE = "{\"result\":[{\"path\":\"neuf.gcode\"}]}";
-        VERIFIER(rpc_lire_fichiers(&e, LISTE, strlen(LISTE)));
-        VERIFIER(e.nb_fichiers == 1);
-        VERIFIER_TEXTE(e.fichiers[0], "neuf.gcode");
+        VERIFIER(rpc_lire_fichiers(&f, LISTE, strlen(LISTE)));
+        VERIFIER(f.nb == 1);
+        VERIFIER_TEXTE(f.noms[0], "neuf.gcode");
     }
 }
 

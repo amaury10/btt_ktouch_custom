@@ -5,8 +5,11 @@
  * l'ossature complète : grille 4x4 paginée, contexte par emplacement pour le
  * rappel de clic, grisage systématique C3) -- deux différences structurelles :
  *
- *   1. La source est `etat->fichiers[0..nb_fichiers-1]` (T1/T2 du
- *      sous-projet), pas `etat->macros[]` -- AUCUN filtrage par préfixe ici,
+ *   1. La source est le store dédié `klipper_fichiers_lire()` (T1/T2 du
+ *      sous-projet), pas `etat->macros[]` -- la liste de fichiers a été
+ *      sortie de etat_klipper_t vers un store dédié (voir klipper_fichiers.h :
+ *      ~2 Ko dupliqués dans chaque copie d'état épuisaient la RAM interne).
+ *      AUCUN filtrage par préfixe ici,
  *      contrairement aux macros `_préfixées` : un chemin de fichier n'a pas
  *      cette convention Klipper, chaque entrée annoncée est affichée telle
  *      quelle (éventuellement avec un '/', sous-dossier -- pas de navigation
@@ -15,8 +18,8 @@
  *      (confirmation.h, "Print file?") -- démarrer une impression ne doit
  *      jamais partir d'un simple effleurement, contrairement au lancement
  *      d'une macro (ecran_macros.c, aucune confirmation). Le nom transmis à
- *      klipper_gcode_imprimer_fichier() est TOUJOURS celui de
- *      `etat->fichiers[i]` au moment du tap, jamais une saisie manuelle --
+ *      klipper_gcode_imprimer_fichier() est TOUJOURS celui du store
+ *      (`ctx->fichiers_copie[i]`) au moment du tap, jamais une saisie manuelle --
  *      c'est ce qui rend ce chemin sûr sans filtre de caractères (voir le
  *      commentaire de klipper_gcode_imprimer_fichier() dans klipper_gcode.h).
  *

@@ -25,6 +25,7 @@
 #include "confirmation.h"
 #include "ecran_fichiers.h"
 #include "etat_klipper.h"
+#include "klipper_fichiers.h"
 #include "habillage.h"
 #include "navigation.h"
 #include "petit_test.h"
@@ -47,16 +48,31 @@ static void construire_ecran(lv_obj_t **parent_sortie, ecran_fichiers_ctx_t **ct
     *brut_sortie = brut;
 }
 
-/* Remplit `e->fichiers[0..n-1]` avec `noms`, borne le compte, remet le reste
- * de l'etat a zero -- petit constructeur partage par les groupes 1 et 2,
+/* Injecte `noms[0..n-1]` (+ `tronques`) dans le store dedie de fichiers
+ * (klipper_fichiers.h) : la liste de fichiers ne vit plus dans etat_klipper_t
+ * (sortie du champ `fichiers[]` pour liberer la RAM interne), c'est desormais
+ * ce store que ecran_fichiers.mettre_a_jour() relit. `n == 0` (noms peut etre
+ * NULL) vide le store. */
+static void definir_store_fichiers(const char *const *noms, uint8_t n, bool tronques)
+{
+    klipper_fichiers_t f;
+    memset(&f, 0, sizeof(f));
+    for (uint8_t i = 0; i < n; i++) {
+        snprintf(f.noms[i], KLIPPER_FICHIER_MAX, "%s", noms[i]);
+    }
+    f.nb = n;
+    f.tronques = tronques;
+    klipper_fichiers_definir(&f);
+}
+
+/* Injecte `noms` dans le store (tronques=false) et remet `e` a zero -- `e`
+ * reste passe a mettre_a_jour() (qui exige un etat non-NULL) meme s'il ne
+ * porte plus les fichiers. Petit constructeur partage par les groupes 1 et 2,
  * meme technique que remplir_macros() dans test_ecran_macros.c. */
 static void remplir_fichiers(etat_klipper_t *e, const char *const *noms, uint8_t n)
 {
     memset(e, 0, sizeof(*e));
-    for (uint8_t i = 0; i < n; i++) {
-        snprintf(e->fichiers[i], KLIPPER_FICHIER_MAX, "%s", noms[i]);
-    }
-    e->nb_fichiers = n;
+    definir_store_fichiers(noms, n, false);
 }
 
 /* Memes helpers de parcours d'arbre que test_commandes.c/test_integration_rail.c :
@@ -127,6 +143,7 @@ static void groupe_construction_et_etats(void)
      * pagination masquee. */
     etat_klipper_t etat;
     memset(&etat, 0, sizeof(etat));
+    definir_store_fichiers(NULL, 0, false); /* store vide */
     ECRAN_FICHIERS.mettre_a_jour(&etat, false, ctx);
     VERIFIER(!lv_obj_has_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN));
     VERIFIER_TEXTE(lv_label_get_text(ctx->vide), "No files");
@@ -158,15 +175,16 @@ static void groupe_construction_et_etats(void)
     /* Pas de troncature dans ce scenario : la ligne reste masquee. */
     VERIFIER(lv_obj_has_flag(ctx->avertissement, LV_OBJ_FLAG_HIDDEN));
 
-    /* --- fichiers_tronques : ligne d'avertissement HONNETE, visible. */
-    etat.fichiers_tronques = true;
+    /* --- tronques : ligne d'avertissement HONNETE, visible (le drapeau vient
+     * desormais du store, pas de l'etat). */
+    definir_store_fichiers(fichiers, 2, true);
     ECRAN_FICHIERS.mettre_a_jour(&etat, false, ctx);
     VERIFIER(!lv_obj_has_flag(ctx->avertissement, LV_OBJ_FLAG_HIDDEN));
     VERIFIER_TEXTE(lv_label_get_text(ctx->avertissement), "Some files are not shown (list truncated)");
 
     /* Redevient faux : la ligne redisparait -- reversible, pas a sens
      * unique (meme lecon que le grisage). */
-    etat.fichiers_tronques = false;
+    definir_store_fichiers(fichiers, 2, false);
     ECRAN_FICHIERS.mettre_a_jour(&etat, false, ctx);
     VERIFIER(lv_obj_has_flag(ctx->avertissement, LV_OBJ_FLAG_HIDDEN));
 

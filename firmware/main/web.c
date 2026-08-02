@@ -51,6 +51,7 @@
 #include "boucle.h"
 #include "etat_klipper.h"
 #include "journal.h"
+#include "klipper_fichiers.h"
 #include "liaison.h"
 #include "netlog.h"
 #include "rescue.h"
@@ -292,20 +293,25 @@ static esp_err_t gestion_state(httpd_req_t *req)
             cJSON_AddBoolToObject(etat_json, "macros_tronquees", etat.macros_tronquees);
 
             /* Tache 2, jalon "browser de fichiers" : `fichiers` en tableau de
-             * chaines, exactement comme `macros` ci-dessus, et pour la meme
-             * raison (borner `nb_fichiers` -- un producteur amont n'est pas
-             * garanti <= KLIPPER_FICHIERS_MAX, voir le commentaire du fix
-             * MAJOR juste au-dessus pour `macros`/`noms_macros` -- meme piege,
-             * meme defense). */
-            uint8_t n_fichiers = etat.nb_fichiers < KLIPPER_FICHIERS_MAX
-                                      ? etat.nb_fichiers
+             * chaines, exactement comme `macros` ci-dessus. La liste ne vit
+             * plus dans etat_klipper_t (sortie vers un store dedie, voir
+             * klipper_fichiers.h : ~2 Ko dupliques dans chaque copie d'etat
+             * epuisaient la RAM interne) -- on la lit ici sous verrou dans une
+             * copie locale. `nb` est deja borne a KLIPPER_FICHIERS_MAX par
+             * rpc_lire_fichiers(), mais on reborne par prudence (defense en
+             * profondeur, meme esprit que `macros`/web_nb_macros_serialisables()
+             * ci-dessus). */
+            klipper_fichiers_t fics;
+            klipper_fichiers_lire(&fics);
+            uint8_t n_fichiers = fics.nb < KLIPPER_FICHIERS_MAX
+                                      ? fics.nb
                                       : (uint8_t)KLIPPER_FICHIERS_MAX;
             const char *noms_fichiers[KLIPPER_FICHIERS_MAX];
             for (uint8_t i = 0; i < n_fichiers; i++) {
-                noms_fichiers[i] = etat.fichiers[i];
+                noms_fichiers[i] = fics.noms[i];
             }
             cJSON_AddItemToObject(etat_json, "fichiers", cJSON_CreateStringArray(noms_fichiers, n_fichiers));
-            cJSON_AddBoolToObject(etat_json, "fichiers_tronques", etat.fichiers_tronques);
+            cJSON_AddBoolToObject(etat_json, "fichiers_tronques", fics.tronques);
 
             cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
             cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);
@@ -422,14 +428,6 @@ static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)
 esp_err_t web_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    /* Pile de la tache httpd relevee : le DEFAUT est 4 Ko, or gestion_state()
-     * pose un `etat_klipper_t etat` sur cette pile (voir plus haut) -- et
-     * sizeof(etat_klipper_t) a double a ~3856 octets depuis le sous-projet
-     * navigateur de fichiers (champ `fichiers[]`), ce qui ne laisse presque rien
-     * a 4 Ko et deborderait sur une reponse /state serialisee un peu profonde.
-     * Meme cause que les piles WS/boucle (voir moonraker_ws.c/boucle.c ; fix
-     * propre a venir = sortir `fichiers[]` de l'etat). 8 Ko laisse la marge. */
-    config.stack_size = 8192;
 
     httpd_handle_t serveur = NULL;
     esp_err_t erreur = httpd_start(&serveur, &config);

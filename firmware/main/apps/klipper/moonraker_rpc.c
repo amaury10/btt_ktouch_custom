@@ -793,11 +793,11 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur)
  * ---------------------------------------------------------------------- */
 
 /* Traite un élément du tableau `result` de `server.files.list` : l'ajoute à
- * `e->fichiers` si c'est bien un objet portant un champ `.path` chaîne et que
- * le chemin tient dans le tampon fixe. Même structure que
- * traiter_candidat_macro() ci-dessus, une différence près : la source est un
- * OBJET (pas une chaîne nue), dont on extrait `.path`. */
-static void traiter_candidat_fichier(etat_klipper_t *e, const cJSON *item)
+ * `f->noms` si c'est bien un objet portant un champ `.path` chaîne et que le
+ * chemin tient dans le tampon fixe. Même structure que traiter_candidat_macro()
+ * ci-dessus, une différence près : la source est un OBJET (pas une chaîne nue),
+ * dont on extrait `.path`. */
+static void traiter_candidat_fichier(klipper_fichiers_t *f, const cJSON *item)
 {
     if (!cJSON_IsObject(item)) {
         return;
@@ -815,22 +815,22 @@ static void traiter_candidat_fichier(etat_klipper_t *e, const cJSON *item)
         /* Trop long pour tenir avec le '\0' : IGNORE, jamais tronque -- un
          * chemin tronque pourrait designer un AUTRE fichier existant (meme
          * raisonnement que traiter_candidat_macro() pour les noms de macro
-         * trop longs). Ne positionne pas `fichiers_tronques`, qui documente
+         * trop longs). Ne positionne pas `tronques`, qui documente
          * specifiquement le depassement du COMPTE (KLIPPER_FICHIERS_MAX),
          * pas une longueur de chemin. */
         return;
     }
-    if (e->nb_fichiers >= KLIPPER_FICHIERS_MAX) {
-        e->fichiers_tronques = true;
+    if (f->nb >= KLIPPER_FICHIERS_MAX) {
+        f->tronques = true;
         return;
     }
-    memcpy(e->fichiers[e->nb_fichiers], nom, len + 1);
-    e->nb_fichiers++;
+    memcpy(f->noms[f->nb], nom, len + 1);
+    f->nb++;
 }
 
-bool rpc_lire_fichiers(etat_klipper_t *etat, const char *json, size_t longueur)
+bool rpc_lire_fichiers(klipper_fichiers_t *dest, const char *json, size_t longueur)
 {
-    if (etat == NULL || json == NULL || longueur == 0) {
+    if (dest == NULL || json == NULL || longueur == 0) {
         return false;
     }
 
@@ -846,18 +846,18 @@ bool rpc_lire_fichiers(etat_klipper_t *etat, const char *json, size_t longueur)
     }
 
     /* Instantane COMPLET (pas une fusion partielle) -- travaille sur une
-     * copie, ecrite en bloc a la fin, meme discipline que rpc_lire_macros(). */
-    etat_klipper_t local = *etat;
-    local.nb_fichiers = 0;
-    local.fichiers_tronques = false;
-    memset(local.fichiers, 0, sizeof(local.fichiers));
+     * locale nulle, ecrite en bloc a la fin dans `*dest`, meme discipline que
+     * rpc_lire_macros() : `*dest` reste INTACT si un cas imprevu apparaissait
+     * (mais ici on ne rend jamais false apres avoir commence a remplir). */
+    klipper_fichiers_t local;
+    memset(&local, 0, sizeof(local));
 
     const cJSON *item = NULL;
     cJSON_ArrayForEach(item, resultat) {
         traiter_candidat_fichier(&local, item);
     }
 
-    *etat = local;
+    *dest = local;
     cJSON_Delete(racine);
     return true;
 }

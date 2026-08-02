@@ -17,6 +17,7 @@
 
 #include "backend.h"
 #include "confirmation.h"
+#include "klipper_fichiers.h"
 #include "klipper_gcode.h"
 #include "source_etat.h"
 
@@ -423,24 +424,32 @@ static void ecran_fichiers_mettre_a_jour(const void *etat, bool donnees_perimees
         return;
     }
 
+    /* La liste de fichiers NE vit plus dans etat_klipper_t (sortie vers un
+     * store dedie, voir klipper_fichiers.h : les ~2 Ko dupliques dans chaque
+     * copie de l'etat epuisaient la RAM interne). On la lit ICI sous verrou
+     * dans une copie locale -- `e` (l'etat) reste passe/verifie par symetrie
+     * avec les autres ecrans, mais n'en porte plus les fichiers. */
+    klipper_fichiers_t fics;
+    klipper_fichiers_lire(&fics);
+
     /* Copie DEFENSIVEMENT bornee AVANT de lire le premier caractere -- meme
      * raisonnement que ecran_macros.c/ecran_accueil.c :
-     * `e->fichiers[i]` peut occuper la totalite de KLIPPER_FICHIER_MAX sans
-     * octet nul (etat_klipper_t est un POD a champs fixes). Aucun filtrage
+     * `fics.noms[i]` peut occuper la totalite de KLIPPER_FICHIER_MAX sans
+     * octet nul (klipper_fichiers_t est un POD a champs fixes). Aucun filtrage
      * par prefixe ici (contrairement aux macros `_prefixees`) -- un chemin
      * de fichier n'a pas cette convention Klipper, voir le commentaire de
      * tete de ecran_fichiers.h -- seuls les emplacements vides (chaine
-     * vide, ne devrait normalement pas arriver dans les indices < nb_fichiers)
+     * vide, ne devrait normalement pas arriver dans les indices < nb)
      * sont sautes, meme garde defensive que ecran_macros.c pour un
      * emplacement vide. */
-    uint8_t nb_fichiers_source = e->nb_fichiers;
+    uint8_t nb_fichiers_source = fics.nb;
     if (nb_fichiers_source > KLIPPER_FICHIERS_MAX) {
         nb_fichiers_source = KLIPPER_FICHIERS_MAX; /* meme borne defensive que ecran_macros.c */
     }
     ctx->nb_fichiers = 0;
     for (uint8_t i = 0; i < nb_fichiers_source; i++) {
         char nom_borne[KLIPPER_FICHIER_MAX + 1];
-        memcpy(nom_borne, e->fichiers[i], KLIPPER_FICHIER_MAX);
+        memcpy(nom_borne, fics.noms[i], KLIPPER_FICHIER_MAX);
         nom_borne[KLIPPER_FICHIER_MAX] = '\0';
         if (nom_borne[0] == '\0') {
             continue; /* emplacement vide */
@@ -455,7 +464,7 @@ static void ecran_fichiers_mettre_a_jour(const void *etat, bool donnees_perimees
         ctx->fichiers_copie[ctx->nb_fichiers][longueur] = '\0';
         ctx->nb_fichiers++;
     }
-    ctx->fichiers_tronques = e->fichiers_tronques;
+    ctx->fichiers_tronques = fics.tronques;
     ctx->donnees_perimees = donnees_perimees;
 
     afficher_page(ctx);

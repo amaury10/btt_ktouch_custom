@@ -90,14 +90,15 @@ void suite_contrat(void)
     printf("  sizeof(etat_klipper_t) = %zu\n", sizeof(etat_klipper_t));
 }
 
-/* Budget releve a ~4 Ko (etait ~2,5 Ko / 3072 avant) : jalon 3b, browser de
- * fichiers gcode (task-1-brief.md) -- ajout de
- * fichiers[KLIPPER_FICHIERS_MAX][KLIPPER_FICHIER_MAX] (32 x 64 = 2048
- * octets), le meme choix de compromis "tampon fixe, memcmp-able" que
- * `macros` ci-dessus, pas de raison de le traiter differemment. sizeof
- * mesure a 3856 au moment de ce changement ; la marge restante (~240 octets)
- * suffit a l'ESP32 (double tampon + copie sous mutex a chaque cycle, voir
- * etat_klipper.h) mais laisse volontairement PEU de place a un futur ajout
- * sans repasser ici. */
-_Static_assert(sizeof(etat_klipper_t) < 4096, "etat v2 : budget ~4 Ko depasse");
+/* Budget ~2,5 Ko : la liste `fichiers[]` (32 x 64 = 2048 octets) qui avait
+ * releve ce budget a ~4 Ko au jalon 3b (browser de fichiers) a ete SORTIE de
+ * etat_klipper_t vers un store dedie (apps/klipper/klipper_fichiers.h) -- cet
+ * etat est un POD copie partout (habillage, boite WS, piles des taches) et les
+ * ~2 Ko dupliques dans chaque copie epuisaient la RAM interne au point que la
+ * tache WebSocket ne pouvait plus s'allouer (« Error create websocket task »).
+ * sizeof revient donc a ~1808 octets. Ce plafond a 3072 (celui d'avant le
+ * browser) garde-fou contre une nouvelle re-integration de gros tampons dans
+ * l'etat toujours-copie : si sizeof le franchit, la personne qui l'a fait doit
+ * venir ici l'assumer (double tampon + copie sous mutex a chaque cycle). */
+_Static_assert(sizeof(etat_klipper_t) < 3072, "etat v2 : budget ~2,5 Ko depasse");
 _Static_assert(KLIPPER_EXTRUDEURS_MAX == 8, "dimensionnement acte au brainstorming jalon 3");
