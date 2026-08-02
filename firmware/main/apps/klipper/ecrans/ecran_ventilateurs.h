@@ -1,6 +1,5 @@
 /* Écran Ventilateurs (sous-projet 4, découpage KlipperScreen -- panneau
- * Fan) : la case de menu "Ventilateurs" de ecran_accueil_hub.c
- * (ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS, jusqu'ici no-op scopé "A venir")
+ * Fan) : la case "Fan" du sous-menu Actions (ecran_actions.c)
  * ouvre CET écran dédié pour régler la vitesse du ventilateur de pièce --
  * même découpage "un panneau KlipperScreen = un écran dédié" que
  * ecran_deplacer.c/ecran_temperatures.c/ecran_extruder.c (sous-projets

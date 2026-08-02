@@ -10,8 +10,8 @@
  *
  * ECART delibere par rapport a l'ancien contenu de ce fichier (pool de
  * tuiles de temperature par palier, geometrie klipper_paliers.h) : le resume
- * n'a plus besoin d'accommoder jusqu'a 8 tetes en grand format -- une seule
- * ligne de texte tronquee (LV_LABEL_LONG_DOT) suffit pour un resume, le
+ * n'a plus besoin d'accommoder jusqu'a 8 tetes en grand format -- quatre
+ * lignes de texte compactes suffisent pour un resume (aucune troncature), le
  * reglage detaille restant derriere la tuile "Temperature" (ECRAN_TEMPERATURES).
  * Le resume est integralement en LECTURE SEULE : aucune de ses quatre lignes
  * n'est LV_OBJ_FLAG_CLICKABLE, contrairement a l'ancien pool de tuiles.

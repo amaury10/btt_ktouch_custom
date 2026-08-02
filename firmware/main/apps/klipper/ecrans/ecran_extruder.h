@@ -1,6 +1,5 @@
 /* Écran Extruder (sous-projet 3, découpage KlipperScreen -- panneau
- * Extruder) : la case de menu "Extruder" de ecran_accueil_hub.c
- * (ECRAN_ACCUEIL_HUB_MENU_EXTRUDER, jusqu'ici no-op scopé "A venir") ouvre
+ * Extruder) : la case "Extrude" du sous-menu Actions (ecran_actions.c) ouvre
  * CET écran dédié pour extruder/rétracter du filament -- même découpage "un
  * panneau KlipperScreen = un écran dédié" que ecran_deplacer.c/
  * ecran_temperatures.c (sous-projet précédent).
