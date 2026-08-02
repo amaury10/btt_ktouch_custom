@@ -23,7 +23,10 @@
 static bool formater_nombre(char *sortie, size_t taille, float valeur, unsigned decimales, bool forcer_signe)
 {
     const char *format = forcer_signe ? "%+.*f" : "%.*f";
-    int ecrit = snprintf(sortie, taille, format, decimales, (double)valeur);
+    /* (int)decimales : `%.*f` lit sa précision via va_arg(int) -- passer un
+     * `unsigned` serait un décalage de type variadique (UB standard, inoffensif
+     * ici mais évité). */
+    int ecrit = snprintf(sortie, taille, format, (int)decimales, (double)valeur);
     if (ecrit < 0 || (size_t)ecrit >= taille) {
         return false;
     }
