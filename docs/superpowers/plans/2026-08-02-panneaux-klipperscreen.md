@@ -8,7 +8,7 @@ sous un sous-menu Configuration, en réutilisant les patterns existants.
 
 **Architecture:** Chaque panneau = un `ecran_desc_t` autonome (contexte
 socle, gcode via klipper_gcode.c + envoyer_gcode). Un sous-menu
-ECRAN_CONFIGURATION (grille texte, idiome de ecran_accueil_hub.c) relie le
+ECRAN_MENU_REGLAGES (grille texte, idiome de ecran_accueil_hub.c) relie le
 tout ; la case « Reglages » du hub y mène. Deux panneaux (Limits, Retraction)
 ajoutent quelques `float` relus à `etat_klipper_t` + abonnement Moonraker.
 
@@ -349,16 +349,25 @@ par l'id dans une petite table. Préférer (a) : plus simple, pas de lookup.
 
 ### Task 8: Sous-menu Configuration + câblage du hub
 
+**COLLISION DE NOMS (découverte pendant Task 5) :** `ECRAN_CONFIGURATION` /
+`ecran_configuration.{h,c}` EXISTENT DÉJÀ — c'est l'écran de PREMIÈRE
+configuration (adresse imprimante + type machine + Save, montré au boot si non
+configuré, app_main.c/reglages_configures()). NE PAS le toucher/écraser. Le
+sous-menu de réglages de cette tâche s'appelle donc `ECRAN_MENU_REGLAGES`
+(fichiers `ecran_menu_reglages.{h,c}`, id `"menu_reglages"`, titre affiché
+« Configuration »).
+
 **Files:**
-- Create: `firmware/main/apps/klipper/ecrans/ecran_configuration.{h,c}`
+- Create: `firmware/main/apps/klipper/ecrans/ecran_menu_reglages.{h,c}`
 - Modify: `firmware/main/apps/klipper/ecrans/ecran_accueil_hub.c` (câbler la
-  case `ECRAN_ACCUEIL_HUB_MENU_REGLAGES` → `navigation_empiler(&ECRAN_CONFIGURATION)`,
+  case `ECRAN_ACCUEIL_HUB_MENU_REGLAGES` → `navigation_empiler(&ECRAN_MENU_REGLAGES)`,
   retirer le sous-titre « A venir »).
-- Modify: `firmware/main/CMakeLists.txt`, `simulateur/main.c` (`--ecran config`).
+- Modify: `firmware/main/CMakeLists.txt`, `simulateur/CMakeLists.txt`,
+  `simulateur/main.c` (`--ecran menu`).
 
 **Interfaces — Consumes:** tous les `ECRAN_*` des Tasks 2-7 + `ECRAN_REGLAGES_WIFI`
 (existant, titre « Network »).
-**Produces:** `extern const ecran_desc_t ECRAN_CONFIGURATION;` id=`"configuration"` titre=`"Configuration"`.
+**Produces:** `extern const ecran_desc_t ECRAN_MENU_REGLAGES;` id=`"menu_reglages"` titre=`"Configuration"`.
 
 Grille de boutons texte (idiome ecran_accueil_hub.c), une case par panneau,
 chacune `navigation_empiler(&ECRAN_*)` : Fine Tune, Z Calibrate, Bed Level,
@@ -369,7 +378,7 @@ La grille défile si nécessaire (LV_OBJ_FLAG_SCROLLABLE autorisé ici,
 contrairement au hub) — mais préférer une grille fixe qui tient dans 436 px si
 12 cases y rentrent (cases ~52 px ×4 lignes + écarts ≈ 232 px : OK sans scroll).
 
-- [ ] **Step 1** Test host : construire ECRAN_CONFIGURATION ne plante pas ;
+- [ ] **Step 1** Test host : construire ECRAN_MENU_REGLAGES ne plante pas ;
   après construire, un clic sur la case Fine Tune empile bien un écran (via le
   faux de navigation du host-test s'il existe — sinon vérifier que le cb est
   bien attaché, comme les tests du hub).
@@ -391,6 +400,6 @@ contrairement au hub) — mais préférer une grille fixe qui tient dans 436 px 
 - ASCII/anglais, contrat ecran_desc_t, grisage C3, ≥44 px, sim flag : rappelés
   par tâche. ✅
 - Cohérence des noms : `ECRAN_REGLAGE_FIN`, `ECRAN_ZCALIBRATE`,
-  `ECRAN_NIVEAU_LIT`, `ECRAN_LIMITES`, `ECRAN_RETRACTION`, `ECRAN_CONFIGURATION`
+  `ECRAN_NIVEAU_LIT`, `ECRAN_LIMITES`, `ECRAN_RETRACTION`, `ECRAN_MENU_REGLAGES`
   + 6 stubs + gcode enums/signatures — identiques entre Produces (Task 1/2-7)
   et Consumes (Task 8). ✅
