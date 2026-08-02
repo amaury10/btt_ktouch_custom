@@ -1,10 +1,16 @@
 /* Sous-menu Configuration (sous-projet "panneaux KlipperScreen", tache 8) :
- * la grille qui relie les douze panneaux de reglage entre eux -- Fine Tune,
- * Z Calibrate, Bed Level, Limits, Retraction (tache 2-6), Network (existant,
- * sous-projet 7 tache 4) et les six stubs Power/Bed Mesh/Input
- * Shaper/Spoolman/Updater/Console (tache 7). Sans ce sous-menu, aucun de ces
- * panneaux n'est atteignable depuis le hub -- c'est l'epine dorsale de
- * navigation de tout le catalogue KlipperScreen de ce depot.
+ * la grille qui relie onze panneaux de reglage entre eux -- Z Calibrate, Bed
+ * Level, Limits, Retraction (tache 2-6), Network (existant, sous-projet 7
+ * tache 4) et les six stubs Power/Bed Mesh/Input Shaper/Spoolman/Updater/
+ * Console (tache 7). Sans ce sous-menu, aucun de ces panneaux n'est
+ * atteignable depuis le hub -- c'est l'epine dorsale de navigation de tout le
+ * catalogue KlipperScreen de ce depot.
+ *
+ * Fine Tune n'est PLUS ici (sous-projet "refonte IHM KlipperScreen", tache 5) :
+ * KlipperScreen le place dans le flux d'impression (Job Status), pas dans
+ * Configuration -- voir ecran_accueil.c, qui l'a recu a la place. La grille
+ * reste 3 colonnes x 4 lignes (12 cases) pour ne pas retoucher sa geometrie
+ * deja revue ; la douzieme case (derniere rangee) reste simplement vide.
  *
  * ATTENTION COLLISION DE NOMS : `ECRAN_CONFIGURATION` / ecran_configuration.h
  * EXISTENT DEJA et designent l'ecran de PREMIERE configuration de l'appareil
@@ -32,25 +38,26 @@
 #include "ecran.h"
 #include "lvgl.h"
 
-/* Grille 3 colonnes x 4 lignes, ORDRE FIXE -- meme convention de tableau que
- * `menu_boutons[i]`/ECRAN_ACCUEIL_HUB_MENU_* dans ecran_accueil_hub.h :
- * `boutons[i]` est TOUJOURS le bouton de la case `i`, quel que soit l'ordre
- * de creation interne. Ordre choisi : les cinq panneaux de reglage propres a
- * ce jalon (Fine Tune, Z Calibrate, Bed Level, Limits, Retraction), puis
- * Network (existant), puis les six stubs dans l'ordre du brief de la tache 7. */
-#define ECRAN_MENU_REGLAGES_CASE_FINE_TUNE     0
-#define ECRAN_MENU_REGLAGES_CASE_ZCALIBRATE    1
-#define ECRAN_MENU_REGLAGES_CASE_BED_LEVEL     2
-#define ECRAN_MENU_REGLAGES_CASE_LIMITS        3
-#define ECRAN_MENU_REGLAGES_CASE_RETRACTION    4
-#define ECRAN_MENU_REGLAGES_CASE_NETWORK       5
-#define ECRAN_MENU_REGLAGES_CASE_POWER         6
-#define ECRAN_MENU_REGLAGES_CASE_BED_MESH      7
-#define ECRAN_MENU_REGLAGES_CASE_INPUT_SHAPER  8
-#define ECRAN_MENU_REGLAGES_CASE_SPOOLMAN      9
-#define ECRAN_MENU_REGLAGES_CASE_UPDATER      10
-#define ECRAN_MENU_REGLAGES_CASE_CONSOLE      11
-#define ECRAN_MENU_REGLAGES_NB                12
+/* Grille 3 colonnes x 4 lignes (12 cases, ONZE peuplees -- voir le
+ * commentaire de tete sur Fine Tune), ORDRE FIXE -- meme convention de
+ * tableau que `menu_boutons[i]`/ECRAN_ACCUEIL_HUB_MENU_* dans
+ * ecran_accueil_hub.h : `boutons[i]` est TOUJOURS le bouton de la case `i`,
+ * quel que soit l'ordre de creation interne. Ordre choisi : les quatre
+ * panneaux de reglage propres a ce jalon (Z Calibrate, Bed Level, Limits,
+ * Retraction), puis Network (existant), puis les six stubs dans l'ordre du
+ * brief de la tache 7. */
+#define ECRAN_MENU_REGLAGES_CASE_ZCALIBRATE    0
+#define ECRAN_MENU_REGLAGES_CASE_BED_LEVEL     1
+#define ECRAN_MENU_REGLAGES_CASE_LIMITS        2
+#define ECRAN_MENU_REGLAGES_CASE_RETRACTION    3
+#define ECRAN_MENU_REGLAGES_CASE_NETWORK       4
+#define ECRAN_MENU_REGLAGES_CASE_POWER         5
+#define ECRAN_MENU_REGLAGES_CASE_BED_MESH      6
+#define ECRAN_MENU_REGLAGES_CASE_INPUT_SHAPER  7
+#define ECRAN_MENU_REGLAGES_CASE_SPOOLMAN      8
+#define ECRAN_MENU_REGLAGES_CASE_UPDATER       9
+#define ECRAN_MENU_REGLAGES_CASE_CONSOLE      10
+#define ECRAN_MENU_REGLAGES_NB                11
 
 typedef struct ecran_menu_reglages_ctx_s {
     lv_obj_t *zone_grille;

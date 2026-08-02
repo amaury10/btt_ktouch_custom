@@ -1,12 +1,14 @@
 /* Sous-projet "panneaux KlipperScreen", tache 8 : le sous-menu Configuration
  * (ECRAN_MENU_REGLAGES, id "menu_reglages" -- PAS ECRAN_CONFIGURATION, voir
- * ecran_menu_reglages.h pour la note de collision de noms) -- grille de 12
- * cases qui relient chacune un panneau de reglage distinct.
+ * ecran_menu_reglages.h pour la note de collision de noms) -- grille de 11
+ * cases qui relient chacune un panneau de reglage distinct (Fine Tune est
+ * parti vers ecran_accueil.c, sous-projet "refonte IHM KlipperScreen" tache 5
+ * -- voir test_ecran_accueil.c).
  *
  * Deux parties, meme technique que test_ecran_accueil_hub.c (voir son
  * commentaire de tete pour le detail du choix) : la premiere construit
  * ECRAN_MENU_REGLAGES directement (calloc du contexte a la taille du
- * descripteur) pour prouver que `construire()` cree bien les 12 boutons avec
+ * descripteur) pour prouver que `construire()` cree bien les 11 boutons avec
  * les bons libelles ; la seconde empile REELLEMENT ECRAN_MENU_REGLAGES via
  * navigation_empiler() et clique sur chaque case pour prouver que le rappel
  * attache empile bien le panneau attendu (et depile a nouveau). Une
@@ -47,7 +49,6 @@ static const struct {
     const char *libelle;
     const char *id_cible;
 } CASES_ATTENDUES[ECRAN_MENU_REGLAGES_NB] = {
-    [ECRAN_MENU_REGLAGES_CASE_FINE_TUNE]     = { "Fine Tune",     "reglage_fin" },
     [ECRAN_MENU_REGLAGES_CASE_ZCALIBRATE]    = { "Z Calibrate",   "zcalibrate" },
     [ECRAN_MENU_REGLAGES_CASE_BED_LEVEL]     = { "Bed Level",     "niveau_lit" },
     [ECRAN_MENU_REGLAGES_CASE_LIMITS]        = { "Limits",        "limites" },
@@ -72,7 +73,7 @@ void suite_ecran_menu_reglages(void)
     }
 
     /* ---------------------------------------------------------------------
-     * Partie 1 : construction directe -- les 12 widgets sont crees, avec
+     * Partie 1 : construction directe -- les 11 widgets sont crees, avec
      * les bons libelles. --------------------------------------------------- */
     lv_obj_t *parent = lv_obj_create(lv_screen_active());
     void *brut = calloc(1, ECRAN_MENU_REGLAGES.taille_contexte);
@@ -91,7 +92,7 @@ void suite_ecran_menu_reglages(void)
 
     /* ---------------------------------------------------------------------
      * Partie 2 : navigation reelle -- empile ECRAN_MENU_REGLAGES, clique
-     * chacune des 12 cases, verifie la pile. Voir le commentaire de tete de
+     * chacune des 11 cases, verifie la pile. Voir le commentaire de tete de
      * ce fichier pour pourquoi une construction separee est necessaire ici
      * (meme raison que test_ecran_accueil_hub.c). ------------------------- */
     navigation_init(lv_screen_active()); /* pile vide, meme technique defensive que les autres suites */

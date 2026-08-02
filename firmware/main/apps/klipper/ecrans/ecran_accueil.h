@@ -12,6 +12,13 @@
  * ne fait qu'empiler et rendre la main, jamais d'appel bloquant depuis ce
  * rappel LVGL (voir son propre commentaire).
  *
+ * Tache 5 (sous-projet "refonte IHM KlipperScreen") : bouton "Fine Tune",
+ * a la place ou KlipperScreen le met reellement -- l'ecran de statut
+ * d'impression (Job Status), pas le sous-menu Configuration (voir
+ * ecran_menu_reglages.c, qui ne le referme plus). Pure navigation
+ * (`navigation_empiler(&ECRAN_REGLAGE_FIN)`), meme idiome que le bouton
+ * Macros de la tache 6 -- pas de passage par ui_commander().
+ *
  * `ecran_accueil_ctx_t` est exposé ici plutôt qu'opaque (contrairement à
  * l'esprit "l'écran ne connaît que void *contexte" de ecran.h) pour deux
  * raisons : il n'embarque que des lv_obj_t* et des sous-widgets déjà
@@ -43,6 +50,13 @@ typedef struct {
      * ecran_accueil.c) : « jamais un bouton mort » (meme principe que le
      * bouton Imprimer de la spec, differe tant que 3d n'est pas livre). */
     lv_obj_t      *bouton_macros;
+    /* Tache 5 (sous-projet "refonte IHM KlipperScreen") : navigue vers
+     * ECRAN_REGLAGE_FIN -- toujours visible (contrairement a bouton_macros
+     * ci-dessus) : cet ecran n'apparait que pendant une impression active
+     * (voir le commentaire de tete de ce fichier), Fine Tune y est donc
+     * TOUJOURS pertinent, meme raisonnement que bouton_pause/_annuler/
+     * _urgence qui ne se masquent jamais non plus. */
+    lv_obj_t      *bouton_reglage_fin;
     /* Deux valeurs mémorisées par mettre_a_jour(), relues par les rappels de
      * clic (voir ecran_accueil.c) : quelle action Pause doit envoyer, et si
      * les trois boutons doivent ignorer un clic tant que les données sont

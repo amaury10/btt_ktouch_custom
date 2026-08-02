@@ -15,6 +15,7 @@
 #include "backend.h"
 #include "confirmation.h"
 #include "ecran_macros.h"
+#include "ecran_reglage_fin.h" /* ECRAN_REGLAGE_FIN, tache 5 */
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "navigation.h"
@@ -66,11 +67,24 @@
  * boutons de commande existants, jamais insere DANS cette rangee (les trois
  * boutons s'y partagent deja quasiment tout LARGEUR_CONTENU -- 740/742px,
  * voir le _Static_assert plus bas -- y ajouter un quatrieme aurait force a
- * retoucher une geometrie deja revue au jalon 2b). Pleine largeur, pour la
- * doleance n1 du projet : ce n'est pas un bouton parmi d'autres. */
+ * retoucher une geometrie deja revue au jalon 2b).
+ *
+ * Tache 5 (sous-projet "refonte IHM KlipperScreen") : cette rangee n'est
+ * plus SEULEMENT Macros -- elle se partage desormais en DEUX moities egales
+ * avec le nouveau bouton "Fine Tune" (KlipperScreen le place dans le flux
+ * d'impression, pas dans Configuration -- voir ecran_menu_reglages.c, qui ne
+ * le referme plus). Pas de TROISIEME rangee pleine largeur possible : le bas
+ * du contenu est deja serre (voir MACROS_BOUTON_Y, tout juste sous
+ * HAUTEUR_CONTENU, _Static_assert plus bas). RANGEE2_BOUTON_LARGEUR reprend
+ * TUILE_LARGEUR (meme largeur que les tuiles de temperature en haut de
+ * l'ecran, meme ecart MARGE entre les deux) plutot qu'une valeur arbitraire,
+ * pour garder le meme rythme visuel que la rangee de tuiles. */
 #define MACROS_BOUTON_Y       (BOUTONS_Y + BOUTON_HAUTEUR + 20)
 #define MACROS_BOUTON_HAUTEUR 60
-#define MACROS_BOUTON_LARGEUR (LARGEUR_CONTENU - 2 * MARGE)
+#define RANGEE2_BOUTON_LARGEUR TUILE_LARGEUR
+#define RANGEE2_ECART           MARGE
+
+#define FINE_TUNE_BOUTON_X (MARGE + RANGEE2_BOUTON_LARGEUR + RANGEE2_ECART)
 
 #define COULEUR_FOND             0x10161D
 #define COULEUR_TEXTE_SECONDAIRE 0xC9D1D9
@@ -107,7 +121,12 @@ _Static_assert(3 * MARGE + 2 * TUILE_LARGEUR == LARGEUR_CONTENU,
 _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_CONTENU,
                 "les trois boutons + marges/ecarts debordent de la largeur du contenu");
 _Static_assert(MACROS_BOUTON_Y + MACROS_BOUTON_HAUTEUR <= HAUTEUR_CONTENU,
-                "le bouton Macros deborde de la hauteur du contenu");
+                "la rangee Macros/Fine Tune deborde de la hauteur du contenu");
+/* Tache 5 : meme garde-fou de symetrie que la rangee de tuiles ci-dessus,
+ * applique a la rangee Macros/Fine Tune -- deux boutons de meme largeur,
+ * un seul ecart entre eux, marge gauche == marge droite. */
+_Static_assert(2 * MARGE + 2 * RANGEE2_BOUTON_LARGEUR + RANGEE2_ECART == LARGEUR_CONTENU,
+                "la rangee Macros/Fine Tune n'est plus symetrique (marge gauche != marge droite)");
 
 /* Construit le bouton lui-même (taille, position, couleur, libellé initial) ;
  * ne pose AUCUN lv_obj_add_event_cb() -- c'est le travail de l'appelant, dans
@@ -309,6 +328,19 @@ static void bouton_macros_cb(lv_event_t *e)
     navigation_empiler(&ECRAN_MACROS);
 }
 
+/* Tache 5 (sous-projet "refonte IHM KlipperScreen") : navigue vers
+ * ECRAN_REGLAGE_FIN -- meme raisonnement que bouton_macros_cb() ci-dessus,
+ * une navigation, pas une commande, donc aucun passage par
+ * ui_commander()/executer_commande() ni garde sur ctx->donnees_perimees :
+ * ouvrir le panneau Fine Tune reste sans risque hors ligne, comme n'importe
+ * quel autre panneau atteint depuis un menu (meme contrat que
+ * ecran_menu_reglages.c, qui l'atteignait jusqu'ici). */
+static void bouton_reglage_fin_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_REGLAGE_FIN);
+}
+
 static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
 {
     ecran_accueil_ctx_t *ctx = contexte;
@@ -378,10 +410,19 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
      * plutot que d'ajouter un parametre position a une fonction partagee par
      * trois boutons qui, eux, n'en ont jamais besoin. */
     ctx->bouton_macros = bouton_creer(parent, "Macros", COULEUR_BOUTON, MARGE);
-    lv_obj_set_size(ctx->bouton_macros, MACROS_BOUTON_LARGEUR, MACROS_BOUTON_HAUTEUR);
+    lv_obj_set_size(ctx->bouton_macros, RANGEE2_BOUTON_LARGEUR, MACROS_BOUTON_HAUTEUR);
     lv_obj_set_pos(ctx->bouton_macros, MARGE, MACROS_BOUTON_Y);
     lv_obj_add_event_cb(ctx->bouton_macros, bouton_macros_cb, LV_EVENT_CLICKED, ctx);
     lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN); /* visible seulement si nb_macros > 0, voir mettre_a_jour() */
+
+    /* Tache 5 : moitie droite de la meme rangee -- toujours visible
+     * (contrairement a Macros juste au-dessus), voir le commentaire de
+     * ecran_accueil.h sur bouton_reglage_fin pour pourquoi aucun grisage/
+     * masquage n'est necessaire ici. */
+    ctx->bouton_reglage_fin = bouton_creer(parent, "Fine Tune", COULEUR_BOUTON, FINE_TUNE_BOUTON_X);
+    lv_obj_set_size(ctx->bouton_reglage_fin, RANGEE2_BOUTON_LARGEUR, MACROS_BOUTON_HAUTEUR);
+    lv_obj_set_pos(ctx->bouton_reglage_fin, FINE_TUNE_BOUTON_X, MACROS_BOUTON_Y);
+    lv_obj_add_event_cb(ctx->bouton_reglage_fin, bouton_reglage_fin_cb, LV_EVENT_CLICKED, ctx);
 }
 
 static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)

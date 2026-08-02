@@ -4,14 +4,15 @@
  *
  * Mise en page (742x436, dans le conteneur de navigation a droite du rail
  * persistant, sous la barre d'etat construite par habillage.c) : une seule
- * grille de 12 cases (3 colonnes x 4 lignes), CENTREE verticalement dans le
- * contenu -- aucune zone de temperature au-dessus, contrairement au hub
- * (ecran_accueil_hub.c), dont ce fichier reprend neanmoins l'idiome de grille
- * a cases fixes (position calculee, `_Static_assert` de non-debordement +
- * clearance du bandeau).
+ * grille de 12 cases (3 colonnes x 4 lignes, ONZE peuplees -- voir
+ * ecran_menu_reglages.h, Fine Tune est parti vers ecran_accueil.c),
+ * CENTREE verticalement dans le contenu -- aucune zone de temperature
+ * au-dessus, contrairement au hub (ecran_accueil_hub.c), dont ce fichier
+ * reprend neanmoins l'idiome de grille a cases fixes (position calculee,
+ * `_Static_assert` de non-debordement + clearance du bandeau).
  *
- * BOUTONS(X) liste les douze cases (indice, libelle, symbole ECRAN_*) -- X()
- * est instanciee deux fois plus bas : une premiere pour generer les douze
+ * BOUTONS(X) liste les onze cases (indice, libelle, symbole ECRAN_*) -- X()
+ * est instanciee deux fois plus bas : une premiere pour generer les onze
  * rappels de clic `menu_reglages_cb_<symbole>()` (chacun ferme sur son propre
  * `navigation_empiler(&<symbole>)`, meme X-macro que STUBS() dans
  * ecran_stub.c), une seconde pour peupler la table MENU_REGLAGES_DEFS (paire
@@ -22,7 +23,6 @@
 
 #include "ecran_limites.h"       /* ECRAN_LIMITES */
 #include "ecran_niveau_lit.h"    /* ECRAN_NIVEAU_LIT */
-#include "ecran_reglage_fin.h"   /* ECRAN_REGLAGE_FIN */
 #include "ecran_reglages_wifi.h" /* ECRAN_REGLAGES_WIFI */
 #include "ecran_retraction.h"    /* ECRAN_RETRACTION */
 #include "ecran_stub.h"          /* ECRAN_POWER/ECRAN_BED_MESH/ECRAN_INPUT_SHAPER/ECRAN_SPOOLMAN/ECRAN_UPDATER/ECRAN_CONSOLE */
@@ -82,14 +82,13 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + GRILLE_Y + GRILLE_HAUTEUR <= BANDEAU_Y_ECRA
 #define COULEUR_BOUTON       0x2A3644
 #define COULEUR_TEXTE_BOUTON 0xFFFFFF
 
-/* --- Table maitresse des douze cases -- symbole du descripteur cible de
+/* --- Table maitresse des onze cases -- symbole du descripteur cible de
  * chaque case, libelle affiche, ORDRE = ordre de remplissage de la grille
  * (rangee par rangee, voir ecran_menu_reglages.h pour les indices
  * ECRAN_MENU_REGLAGES_CASE_*). Valeurs EXACTES du brief de la tache,
  * verbatim -- ASCII/anglais, meme discipline que le reste de ce depot (voir
  * ecran_accueil_hub.c, "Libelles de menu SANS accent"). ------------------- */
 #define BOUTONS(X)                                                                                                    \
-    X(ECRAN_MENU_REGLAGES_CASE_FINE_TUNE, "Fine Tune", ECRAN_REGLAGE_FIN)                                             \
     X(ECRAN_MENU_REGLAGES_CASE_ZCALIBRATE, "Z Calibrate", ECRAN_ZCALIBRATE)                                           \
     X(ECRAN_MENU_REGLAGES_CASE_BED_LEVEL, "Bed Level", ECRAN_NIVEAU_LIT)                                              \
     X(ECRAN_MENU_REGLAGES_CASE_LIMITS, "Limits", ECRAN_LIMITES)                                                       \
@@ -144,8 +143,11 @@ static void ecran_menu_reglages_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* --- grille, 12 cases a taille fixe (voir GRILLE_* en tete de fichier) --
-     * meme idiome que la grille de menu de ecran_accueil_hub.c. ----------- */
+    /* --- grille, 12 cases a taille fixe (ONZE peuplees, voir GRILLE_* en
+     * tete de fichier) -- meme idiome que la grille de menu de
+     * ecran_accueil_hub.c. La boucle ci-dessous s'arrete a
+     * ECRAN_MENU_REGLAGES_NB (11) : la douzieme case (derniere rangee)
+     * reste simplement vide, aucune retouche de geometrie necessaire. ----- */
     ctx->zone_grille = lv_obj_create(parent);
     lv_obj_remove_style_all(ctx->zone_grille);
     lv_obj_clear_flag(ctx->zone_grille, LV_OBJ_FLAG_SCROLLABLE);

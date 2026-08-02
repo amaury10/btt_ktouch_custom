@@ -10,14 +10,23 @@
  * teste UNIQUEMENT le contrat de cet écran, pas celui de la pile de
  * navigation (déjà couverte par test_navigation.c) -- navigation_empiler()
  * ajouterait une dépendance à navigation_init()/lv_screen_active() sans
- * rien prouver de plus sur ecran_accueil.c lui-même. */
+ * rien prouver de plus sur ecran_accueil.c lui-même.
+ *
+ * Exception, tâche 5 (sous-projet "refonte IHM KlipperScreen") : le bouton
+ * "Fine Tune" en fin de fichier appelle bel et bien navigation_init() puis
+ * clique le widget déjà construit ci-dessus -- seule façon de prouver que ce
+ * bouton précis empile ECRAN_REGLAGE_FIN (et pas un autre écran), même
+ * technique que la partie 3 de test_ecran_menu_reglages.c pour la tuile
+ * "Configuration" du hub. */
 #include <stdlib.h>
 #include <string.h>
 
 #include "lvgl.h"
 
 #include "ecran_accueil.h"
+#include "ecran_reglage_fin.h"
 #include "etat_klipper.h"
+#include "navigation.h"
 #include "petit_test.h"
 
 void suite_ecran_accueil(void)
@@ -40,6 +49,7 @@ void suite_ecran_accueil(void)
     VERIFIER(ctx->bouton_annuler != NULL);
     VERIFIER(ctx->bouton_urgence != NULL);
     VERIFIER(ctx->bouton_macros != NULL);
+    VERIFIER(ctx->bouton_reglage_fin != NULL);
 
     /* --- etat entierement a zero : rien ne doit planter ; temps restant a 0
      * encode "inconnu" (voir KLIPPER_TEMPS_RESTANT_MAX_S dans
@@ -198,6 +208,26 @@ void suite_ecran_accueil(void)
     VERIFIER(!lv_color_eq(normal_fichier, lv_color_hex(0x6B7280)));
     lv_color_t normal_temps = lv_obj_get_style_text_color(ctx->temps, 0);
     VERIFIER(!lv_color_eq(normal_temps, lv_color_hex(0x6B7280)));
+
+    /* --- Tache 5 (sous-projet "refonte IHM KlipperScreen") : le bouton
+     * "Fine Tune" empile bien ECRAN_REGLAGE_FIN -- KlipperScreen le place
+     * dans le flux d'impression (cet ecran), pas dans Configuration (voir
+     * ecran_menu_reglages.c, qui ne le referme plus, et
+     * test_ecran_menu_reglages.c, qui ne l'attend plus). navigation_init()
+     * sur une pile vide, puis clic direct sur le widget deja construit
+     * ci-dessus (meme technique que le clic direct exerce par
+     * test_commandes.c sur les boutons Pause/Cancel/E-STOP de ce meme
+     * fichier) -- pas besoin de repasser par navigation_empiler(&ECRAN_ACCUEIL)
+     * pour prouver ce cablage precis. */
+    /* Pas de navigation_depiler() ensuite : la pile ne descend jamais sous 1
+     * ecran une fois peuplee (voir navigation.h) -- inutile ici, la suite
+     * suivante qui appelle navigation_init() nettoiera cette pile avant de
+     * repartir de zero, meme discipline que la partie 3 de
+     * test_ecran_menu_reglages.c. */
+    navigation_init(lv_screen_active());
+    lv_obj_send_event(ctx->bouton_reglage_fin, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 1);
+    VERIFIER_TEXTE(navigation_id_courant(), "reglage_fin");
 
     lv_obj_delete(parent);
     free(brut);
