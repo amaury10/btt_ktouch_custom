@@ -866,7 +866,7 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
      * de cJSON_ParseWithLength() sur le payload.
      *
      * 16 Ko suffit MAINTENANT que sizeof(etat_klipper_t) vaut ~1840 octets
-     * (1808 d'origine + 32 pour les 8 scalaires limite_*/retr_* des panneaux
+     * (1808 d'origine + 32 pour les 8 scalaires limite_ et retr_ des panneaux
      * Limits/Retraction, jalon panneaux KlipperScreen) : la liste `fichiers[]`
      * (qui avait double la taille de l'etat a
      * ~3856 octets) a ete sortie de l'etat vers un store dedie
