@@ -213,6 +213,13 @@ static void chart_ajouter_serie(ecran_accueil_hub_ctx_t *ctx, uint8_t i)
     for (size_t k = 0; k < n; k++) {
         lv_chart_set_next_value(ctx->chart, ctx->serie[i], tampon[k]);
     }
+    /* Applique l'etat de visibilite stocke AU MOMENT DE LA CREATION : une serie
+     * peut naitre APRES que l'utilisateur a masque son chauffant (toggle sur le
+     * nom pendant la fenetre de boot ou serie[i]==NULL). Sans ceci, la courbe
+     * naitrait visible alors que le nom est grise -- le nom promet justement (voir
+     * chauffant_nom_cb()) que le masquage "s'appliquera des que la serie existe".
+     * A construire() tous les serie_visible[] valent true -> hide(false) = no-op. */
+    lv_chart_hide_series(ctx->chart, ctx->serie[i], !ctx->serie_visible[i]);
 }
 
 /* Ecrit "%.1f" si `reference` est vrai, "--" sinon -- copie de formater_axe()
