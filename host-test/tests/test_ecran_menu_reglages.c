@@ -10,9 +10,12 @@
  * les bons libelles ; la seconde empile REELLEMENT ECRAN_MENU_REGLAGES via
  * navigation_empiler() et clique sur chaque case pour prouver que le rappel
  * attache empile bien le panneau attendu (et depile a nouveau). Une
- * troisieme partie prouve que la case "Reglages" du hub (ecran_accueil_hub.c,
- * tache 8 de ce meme sous-projet) navigue desormais reellement vers
- * ECRAN_MENU_REGLAGES -- elle n'est plus no-op.
+ * troisieme partie prouve que la tuile "Configuration" du hub
+ * (ecran_accueil_hub.c, sous-projet "refonte IHM KlipperScreen" tache 4,
+ * main_panel) navigue reellement vers ECRAN_MENU_REGLAGES -- couverture
+ * conservee ici par coherence historique (tache 8) meme si
+ * test_ecran_accueil_hub.c verifie deja les cinq tuiles du hub, dont
+ * celle-ci, de facon exhaustive.
  *
  * DOIT rester APRES suite_ecran_configuration() (habillage construit, voir
  * habillage_est_construit()) ET suite_commandes() (boucle simulee demarree,
@@ -122,10 +125,10 @@ void suite_ecran_menu_reglages(void)
     }
 
     /* ---------------------------------------------------------------------
-     * Partie 3 : la case "Reglages" du hub (ecran_accueil_hub.c) navigue
-     * desormais reellement vers ECRAN_MENU_REGLAGES -- elle n'est plus
-     * no-op (voir ouvrir_menu_reglages_cb(), meme tache). Meme technique de
-     * parcours/clic que test_ecran_accueil_hub.c pour ses autres cases. --- */
+     * Partie 3 : la tuile "Configuration" du hub (ecran_accueil_hub.c,
+     * main_panel) navigue reellement vers ECRAN_MENU_REGLAGES -- meme
+     * technique de parcours/clic que test_ecran_accueil_hub.c pour ses
+     * autres tuiles. --------------------------------------------------- */
     navigation_init(lv_screen_active());
     VERIFIER(navigation_empiler(&ECRAN_ACCUEIL_HUB) == ESP_OK);
     VERIFIER(navigation_profondeur() == 1);
@@ -139,11 +142,11 @@ void suite_ecran_menu_reglages(void)
     VERIFIER(conteneur_hub != NULL);
     lv_obj_t *zone_menu = lv_obj_get_child(conteneur_hub, lv_obj_get_child_count(conteneur_hub) - 1);
     VERIFIER(zone_menu != NULL);
-    lv_obj_t *bouton_reglages = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_REGLAGES);
-    VERIFIER(bouton_reglages != NULL);
-    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_reglages, 0)), "Reglages");
+    lv_obj_t *bouton_configuration = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_CONFIGURATION);
+    VERIFIER(bouton_configuration != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_configuration, 0)), "Configuration");
 
-    lv_obj_send_event(bouton_reglages, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(bouton_configuration, LV_EVENT_CLICKED, NULL);
     VERIFIER(navigation_profondeur() == 2);
     VERIFIER_TEXTE(navigation_id_courant(), "menu_reglages");
 
