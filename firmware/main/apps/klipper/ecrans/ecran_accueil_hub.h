@@ -12,18 +12,22 @@
  * le chooser d'habillage (accueil_choix.h) le reference -- aucun des trois ne
  * bouge, seul le CONTENU change.
  *
- * Lignes de chauffants (tache 4 du sous-projet "graphes de temperature",
- * task-4-brief.md) : nom ("T0"/"Bed") et valeur ("actuelle/consigne") sont
- * deux `lv_label_t` DISTINCTS et adjacents, jamais un texte concatene comme
- * l'ancienne ligne de temperatures -- c'est precisement ce qui a permis a
- * cette tache de poser LV_OBJ_FLAG_CLICKABLE SEULEMENT sur le label VALEUR
- * (chauffant_valeur[i]) sans retoucher la mise en page. Taper la VALEUR ouvre
- * le clavier numerique pour editer la consigne de CE chauffant precis --
- * meme parsing/bornes que ecran_temperatures.c (reference, voir le .c).
- * Le label NOM (chauffant_nom[i]) reste EN LECTURE SEULE dans cette tache
- * (tache 5 du meme sous-projet le rendra cliquable). Regler une temperature
- * reste aussi possible via la tuile "Temperature", qui ouvre ECRAN_TEMPERATURES
- * (cible deja cliquable).
+ * Lignes de chauffants (taches 4 et 5 du sous-projet "graphes de
+ * temperature", task-4-brief.md/task-5-brief.md) : nom ("T0"/"Bed") et valeur
+ * ("actuelle/consigne") sont deux `lv_label_t` DISTINCTS et adjacents, jamais
+ * un texte concatene comme l'ancienne ligne de temperatures -- c'est
+ * precisement ce qui a permis a la tache 4 de poser LV_OBJ_FLAG_CLICKABLE sur
+ * le label VALEUR (chauffant_valeur[i]) SANS retoucher la mise en page, puis
+ * a la tache 5 de faire de meme sur le label NOM (chauffant_nom[i]) pour un
+ * raccourci DIFFERENT. Taper la VALEUR ouvre le clavier numerique pour
+ * editer la consigne de CE chauffant precis -- meme parsing/bornes que
+ * ecran_temperatures.c (reference, voir le .c). Taper le NOM bascule
+ * l'affichage de la courbe de CE chauffant sur le graphe (`serie_visible[]`
+ * ci-dessous) et grise le label NOM quand la courbe est masquee -- voir
+ * chauffant_nom_cb() dans le .c pour le detail, y compris la reconciliation
+ * avec le grisage C3 (donnees perimees). Regler une temperature reste aussi
+ * possible via la tuile "Temperature", qui ouvre ECRAN_TEMPERATURES (cible
+ * deja cliquable).
  *
  * Le graphe (`chart`) lit exclusivement klipper_temp_historique.h (tache 1 du
  * meme sous-projet) : jamais de copie du tampon circulaire entier, voir
@@ -95,9 +99,13 @@ typedef struct ecran_accueil_hub_ctx_s {
     /* --- colonne gauche : lignes de chauffants -- `chauffant_nom[i]`/
      * `chauffant_valeur[i]` sont TOUJOURS la paire de la ligne `i`, masquee
      * (LV_OBJ_FLAG_HIDDEN) si moins de ECRAN_ACCUEIL_HUB_HEATER_LIGNES
-     * chauffants sont presents. `chauffant_valeur[i]` est CLIQUABLE (tache 4,
-     * voir le commentaire de tete ci-dessus) ; `chauffant_infos[i]` est le
-     * tableau parallele (meme indice `i`) que son rappel de clic relit. ---- */
+     * chauffants sont presents. `chauffant_valeur[i]` (tache 4) ET
+     * `chauffant_nom[i]` (tache 5) sont TOUS DEUX CLIQUABLES, voir le
+     * commentaire de tete ci-dessus -- `chauffant_infos[i]` est le tableau
+     * parallele (meme indice `i`) que les DEUX rappels de clic relisent
+     * (chauffant_valeur_cb() pour la consigne, chauffant_nom_cb() pour
+     * l'indice de serie du graphe, voir chauffant_info_serie_indice() dans
+     * le .c). ---------------------------------------------------------- */
     lv_obj_t *chauffant_nom[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];    /* "T0"/"T1"/"Bed" */
     lv_obj_t *chauffant_valeur[ECRAN_ACCUEIL_HUB_HEATER_LIGNES]; /* "205.0/210.0" */
     ecran_accueil_hub_chauffant_info_t chauffant_infos[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];
@@ -125,6 +133,22 @@ typedef struct ecran_accueil_hub_ctx_s {
     lv_obj_t          *chart;
     lv_chart_series_t *serie[KLIPPER_HISTO_SERIES];
     uint32_t            derniere_gen;
+    /* Raccourci NOM (tache 5, task-5-brief.md) : `serie_visible[s]` --
+     * indexee EXACTEMENT comme `serie[]` ci-dessus, PAS comme les lignes de
+     * chauffants (`i`) -- suit UNIQUEMENT l'intention utilisateur (dernier
+     * clic sur le NOM du chauffant de cette serie), TOUT A `true` a la
+     * construction (chart_ajouter_serie() n'appelle jamais
+     * lv_chart_hide_series(), une serie neuve est donc deja visible par
+     * defaut cote LVGL -- ce tableau ne fait que suivre/refleter cet etat,
+     * jamais le contraire). `donnees_perimees` memorise le DERNIER argument
+     * `donnees_perimees` recu par mettre_a_jour() -- necessaire pour que
+     * chauffant_nom_cb() (le .c) puisse reconcilier le grisage C3 (donnees
+     * perimees) avec ce toggle SANS attendre le prochain mettre_a_jour() :
+     * la couleur du label NOM doit rester grise si perime OU masque, normale
+     * seulement si frais ET visible -- voir le commentaire complet dans le
+     * .c (chauffant_nom_cb() et la boucle de grisage de mettre_a_jour()). */
+    bool serie_visible[KLIPPER_HISTO_SERIES];
+    bool donnees_perimees;
 
     /* --- colonne droite : cinq tuiles de menu empilees verticalement (voir
      * ECRAN_ACCUEIL_HUB_MENU_* ci-dessus pour l'indexation) : `zone_menu` est

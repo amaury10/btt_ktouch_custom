@@ -20,16 +20,18 @@
  * recopiees) et verifiees les unes par rapport aux autres, meme idiome que
  * ecran_deplacer.c.
  *
- * Lignes de chauffants (tache 4) : voir le commentaire de tete du .h pour
- * pourquoi nom/valeur sont deux `lv_label_t` distincts plutot qu'un texte
- * concatene -- LV_OBJ_FLAG_CLICKABLE est pose ICI sur `chauffant_valeur[i]`
- * SEULEMENT (jamais `chauffant_nom[i]`, reserve a la tache 5), sans retoucher
- * cette mise en page. Taper la valeur ouvre le clavier numerique
- * (chauffant_valeur_cb() plus bas) pour editer la consigne de CE chauffant --
- * meme parsing/bornes/gcode que cellule_bouton_cb()/cellule_clavier_rappel()
- * de ecran_temperatures.c (copie plutot que partagee, meme choix que le
- * reste de ce depot vis-a-vis de construire_arguments_gcode()/envoyer_gcode()
- * plus bas).
+ * Lignes de chauffants (taches 4 et 5) : voir le commentaire de tete du .h
+ * pour pourquoi nom/valeur sont deux `lv_label_t` distincts plutot qu'un
+ * texte concatene -- LV_OBJ_FLAG_CLICKABLE est pose ICI sur
+ * `chauffant_valeur[i]` ET `chauffant_nom[i]`, sans retoucher cette mise en
+ * page. Taper la valeur ouvre le clavier numerique (chauffant_valeur_cb()
+ * plus bas) pour editer la consigne de CE chauffant -- meme parsing/bornes/
+ * gcode que cellule_bouton_cb()/cellule_clavier_rappel() de
+ * ecran_temperatures.c (copie plutot que partagee, meme choix que le reste
+ * de ce depot vis-a-vis de construire_arguments_gcode()/envoyer_gcode() plus
+ * bas). Taper le nom (chauffant_nom_cb() plus bas) bascule l'affichage de la
+ * courbe de CE chauffant sur le graphe et grise/degrise le label -- raccourci
+ * INDEPENDANT de celui de la valeur, meme ligne mais deux gestes distincts.
  *
  * Libelles de menu SANS accent ("Configuration", pas de caractere accentue)
  * -- aucun texte affiche a l'ecran dans ce depot n'utilise de caractere
@@ -336,6 +338,19 @@ static bool chauffant_info_nom_chauffeur(const ecran_accueil_hub_chauffant_info_
     return nom_chauffeur_extrudeur(info->indice_extrudeur, sortie, taille);
 }
 
+/* Rend l'indice de serie du graphe (0..KLIPPER_HISTO_SERIES-1, meme mapping
+ * FIXE que klipper_temp_historique.h/ctx->serie[]) que designe `info` --
+ * factorise entre chart_ajouter_serie()/construire()/mettre_a_jour() (deja
+ * indexes par `i` de serie directement) et chauffant_nom_cb() plus bas (qui,
+ * lui, ne connait `info` que via `chauffant_infos[]`, indexe par NUMERO DE
+ * LIGNE, pas par numero de serie -- les deux coincident pour un extrudeur
+ * SEULEMENT si aucune ligne n'a ete sautee, jamais garanti puisque
+ * ECRAN_ACCUEIL_HUB_HEATER_LIGNES < KLIPPER_HISTO_SERIES). */
+static uint8_t chauffant_info_serie_indice(const ecran_accueil_hub_chauffant_info_t *info)
+{
+    return info->est_plateau ? (uint8_t)KLIPPER_EXTRUDEURS_MAX : info->indice_extrudeur;
+}
+
 /* Rappel du clavier numerique ouvert par chauffant_valeur_cb() ci-dessous --
  * `contexte` EST directement `&ctx->chauffant_infos[i]`. `valeur == NULL`
  * (annule) : rien (spec). Sinon parse en entier, borne
@@ -393,6 +408,56 @@ static void chauffant_valeur_cb(lv_event_t *e)
     char valeur_initiale[8];
     snprintf(valeur_initiale, sizeof(valeur_initiale), "%u", (unsigned)info->consigne_courante);
     clavier_ouvrir(titre, valeur_initiale, CLAVIER_NUMERIQUE, chauffant_clavier_rappel, info);
+}
+
+/* ------------------------------------------------------------------------
+ * Raccourci accueil (tache 5, task-5-brief.md) : taper le NOM d'une ligne de
+ * chauffant bascule l'affichage de sa courbe sur le graphe et grise/degrise
+ * le label -- RIEN a voir avec le raccourci VALEUR ci-dessus (pas de clavier,
+ * pas de gcode), un geste purement local a l'ecran.
+ * ------------------------------------------------------------------------ */
+
+/* Tap sur le label NOM d'une ligne de chauffant. `info` est passe
+ * DIRECTEMENT comme `contexte` (meme tableau `chauffant_infos[]` que
+ * chauffant_valeur_cb() ci-dessus, un SECOND lv_obj_add_event_cb() sur le
+ * MEME element du tableau -- voir la boucle de construire() plus bas) --
+ * `lv_event_get_target(e)` (et non `info`) donne le label a recolorer, la
+ * cible EXACTE du clic.
+ *
+ * Regle de reconciliation avec le grisage C3 (donnees_perimees, voir la
+ * boucle de mettre_a_jour() plus bas) : la couleur du label NOM doit
+ * refleter LES DEUX etats a la fois --
+ *   grise    si (donnees_perimees OU courbe masquee)
+ *   normale  seulement si (fraiches ET courbe visible)
+ * -- jamais l'un qui efface la memoire de l'autre. Cette fonction applique
+ * la regle IMMEDIATEMENT (sans attendre le prochain mettre_a_jour()) en
+ * relisant `ctx->donnees_perimees`, la valeur du DERNIER appel a
+ * mettre_a_jour() (voir son commentaire de tete dans le .h) ; mettre_a_jour()
+ * applique la MEME regle a chaque rafraichissement en relisant
+ * `ctx->serie_visible[]`, l'etat que CE rappel vient de faire evoluer -- les
+ * deux cotes de la reconciliation partagent donc les deux memes variables,
+ * jamais une troisieme source de verite qui pourrait diverger. */
+static void chauffant_nom_cb(lv_event_t *e)
+{
+    ecran_accueil_hub_chauffant_info_t *info = lv_event_get_user_data(e);
+    lv_obj_t *cible = lv_event_get_target(e);
+    if (info == NULL || info->ctx == NULL || cible == NULL) {
+        return;
+    }
+    ecran_accueil_hub_ctx_t *ctx = info->ctx;
+
+    uint8_t s = chauffant_info_serie_indice(info);
+    ctx->serie_visible[s] = !ctx->serie_visible[s];
+    if (ctx->serie[s] != NULL) {
+        /* NULL possible : ce chauffant n'a encore jamais ete vu present par
+         * le store (voir chart_ajouter_serie()) -- le toggle reste memorise
+         * dans serie_visible[] et s'appliquera au chart des que
+         * mettre_a_jour() creera la serie (rattrapage deja existant, tache 3). */
+        lv_chart_hide_series(ctx->chart, ctx->serie[s], !ctx->serie_visible[s]);
+    }
+
+    uint32_t couleur = (ctx->donnees_perimees || !ctx->serie_visible[s]) ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
+    lv_obj_set_style_text_color(cible, lv_color_hex(couleur), 0);
 }
 
 static lv_obj_t *ligne_creer(lv_obj_t *parent, lv_coord_t y)
@@ -467,13 +532,23 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
+    /* --- toutes les series demarrent VISIBLES (spec, task-5-brief.md :
+     * "tout a true au depart") -- pose ICI, avant toute creation de widget,
+     * comme derniere_gen plus bas : un etat qu'un clic peut faire evoluer
+     * mais que construire() n'a besoin d'ecrire qu'une seule fois. --------- */
+    for (uint8_t i = 0; i < KLIPPER_HISTO_SERIES; i++) {
+        ctx->serie_visible[i] = true;
+    }
+    ctx->donnees_perimees = false; /* premiere donnee jamais recue = pas encore perimee, reecrit au premier mettre_a_jour() */
+
     /* --- colonne gauche : lignes de chauffants -- pool a taille fixe
      * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES), masque/rempli par mettre_a_jour()
      * selon le nombre de chauffants reellement presents. `chauffant_valeur[i]`
-     * est un `lv_label_t` NU (jamais un bouton) : LV_OBJ_FLAG_CLICKABLE doit
-     * etre pose EXPLICITEMENT ici pour qu'il recoive des evenements de clic
-     * (voir le commentaire de tete du fichier, tache 4). `chauffant_nom[i]`,
-     * lui, reste SANS ce flag -- tache 5 du meme sous-projet. --------------- */
+     * ET `chauffant_nom[i]` sont des `lv_label_t` NUS (jamais un bouton) :
+     * LV_OBJ_FLAG_CLICKABLE doit etre pose EXPLICITEMENT sur chacun pour
+     * qu'il recoive des evenements de clic (voir le commentaire de tete du
+     * fichier, taches 4 et 5) -- deux rappels DISTINCTS sur le MEME element
+     * `chauffant_infos[i]`, jamais confondus. ------------------------------ */
     for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
         lv_coord_t y = (lv_coord_t)(CHAUFFANTS_ZONE_Y + i * (CHAUFFANT_LIGNE_HAUTEUR + CHAUFFANT_LIGNE_ECART));
 
@@ -503,6 +578,12 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
          * jusque-la (voir la boucle de visibilite dans mettre_a_jour()). */
         ctx->chauffant_infos[i].ctx = ctx;
         lv_obj_add_event_cb(valeur, chauffant_valeur_cb, LV_EVENT_CLICKED, &ctx->chauffant_infos[i]);
+
+        /* Tache 5 : meme `chauffant_infos[i]`, un SECOND rappel sur le label
+         * NOM -- voir chauffant_nom_cb() plus haut pour ce qu'il en lit
+         * (est_plateau/indice_extrudeur, jamais consigne_courante). */
+        lv_obj_add_flag(nom, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(nom, chauffant_nom_cb, LV_EVENT_CLICKED, &ctx->chauffant_infos[i]);
     }
 
     /* --- colonne gauche : resume, trois lignes en lecture seule -- Voir le
@@ -714,10 +795,31 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
      * un etat courant perime, et chaque tuile de menu ouvre un ecran qui
      * grise lui-meme son propre contenu si besoin (meme choix delibere que
      * l'ancien hub : "naviguer... reste sans danger meme avec un etat
-     * perime"). -------------------------------------------------------- */
+     * perime"). --------------------------------------------------------
+     *
+     * Label NOM (tache 5, task-5-brief.md) : SEUL cas ou ce grisage C3 ne
+     * suffit pas seul -- chauffant_nom_cb() (plus haut) grise/degrise CE
+     * MEME label independamment, au clic, selon `serie_visible[]`. Les deux
+     * mecanismes ne doivent JAMAIS s'ecraser l'un l'autre : la regle
+     * (identique cote chauffant_nom_cb()) est
+     *   grise    si (donnees_perimees OU courbe masquee)
+     *   normale  seulement si (fraiches ET courbe visible)
+     * -- appliquee ICI a CHAQUE rafraichissement en relisant
+     * `ctx->serie_visible[]` (que seul un clic fait evoluer, jamais cette
+     * fonction), donc un mettre_a_jour() "frais" ne degrise jamais un nom
+     * dont l'utilisateur a masque la courbe, et un toggle ulterieur reste
+     * grise tant que les donnees restent perimees. `chauffant_valeur[i]`,
+     * lui, N'EST PAS concerne (spec tache 5 : "Do NOT change the VALUE-tap
+     * behaviour") -- il garde la couleur COMMUNE `couleur` ci-dessous, comme
+     * avant cette tache. `ctx->donnees_perimees` est memorise ICI (dernier
+     * argument recu) pour que chauffant_nom_cb() applique la MEME regle
+     * immediatement au clic, sans attendre le prochain appel. -------------- */
+    ctx->donnees_perimees = donnees_perimees;
     uint32_t couleur = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
     for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
-        lv_obj_set_style_text_color(ctx->chauffant_nom[i], lv_color_hex(couleur), 0);
+        uint8_t s = chauffant_info_serie_indice(&ctx->chauffant_infos[i]);
+        uint32_t couleur_nom = (donnees_perimees || !ctx->serie_visible[s]) ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
+        lv_obj_set_style_text_color(ctx->chauffant_nom[i], lv_color_hex(couleur_nom), 0);
         lv_obj_set_style_text_color(ctx->chauffant_valeur[i], lv_color_hex(couleur), 0);
     }
     lv_obj_set_style_text_color(ctx->position, lv_color_hex(couleur), 0);

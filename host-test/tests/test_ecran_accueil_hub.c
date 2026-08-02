@@ -183,10 +183,13 @@ void suite_ecran_accueil_hub(void)
      * Tache 4 (task-4-brief.md) : taper le label VALEUR d'une ligne de
      * chauffant ouvre le clavier numerique pour editer sa consigne -- modele
      * direct de suite_ecran_temperatures() (test_ecran_temperatures.c) pour
-     * la partie clavier. Le label NOM, lui, reste NON cliquable (tache 5).
+     * la partie clavier. Le label NOM, lui, est cliquable pour un raccourci
+     * DIFFERENT (tache 5, plus bas dans cette suite) -- les deux flags sont
+     * donc VRAIS ici, un seul geste (clavier vs toggle courbe) distinguant
+     * les deux rappels.
      * ------------------------------------------------------------------- */
     VERIFIER(lv_obj_has_flag(ctx->chauffant_valeur[0], LV_OBJ_FLAG_CLICKABLE));
-    VERIFIER(!lv_obj_has_flag(ctx->chauffant_nom[0], LV_OBJ_FLAG_CLICKABLE));
+    VERIFIER(lv_obj_has_flag(ctx->chauffant_nom[0], LV_OBJ_FLAG_CLICKABLE));
 
     char action[32];
     char arguments[192];
@@ -252,6 +255,53 @@ void suite_ecran_accueil_hub(void)
     VERIFIER(source_etat_sim_file_taille() == avant);
     lv_timer_handler();
     VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    /* ---------------------------------------------------------------------
+     * Tache 5 (task-5-brief.md) : taper le label NOM d'une ligne de
+     * chauffant bascule l'affichage de sa courbe sur le graphe et grise/
+     * degrise le label -- verifie via l'etat ctx->serie_visible[] maintenu
+     * PLUS la couleur resolue du label (option explicitement offerte par le
+     * brief : l'API publique LVGL n'expose pas le champ prive `hidden` de
+     * lv_chart_series_t, lv_chart_hide_series() ne rend rien). serie_visible[0]
+     * correspond a T0 (mapping FIXE de klipper_temp_historique.h, ligne 0 de
+     * cet etat de test). ------------------------------------------------- */
+    VERIFIER(ctx->serie_visible[0] == true);
+    lv_color_t couleur_nom_avant = lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0);
+    VERIFIER(!lv_color_eq(couleur_nom_avant, lv_color_hex(0x6B7280)));
+
+    /* --- (a) premier clic : masque la courbe, grise le nom, IMMEDIATEMENT
+     * (sans mettre_a_jour() intermediaire). --------------------------------- */
+    lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL);
+    VERIFIER(ctx->serie_visible[0] == false);
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+
+    /* --- (b) reclic : reaffiche la courbe, degrise le nom -- round-trip. -- */
+    lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL);
+    VERIFIER(ctx->serie_visible[0] == true);
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+
+    /* --- (c) reconciliation avec le grisage C3 : masquer la courbe puis
+     * appeler mettre_a_jour() avec des donnees FRAICHES ne doit PAS degriser
+     * le nom -- le toggle utilisateur reste prioritaire sur des donnees
+     * fraiches (voir le commentaire de mettre_a_jour()/chauffant_nom_cb()
+     * dans le .c pour la regle complete). La VALEUR, elle, N'EST PAS grisee
+     * (spec tache 5 : seul le NOM reagit au toggle de courbe). -------------- */
+    lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL); /* masque de nouveau */
+    VERIFIER(ctx->serie_visible[0] == false);
+    ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
+    VERIFIER(ctx->serie_visible[0] == false);
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_valeur[0], 0), lv_color_hex(0x6B7280)));
+
+    /* --- (d) l'autre sens de la reconciliation : donnees perimees grise le
+     * nom MEME quand la courbe est visible, et redevient normal des que les
+     * donnees redeviennent fraiches ET que la courbe est restee visible. --- */
+    lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL); /* re-affiche la courbe */
+    VERIFIER(ctx->serie_visible[0] == true);
+    ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, true, ctx);
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+    ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
 
     /* --- 1 seul extrudeur present : la ligne T1 disparait (masquee, jamais
      * juste videe), Bed glisse en ligne 1. -------------------------------- */
