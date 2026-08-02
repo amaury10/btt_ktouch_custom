@@ -66,6 +66,20 @@ typedef struct {
     uint16_t flux_pct;                      /* M221, 100 = normal ; 0 = pas encore reçu */
     int32_t  babystep_z_um;                 /* µm signés (gcode offset Z) */
 
+    /* Limites globales de vitesse/accélération (panneau Limits, tâche 5,
+     * sous-projet "panneaux KlipperScreen") -- toolhead.max_velocity/
+     * max_accel/square_corner_velocity/max_accel_to_decel, lues par
+     * fusionner_toolhead() (moonraker_rpc.c). +16 octets, QUATRE scalaires
+     * `float` groupés, PAS de tableau -- voir la note RAM en tête de ce
+     * fichier (klipper_fichiers.h) sur pourquoi un tableau ajouté ici serait
+     * dangereux alors que des scalaires ne le sont pas. 0 = pas encore reçu
+     * (Klipper récent peut omettre max_accel_to_decel, déprécié -- ce champ
+     * reste alors à 0, l'écran grise cette ligne, voir ecran_limites.c). */
+    float limite_velocity;        /* mm/s, toolhead.max_velocity */
+    float limite_accel;           /* mm/s^2, toolhead.max_accel */
+    float limite_square_corner;   /* mm/s, toolhead.square_corner_velocity */
+    float limite_accel_to_decel;  /* mm/s^2, toolhead.max_accel_to_decel */
+
     char    macros[KLIPPER_MACROS_MAX][KLIPPER_MACRO_NOM_MAX];
     uint8_t nb_macros;
     bool    macros_tronquees;

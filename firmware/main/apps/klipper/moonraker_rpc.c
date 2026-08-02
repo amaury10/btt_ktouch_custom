@@ -375,6 +375,27 @@ static void fusionner_toolhead(etat_klipper_t *e, const cJSON *toolhead)
             e->outil_actif = (uint8_t)idx;
         }
     }
+
+    /* Tâche 5 (panneau Limits) : quatre champs supplémentaires du MÊME objet
+     * `toolhead`, lus EXACTEMENT comme `position` ci-dessus (nombre_fini(),
+     * poison par champ -- un champ absent ou non fini laisse le `limite_*`
+     * correspondant inchangé). `max_accel_to_decel` est déprécié côté
+     * Klipper récent et peut être absent : reste alors à sa valeur courante
+     * (0 si jamais reçu), l'écran grise cette ligne -- pas de cas particulier
+     * ici, la règle générale suffit. */
+    float v;
+    if (nombre_fini(toolhead, "max_velocity", &v)) {
+        e->limite_velocity = v;
+    }
+    if (nombre_fini(toolhead, "max_accel", &v)) {
+        e->limite_accel = v;
+    }
+    if (nombre_fini(toolhead, "square_corner_velocity", &v)) {
+        e->limite_square_corner = v;
+    }
+    if (nombre_fini(toolhead, "max_accel_to_decel", &v)) {
+        e->limite_accel_to_decel = v;
+    }
 }
 
 static void fusionner_gcode_move(etat_klipper_t *e, const cJSON *gm)

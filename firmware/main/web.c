@@ -266,6 +266,19 @@ static esp_err_t gestion_state(httpd_req_t *req)
             cJSON_AddNumberToObject(etat_json, "flux_pct", etat.flux_pct);
             cJSON_AddNumberToObject(etat_json, "babystep_z_um", etat.babystep_z_um);
 
+            /* Tache 5 (panneau Limits, sous-projet "panneaux KlipperScreen") :
+             * les quatre limites toolhead, memes noms de cle que les champs
+             * etat_klipper_t (voir core/etat_klipper.h) -- 0 signifie "pas
+             * encore recu", publie tel quel plutot que masque en null : un
+             * client de /state qui veut distinguer les deux peut deja le
+             * faire via `generation` (voir plus haut), meme convention que
+             * vitesse_pct/flux_pct ci-dessus (0 = pas recu, publie sans
+             * traitement special). */
+            cJSON_AddNumberToObject(etat_json, "limite_velocity", (double)etat.limite_velocity);
+            cJSON_AddNumberToObject(etat_json, "limite_accel", (double)etat.limite_accel);
+            cJSON_AddNumberToObject(etat_json, "limite_square_corner", (double)etat.limite_square_corner);
+            cJSON_AddNumberToObject(etat_json, "limite_accel_to_decel", (double)etat.limite_accel_to_decel);
+
             /* `macros` en tableau de chaines : le nom de macro Klipper est
              * la seule information utile a un client, l'index dans le
              * tampon fixe etat_klipper_t::macros n'a pas de sens hors du

@@ -66,6 +66,7 @@
 #include "ecran_extruder.h"
 #include "ecran_fichiers.h"
 #include "ecran_jouet.h"
+#include "ecran_limites.h"
 #include "ecran_macros.h"
 #include "ecran_niveau_lit.h"
 #include "ecran_reglage_fin.h"
@@ -283,8 +284,9 @@ int main(int argc, char **argv)
              * mode capture, d'un tap reel sur une case de menu -- rien ne simule
              * le tactile en capture). Valeurs reconnues : "macros", "deplacer",
              * "temperatures", "extruder", "ventilateurs", "fichiers", "wifi",
-             * "fin", "zcal", "lit" -- toute autre retombe sur l'accueil seul
-             * (ecran_demande reste NULL), meme politique defensive que --app. */
+             * "fin", "zcal", "lit", "limites" -- toute autre retombe sur
+             * l'accueil seul (ecran_demande reste NULL), meme politique
+             * defensive que --app. */
             const char *valeur = argv[++i];
             if (strcmp(valeur, "macros") == 0)            ecran_demande = &ECRAN_MACROS;
             else if (strcmp(valeur, "deplacer") == 0)     ecran_demande = &ECRAN_DEPLACER;
@@ -296,6 +298,7 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "fin") == 0)          ecran_demande = &ECRAN_REGLAGE_FIN;
             else if (strcmp(valeur, "zcal") == 0)         ecran_demande = &ECRAN_ZCALIBRATE;
             else if (strcmp(valeur, "lit") == 0)          ecran_demande = &ECRAN_NIVEAU_LIT;
+            else if (strcmp(valeur, "limites") == 0)      ecran_demande = &ECRAN_LIMITES;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {

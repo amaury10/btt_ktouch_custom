@@ -246,6 +246,44 @@ static void section_fusionner_status(void)
         VERIFIER_FLOAT(e.position[2], 5.0f, 0.001f);
     }
 
+    /* --- tache 5 (panneau Limits) : max_velocity/max_accel/
+     * square_corner_velocity/max_accel_to_decel, MEME objet toolhead, lus
+     * exactement comme position/homed_axes ci-dessus (poison par champ) --- */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg),
+            "{\"toolhead\":{\"max_velocity\":300.0,\"max_accel\":5000.0,"
+            "\"square_corner_velocity\":5.0,\"max_accel_to_decel\":2500.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.limite_velocity, 300.0f, 0.01f);
+        VERIFIER_FLOAT(e.limite_accel, 5000.0f, 0.01f);
+        VERIFIER_FLOAT(e.limite_square_corner, 5.0f, 0.01f);
+        VERIFIER_FLOAT(e.limite_accel_to_decel, 2500.0f, 0.01f);
+
+        /* Klipper recent : max_accel_to_decel deprecie, peut etre absent --
+         * reste a 0 (pas ecrase par du bruit), le reste du meme objet
+         * s'applique normalement (poison par CHAMP, pas par message). */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg),
+            "{\"toolhead\":{\"max_velocity\":300.0,\"max_accel\":5000.0,"
+            "\"square_corner_velocity\":5.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.limite_velocity, 300.0f, 0.01f);
+        VERIFIER(e.limite_accel_to_decel == 0.0f);
+
+        /* champ non fini (1e40, +infini en float) : reste inchange, le reste
+         * du meme objet continue d'etre applique -- meme piege que
+         * extruder.temperature plus haut. */
+        memset(&e, 0, sizeof(e));
+        e.limite_accel = 42.0f;   /* valeur temoin : ne doit pas bouger */
+        enveloppe(msg, sizeof(msg),
+            "{\"toolhead\":{\"max_accel\":1e40,\"max_velocity\":300.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.limite_accel, 42.0f, 0.01f);
+        VERIFIER_FLOAT(e.limite_velocity, 300.0f, 0.01f);
+    }
+
     /* --- speed_factor 1.5 => 150 %, extrude_factor 0.9 => 90 %,
      * homing_origin[2] => babystep en µm, absolute_coordinates --- */
     {
@@ -1004,6 +1042,12 @@ static void section_methode_commande(void)
 void suite_moonraker_rpc(void)
 {
     printf("suite : protocole moonraker (JSON-RPC / WebSocket)\n");
+    /* Tache 5 (panneau Limits) : la regle RAM documentee dans etat_klipper.h/
+     * klipper_fichiers.h exige de connaitre sizeof(etat_klipper_t) apres tout
+     * ajout de champ -- imprime ici plutot que devine, meme discipline que
+     * les VERIFIER() qui suivent ne se fient jamais a une valeur non
+     * mesuree. */
+    printf("  sizeof(etat_klipper_t) = %zu octets\n", sizeof(etat_klipper_t));
     section_construire_requete();
     section_construire_abonnement();
     section_classifier();

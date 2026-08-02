@@ -134,6 +134,7 @@ add_executable(tests
     tests/test_ecran_reglage_fin.c
     tests/test_ecran_zcalibrate.c
     tests/test_ecran_niveau_lit.c
+    tests/test_ecran_limites.c
     tests/test_accueil_choix.c
     tests/test_clavier.c
     tests/test_ecran_configuration.c
@@ -184,6 +185,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_reglage_fin.c
     ${ECRANS_DIR}/ecran_zcalibrate.c
     ${ECRANS_DIR}/ecran_niveau_lit.c
+    ${ECRANS_DIR}/ecran_limites.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c

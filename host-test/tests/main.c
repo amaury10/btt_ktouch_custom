@@ -29,6 +29,7 @@ void suite_ecran_ventilateurs(void);
 void suite_ecran_reglage_fin(void);
 void suite_ecran_zcalibrate(void);
 void suite_ecran_niveau_lit(void);
+void suite_ecran_limites(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -200,6 +201,15 @@ int main(void)
      * simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_niveau_lit() dans test_ecran_niveau_lit.c. */
     suite_ecran_niveau_lit();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 5 : l'ecran Limits
+     * (max_velocity/max_accel/square_corner_velocity/max_accel_to_decel via
+     * SET_VELOCITY_LIMIT, quatre lignes -/+ a pas fixe, sans bouton Reset) --
+     * meme garde d'ordonnancement que suite_ecran_niveau_lit() juste
+     * au-dessus (habillage construit + boucle simulee demarree) -- voir le
+     * commentaire de tete de suite_ecran_limites() dans
+     * test_ecran_limites.c. */
+    suite_ecran_limites();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --
