@@ -279,6 +279,15 @@ static esp_err_t gestion_state(httpd_req_t *req)
             cJSON_AddNumberToObject(etat_json, "limite_square_corner", (double)etat.limite_square_corner);
             cJSON_AddNumberToObject(etat_json, "limite_accel_to_decel", (double)etat.limite_accel_to_decel);
 
+            /* Tache 6 (panneau Retraction, sous-projet "panneaux
+             * KlipperScreen") : les quatre champs firmware_retraction, meme
+             * convention que limite_* ci-dessus (0 = pas encore recu ou
+             * objet absent de la machine, publie tel quel). */
+            cJSON_AddNumberToObject(etat_json, "retr_length", (double)etat.retr_length);
+            cJSON_AddNumberToObject(etat_json, "retr_speed", (double)etat.retr_speed);
+            cJSON_AddNumberToObject(etat_json, "retr_unretract_extra", (double)etat.retr_unretract_extra);
+            cJSON_AddNumberToObject(etat_json, "retr_unretract_speed", (double)etat.retr_unretract_speed);
+
             /* `macros` en tableau de chaines : le nom de macro Klipper est
              * la seule information utile a un client, l'index dans le
              * tampon fixe etat_klipper_t::macros n'a pas de sens hors du

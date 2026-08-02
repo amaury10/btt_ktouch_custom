@@ -58,7 +58,8 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
         "\"extruder\":null,\"extruder1\":null,\"extruder2\":null,\"extruder3\":null,"
         "\"extruder4\":null,\"extruder5\":null,\"extruder6\":null,\"extruder7\":null,"
         "\"heater_bed\":null,\"fan\":null,"
-        "\"print_stats\":null,\"virtual_sdcard\":null,\"webhooks\":null"
+        "\"print_stats\":null,\"virtual_sdcard\":null,\"webhooks\":null,"
+        "\"firmware_retraction\":null"
         "}}";
     return rpc_construire_requete(sortie, taille, id, "printer.objects.subscribe", PARAMS);
 }
@@ -398,6 +399,32 @@ static void fusionner_toolhead(etat_klipper_t *e, const cJSON *toolhead)
     }
 }
 
+/* Tâche 6 (panneau Retraction) : `firmware_retraction`, objet DISTINCT de
+ * `toolhead` -- doit être ajouté à l'abonnement (voir PARAMS ci-dessus),
+ * contrairement à toolhead qui l'était déjà. Klipper renvoie `{}` pour cet
+ * objet quand la machine n'a PAS de section [firmware_retraction] dans son
+ * printer.cfg (cas fréquent, voir moonraker_rpc.h) -- les quatre champs
+ * restent alors à leur valeur courante (0 si jamais reçus), sans poison
+ * particulier ici : la même garde nombre_fini()/poison-par-champ que
+ * fusionner_toolhead() ci-dessus suffit, un objet vide ne contenant aucune
+ * des quatre clés attendues. */
+static void fusionner_firmware_retraction(etat_klipper_t *e, const cJSON *obj)
+{
+    float v;
+    if (nombre_fini(obj, "retract_length", &v)) {
+        e->retr_length = v;
+    }
+    if (nombre_fini(obj, "retract_speed", &v)) {
+        e->retr_speed = v;
+    }
+    if (nombre_fini(obj, "unretract_extra_length", &v)) {
+        e->retr_unretract_extra = v;
+    }
+    if (nombre_fini(obj, "unretract_speed", &v)) {
+        e->retr_unretract_speed = v;
+    }
+}
+
 static void fusionner_gcode_move(etat_klipper_t *e, const cJSON *gm)
 {
     if (!cJSON_IsObject(gm)) {
@@ -530,6 +557,8 @@ static void fusionner_objet_statut(etat_klipper_t *local, const cJSON *statut)
             fusionner_chauffeur(&local->plateau, item);
         } else if (strcmp(nom, "toolhead") == 0) {
             fusionner_toolhead(local, item);
+        } else if (strcmp(nom, "firmware_retraction") == 0) {
+            fusionner_firmware_retraction(local, item);
         } else if (strcmp(nom, "gcode_move") == 0) {
             fusionner_gcode_move(local, item);
         } else if (strcmp(nom, "fan") == 0) {

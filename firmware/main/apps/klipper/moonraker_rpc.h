@@ -66,7 +66,8 @@ bool rpc_construire_requete(char *sortie, size_t taille, uint32_t id,
  * n'arrive jamais, et le client retombe silencieusement en repli HTTP sans
  * le moindre signal d'erreur — le pire symptôme à diagnostiquer) avec les
  * objets dont l'état v2 a besoin (toolhead, gcode_move, extruder..
- * extruder7, heater_bed, fan, print_stats, virtual_sdcard, webhooks).
+ * extruder7, heater_bed, fan, print_stats, virtual_sdcard, webhooks,
+ * firmware_retraction).
  * speed_factor/extrude_factor sont portés par gcode_move, déjà dans la
  * liste — pas d'entrée séparée. Même contrat de tampon que
  * rpc_construire_requete() ci-dessus ; voir RPC_ABONNEMENT_TAILLE_MIN pour

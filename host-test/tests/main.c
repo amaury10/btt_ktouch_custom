@@ -30,6 +30,7 @@ void suite_ecran_reglage_fin(void);
 void suite_ecran_zcalibrate(void);
 void suite_ecran_niveau_lit(void);
 void suite_ecran_limites(void);
+void suite_ecran_retraction(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -210,6 +211,17 @@ int main(void)
      * commentaire de tete de suite_ecran_limites() dans
      * test_ecran_limites.c. */
     suite_ecran_limites();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 6 : l'ecran Retraction
+     * (retract_length/retract_speed/unretract_extra_length/unretract_speed
+     * via SET_RETRACTION, quatre lignes -/+ a pas fixe, deux domaines
+     * d'unite -- longueur en um/klipper_gcode_retraction_longueur(), vitesse
+     * en mm/s entier/klipper_gcode_retraction_vitesse() -- sans bouton
+     * Reset) -- meme garde d'ordonnancement que suite_ecran_limites() juste
+     * au-dessus (habillage construit + boucle simulee demarree) -- voir le
+     * commentaire de tete de suite_ecran_retraction() dans
+     * test_ecran_retraction.c. */
+    suite_ecran_retraction();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --

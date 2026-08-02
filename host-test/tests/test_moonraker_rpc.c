@@ -55,6 +55,10 @@ static void section_construire_abonnement(void)
     VERIFIER(strstr(tampon, "\"print_stats\":null") != NULL);
     VERIFIER(strstr(tampon, "\"virtual_sdcard\":null") != NULL);
     VERIFIER(strstr(tampon, "\"webhooks\":null") != NULL);
+    /* Tache 6 (panneau Retraction) : firmware_retraction, objet DISTINCT de
+     * toolhead, doit etre explicitement ajoute a l'abonnement (contrairement
+     * aux limite_*, portes par toolhead, deja abonne avant la tache 5). */
+    VERIFIER(strstr(tampon, "\"firmware_retraction\":null") != NULL);
 
     /* tampon trop court => false */
     char petit[10];
@@ -282,6 +286,55 @@ static void section_fusionner_status(void)
         VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
         VERIFIER_FLOAT(e.limite_accel, 42.0f, 0.01f);
         VERIFIER_FLOAT(e.limite_velocity, 300.0f, 0.01f);
+    }
+
+    /* --- tache 6 (panneau Retraction) : firmware_retraction, objet DISTINCT
+     * de toolhead (contrairement a limite_*, doit etre ajoute a
+     * l'abonnement -- voir section_construire_abonnement() plus bas), meme
+     * discipline nombre_fini()/poison-par-champ --- */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg),
+            "{\"firmware_retraction\":{\"retract_length\":1.5,\"retract_speed\":40.0,"
+            "\"unretract_extra_length\":0.2,\"unretract_speed\":35.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.retr_length, 1.5f, 0.001f);
+        VERIFIER_FLOAT(e.retr_speed, 40.0f, 0.01f);
+        VERIFIER_FLOAT(e.retr_unretract_extra, 0.2f, 0.001f);
+        VERIFIER_FLOAT(e.retr_unretract_speed, 35.0f, 0.01f);
+
+        /* Machine sans [firmware_retraction] : Klipper renvoie `{}` pour cet
+         * objet -- les quatre champs restent a 0, sans erreur de parsing. */
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg), "{\"firmware_retraction\":{}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER(e.retr_length == 0.0f);
+        VERIFIER(e.retr_speed == 0.0f);
+        VERIFIER(e.retr_unretract_extra == 0.0f);
+        VERIFIER(e.retr_unretract_speed == 0.0f);
+
+        /* Champ manquant isole : reste a 0 (valeur temoin), le reste du meme
+         * objet continue d'etre applique -- poison par CHAMP, pas par
+         * message (meme piege que max_accel_to_decel ci-dessus). */
+        memset(&e, 0, sizeof(e));
+        e.retr_speed = 42.0f;   /* valeur temoin : ne doit pas bouger */
+        enveloppe(msg, sizeof(msg),
+            "{\"firmware_retraction\":{\"retract_length\":1.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.retr_length, 1.0f, 0.001f);
+        VERIFIER_FLOAT(e.retr_speed, 42.0f, 0.01f);
+
+        /* champ non fini (1e40, +infini en float) : reste inchange, le reste
+         * du meme objet continue d'etre applique -- meme piege que
+         * extruder.temperature/toolhead.max_accel plus haut. */
+        memset(&e, 0, sizeof(e));
+        e.retr_unretract_speed = 42.0f;   /* valeur temoin : ne doit pas bouger */
+        enveloppe(msg, sizeof(msg),
+            "{\"firmware_retraction\":{\"unretract_speed\":1e40,\"retract_length\":1.5}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.retr_unretract_speed, 42.0f, 0.01f);
+        VERIFIER_FLOAT(e.retr_length, 1.5f, 0.001f);
     }
 
     /* --- speed_factor 1.5 => 150 %, extrude_factor 0.9 => 90 %,

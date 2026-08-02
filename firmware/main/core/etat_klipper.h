@@ -80,6 +80,21 @@ typedef struct {
     float limite_square_corner;   /* mm/s, toolhead.square_corner_velocity */
     float limite_accel_to_decel;  /* mm/s^2, toolhead.max_accel_to_decel */
 
+    /* Retraction firmware (panneau Retraction, tache 6, sous-projet
+     * "panneaux KlipperScreen") -- firmware_retraction.retract_length/
+     * retract_speed/unretract_extra_length/unretract_speed, lues par
+     * fusionner_firmware_retraction() (moonraker_rpc.c). +16 octets, QUATRE
+     * scalaires `float` groupes, PAS de tableau -- meme regle RAM que
+     * limite_* juste au-dessus (voir klipper_fichiers.h). 0 = pas encore
+     * recu -- frequent : beaucoup de printer.cfg n'ont PAS de section
+     * [firmware_retraction], Klipper renvoie alors `{}` pour cet objet
+     * (voir moonraker_rpc.h) et ces quatre champs restent a 0, l'ecran grise
+     * tout le panneau (voir ecran_retraction.c). */
+    float retr_length;           /* mm, firmware_retraction.retract_length ; 0 = absent/non recu */
+    float retr_speed;            /* mm/s, .retract_speed */
+    float retr_unretract_extra;  /* mm, .unretract_extra_length */
+    float retr_unretract_speed;  /* mm/s, .unretract_speed */
+
     char    macros[KLIPPER_MACROS_MAX][KLIPPER_MACRO_NOM_MAX];
     uint8_t nb_macros;
     bool    macros_tronquees;
