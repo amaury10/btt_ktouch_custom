@@ -43,6 +43,7 @@ void suite_ecran_fichiers(void);
 void suite_ecran_reglages_wifi(void);
 void suite_ecran_menu_reglages(void);
 void suite_ecran_actions(void);
+void suite_ecran_homing(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
@@ -269,6 +270,15 @@ int main(void)
      * voir le commentaire de tete de suite_ecran_actions() dans
      * test_ecran_actions.c. */
     suite_ecran_actions();
+
+    /* Sous-projet "refonte IHM KlipperScreen", tache 3 : le panneau Homing
+     * (ECRAN_HOMING, id "homing") -- grille 2x2 de quatre boutons send-only
+     * vers klipper_gcode_home() (Home All/X/Y/Z, envoi direct sans
+     * confirmation -- le homing est non destructif). Meme garde
+     * d'ordonnancement que les autres suites d'ecran ci-dessus (habillage
+     * construit + boucle simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_homing() dans test_ecran_homing.c. */
+    suite_ecran_homing();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage
