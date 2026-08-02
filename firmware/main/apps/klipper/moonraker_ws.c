@@ -865,8 +865,10 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
      * vivantes a la fois avec le local de rpc_fusionner_*), plus la recursion
      * de cJSON_ParseWithLength() sur le payload.
      *
-     * 16 Ko suffit MAINTENANT que sizeof(etat_klipper_t) est revenu a ~1808
-     * octets : la liste `fichiers[]` (qui avait double la taille de l'etat a
+     * 16 Ko suffit MAINTENANT que sizeof(etat_klipper_t) vaut ~1840 octets
+     * (1808 d'origine + 32 pour les 8 scalaires limite_*/retr_* des panneaux
+     * Limits/Retraction, jalon panneaux KlipperScreen) : la liste `fichiers[]`
+     * (qui avait double la taille de l'etat a
      * ~3856 octets) a ete sortie de l'etat vers un store dedie
      * (klipper_fichiers.h) -- rpc_lire_fichiers() ne pose plus de copie de
      * l'etat sur cette pile, juste un klipper_fichiers_t transitoire. Deux
