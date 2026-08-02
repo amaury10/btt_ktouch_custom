@@ -30,6 +30,7 @@
 
 #include "lvgl.h"
 
+#include "backend.h"
 #include "ecran_accueil_hub.h"
 #include "etat_klipper.h"
 #include "habillage.h"
@@ -38,6 +39,38 @@
 #include "petit_test.h"
 #include "source_etat.h"
 #include "source_etat_sim.h"
+
+/* Retrouve le dernier enfant de lv_layer_top() -- meme helper que
+ * dernier_enfant_calque_superieur() dans test_ecran_temperatures.c/
+ * test_clavier.c : le clavier (clavier.h) se construit toujours sur cette
+ * couche, par-dessus l'ecran actif entier. Copie locale plutot que partagee,
+ * meme choix que le reste de ce harnais. */
+static lv_obj_t *dernier_enfant_calque_superieur(void)
+{
+    lv_obj_t *calque = lv_layer_top();
+    uint32_t n = lv_obj_get_child_count(calque);
+    if (n == 0) {
+        return NULL;
+    }
+    return lv_obj_get_child(calque, n - 1);
+}
+
+/* Retrouve le premier descendant DIRECT de `parent` dont la classe LVGL est
+ * `classe` -- copie locale du meme helper que test_ecran_temperatures.c. */
+static lv_obj_t *enfant_de_classe(lv_obj_t *parent, const lv_obj_class_t *classe)
+{
+    if (parent == NULL) {
+        return NULL;
+    }
+    uint32_t n = lv_obj_get_child_count(parent);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *enfant = lv_obj_get_child(parent, i);
+        if (lv_obj_check_type(enfant, classe)) {
+            return enfant;
+        }
+    }
+    return NULL;
+}
 
 void suite_ecran_accueil_hub(void)
 {
@@ -145,6 +178,80 @@ void suite_ecran_accueil_hub(void)
     VERIFIER_TEXTE(lv_label_get_text(ctx->progression), "Printing: 42%");
     /* impression en cours -- la mini-progression redevient visible */
     VERIFIER(!lv_obj_has_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN));
+
+    /* ---------------------------------------------------------------------
+     * Tache 4 (task-4-brief.md) : taper le label VALEUR d'une ligne de
+     * chauffant ouvre le clavier numerique pour editer sa consigne -- modele
+     * direct de suite_ecran_temperatures() (test_ecran_temperatures.c) pour
+     * la partie clavier. Le label NOM, lui, reste NON cliquable (tache 5).
+     * ------------------------------------------------------------------- */
+    VERIFIER(lv_obj_has_flag(ctx->chauffant_valeur[0], LV_OBJ_FLAG_CLICKABLE));
+    VERIFIER(!lv_obj_has_flag(ctx->chauffant_nom[0], LV_OBJ_FLAG_CLICKABLE));
+
+    char action[32];
+    char arguments[192];
+
+    /* --- (a) tap sur la valeur de T0 : clavier numerique sur lv_layer_top(),
+     * preremplit (placeholder) avec la consigne courante (210). ------------ */
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+    lv_obj_send_event(ctx->chauffant_valeur[0], LV_EVENT_CLICKED, NULL);
+    lv_obj_t *racine_clavier = dernier_enfant_calque_superieur();
+    VERIFIER(racine_clavier != NULL);
+    lv_obj_t *kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    lv_obj_t *ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    VERIFIER(lv_keyboard_get_mode(kb) == LV_KEYBOARD_MODE_NUMBER);
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "210");
+    VERIFIER_TEXTE(lv_textarea_get_text(ta), "");
+
+    /* --- (b) valider "200" : BACKEND_ACTION_GCODE, script
+     * SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200. -------------------- */
+    lv_textarea_set_text(ta, "200");
+    size_t avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=200") != NULL);
+    lv_timer_handler(); /* acheve la fermeture asynchrone du clavier */
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+    source_etat_sim_cycle(); /* draine avant la suite */
+
+    /* --- (c) tap sur la valeur du plateau (ligne 2, "Bed") : preremplit avec
+     * 60, valider "70" -> HEATER=heater_bed. -------------------------------- */
+    lv_obj_send_event(ctx->chauffant_valeur[2], LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    VERIFIER(racine_clavier != NULL);
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    VERIFIER_TEXTE(lv_textarea_get_placeholder_text(ta), "60");
+    lv_textarea_set_text(ta, "70");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=70") != NULL);
+    lv_timer_handler();
+    source_etat_sim_cycle();
+
+    /* --- (d) hors bornes (999) sur T0 : AUCUN gcode envoye (taille de file
+     * inchangee) -- pas de troncature/clamp silencieux. ---------------------- */
+    lv_obj_send_event(ctx->chauffant_valeur[0], LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    lv_textarea_set_text(ta, "999");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+    lv_timer_handler();
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
 
     /* --- 1 seul extrudeur present : la ligne T1 disparait (masquee, jamais
      * juste videe), Bed glisse en ligne 1. -------------------------------- */

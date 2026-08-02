@@ -20,11 +20,16 @@
  * recopiees) et verifiees les unes par rapport aux autres, meme idiome que
  * ecran_deplacer.c.
  *
- * Lignes de chauffants EN LECTURE SEULE (aucun tap) : voir le commentaire de
- * tete du .h pour pourquoi nom/valeur sont deux `lv_label_t` distincts des
- * cette tache-ci plutot qu'un texte concatene -- la tache 4/5 du meme
- * sous-projet posera LV_OBJ_FLAG_CLICKABLE sur chaque paire sans retoucher
- * cette mise en page.
+ * Lignes de chauffants (tache 4) : voir le commentaire de tete du .h pour
+ * pourquoi nom/valeur sont deux `lv_label_t` distincts plutot qu'un texte
+ * concatene -- LV_OBJ_FLAG_CLICKABLE est pose ICI sur `chauffant_valeur[i]`
+ * SEULEMENT (jamais `chauffant_nom[i]`, reserve a la tache 5), sans retoucher
+ * cette mise en page. Taper la valeur ouvre le clavier numerique
+ * (chauffant_valeur_cb() plus bas) pour editer la consigne de CE chauffant --
+ * meme parsing/bornes/gcode que cellule_bouton_cb()/cellule_clavier_rappel()
+ * de ecran_temperatures.c (copie plutot que partagee, meme choix que le
+ * reste de ce depot vis-a-vis de construire_arguments_gcode()/envoyer_gcode()
+ * plus bas).
  *
  * Libelles de menu SANS accent ("Configuration", pas de caractere accentue)
  * -- aucun texte affiche a l'ecran dans ce depot n'utilise de caractere
@@ -34,16 +39,31 @@
  * Supplement, un glyphe manquant se rendrait en tofu silencieux. */
 #include "ecran_accueil_hub.h"
 
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "cJSON.h"
+
+#include "backend.h"
+#include "clavier.h"
 #include "ecran_actions.h"       /* ECRAN_ACTIONS */
 #include "ecran_fichiers.h"      /* ECRAN_FICHIERS */
 #include "ecran_homing.h"        /* ECRAN_HOMING */
 #include "ecran_menu_reglages.h" /* ECRAN_MENU_REGLAGES */
-#include "ecran_temperatures.h"  /* ECRAN_TEMPERATURES */
+/* ECRAN_TEMPERATURES + ECRAN_TEMPERATURES_TITRE_BUSE/PLATEAU/TEMP_MIN/MAX :
+ * reutilises TELS QUELS pour le clavier de consigne pose par cette tache --
+ * memes titres/bornes que le panneau dedie, jamais une seconde source de
+ * verite qui pourrait diverger (voir chauffant_valeur_cb()/chauffant_clavier_rappel()
+ * plus bas). */
+#include "ecran_temperatures.h"
+#include "habillage.h" /* habillage_notifier() */
+#include "klipper_gcode.h"
 #include "klipper_temp_historique.h"
 #include "navigation.h" /* navigation_empiler() */
+#include "source_etat.h" /* ui_commander() */
 #include "tuile.h"      /* ui_format_temperature() */
 
 #define LARGEUR_CONTENU 742 /* 800 - RAIL_LARGEUR (58), voir habillage.c */
@@ -207,6 +227,174 @@ static void formater_axe(char *sortie, size_t taille, float valeur, bool referen
     snprintf(sortie, taille, "%.1f", (double)valeur);
 }
 
+/* ------------------------------------------------------------------------
+ * Raccourci accueil (tache 4, task-4-brief.md) : taper la VALEUR d'une ligne
+ * de chauffant ouvre le clavier numerique pour editer sa consigne. Copie des
+ * memes idiomes que ecran_temperatures.c (construire_arguments_gcode()/
+ * envoyer_gcode()/nom_chauffeur_extrudeur()/consigne_u16()) -- copie plutot
+ * que partagee, meme choix que le reste de ce depot (voir formater_axe()
+ * ci-dessus pour le meme choix ailleurs dans ce fichier). Les TITRES et les
+ * BORNES, eux, sont REUTILISES directement depuis ecran_temperatures.h
+ * (ECRAN_TEMPERATURES_TITRE_BUSE/PLATEAU, ECRAN_TEMPERATURES_TEMP_MIN/MAX) --
+ * jamais une seconde constante qui pourrait diverger du panneau dedie.
+ * ------------------------------------------------------------------------ */
+
+/* Tampon suffisant pour {"script":"<gcode>"} : KLIPPER_GCODE_MAX (160,
+ * klipper_gcode.h) plus la marge du wrapper JSON (guillemets, cle "script",
+ * accolades) -- meme raisonnement que GCODE_ARGS_MAX dans ecran_temperatures.c. */
+#define GCODE_ARGS_MAX (KLIPPER_GCODE_MAX + 32)
+
+/* Construit {"script":"<script>"} via cJSON (jamais un snprintf a la main) :
+ * copie de construire_arguments_gcode() de ecran_temperatures.c -- un vrai
+ * octet 0x0A brut dans une chaine JSON violerait RFC 8259. Rend false SANS
+ * TOUCHER `sortie` si un argument est invalide, si cJSON echoue (memoire), ou
+ * si le resultat ne tient pas dans `taille`. */
+static bool construire_arguments_gcode(const char *script, char *sortie, size_t taille)
+{
+    if (script == NULL || sortie == NULL || taille == 0) {
+        return false;
+    }
+    cJSON *racine = cJSON_CreateObject();
+    if (racine == NULL) {
+        return false;
+    }
+    if (cJSON_AddStringToObject(racine, "script", script) == NULL) {
+        cJSON_Delete(racine);
+        return false;
+    }
+    char *texte = cJSON_PrintUnformatted(racine);
+    cJSON_Delete(racine);
+    if (texte == NULL) {
+        return false;
+    }
+    size_t longueur = strlen(texte);
+    bool ok = longueur < taille;
+    if (ok) {
+        memcpy(sortie, texte, longueur + 1);
+    }
+    cJSON_free(texte);
+    return ok;
+}
+
+static void envoyer_gcode(const char *script)
+{
+    if (script == NULL) {
+        return;
+    }
+    char arguments[GCODE_ARGS_MAX];
+    if (!construire_arguments_gcode(script, arguments, sizeof(arguments))) {
+        return; /* ne devrait jamais arriver : GCODE_ARGS_MAX suffit toujours */
+    }
+    ui_commander(BACKEND_ACTION_GCODE, arguments);
+}
+
+/* Nom du chauffeur Klipper d'un extrudeur : indice 0 => "extruder", indice N
+ * (1..7) => "extruderN" -- PAS "extruder0" pour l'indice 0. Copie de
+ * nom_chauffeur_extrudeur() de ecran_temperatures.c. Rend faux SANS toucher
+ * `sortie` si le tampon est trop court ou si `indice` deborde
+ * KLIPPER_EXTRUDEURS_MAX. */
+static bool nom_chauffeur_extrudeur(uint8_t indice, char *sortie, size_t taille)
+{
+    if (sortie == NULL || taille == 0 || indice >= KLIPPER_EXTRUDEURS_MAX) {
+        return false;
+    }
+    int ecrit = (indice == 0) ? snprintf(sortie, taille, "extruder")
+                               : snprintf(sortie, taille, "extruder%u", (unsigned)indice);
+    return ecrit >= 0 && (size_t)ecrit < taille;
+}
+
+/* Convertit une consigne backend (float, potentiellement NaN/negative/hors
+ * plage) en entier [0, ECRAN_TEMPERATURES_TEMP_MAX] affichable/envoyable --
+ * copie de consigne_u16() de ecran_temperatures.c, meme borne (reutilisee,
+ * jamais recopiee en dur). isnan() teste EXPLICITEMENT en premier -- comparer
+ * un NaN a 0.0f rend faux dans les DEUX sens, ce qui laisserait tomber dans
+ * la conversion (uint16_t)v finale avec un NaN : comportement indefini en C
+ * (6.3.1.4), jamais accepte silencieusement ici. */
+static uint16_t consigne_u16(float valeur)
+{
+    if (isnan(valeur) || valeur <= 0.0f) {
+        return 0;
+    }
+    if (valeur > (float)ECRAN_TEMPERATURES_TEMP_MAX) {
+        return (uint16_t)ECRAN_TEMPERATURES_TEMP_MAX;
+    }
+    return (uint16_t)valeur;
+}
+
+/* Rend `info->ctx` -> nom du chauffeur Klipper de CE chauffant (extrudeur ou
+ * "heater_bed"), dans `sortie`. Copie de cellule_info_nom_chauffeur() de
+ * ecran_temperatures.c -- factorise entre chauffant_valeur_cb() (pour le
+ * titre "Nozzle"/"Bed") et chauffant_clavier_rappel() (pour le gcode
+ * reellement envoye) : les deux ne doivent jamais diverger sur QUEL
+ * chauffeur une ligne precise designe. */
+static bool chauffant_info_nom_chauffeur(const ecran_accueil_hub_chauffant_info_t *info, char *sortie, size_t taille)
+{
+    if (info->est_plateau) {
+        int ecrit = snprintf(sortie, taille, "heater_bed");
+        return ecrit >= 0 && (size_t)ecrit < taille;
+    }
+    return nom_chauffeur_extrudeur(info->indice_extrudeur, sortie, taille);
+}
+
+/* Rappel du clavier numerique ouvert par chauffant_valeur_cb() ci-dessous --
+ * `contexte` EST directement `&ctx->chauffant_infos[i]`. `valeur == NULL`
+ * (annule) : rien (spec). Sinon parse en entier, borne
+ * [ECRAN_TEMPERATURES_TEMP_MIN, ECRAN_TEMPERATURES_TEMP_MAX] -- MEMES bornes
+ * EXACTES que cellule_clavier_rappel() de ecran_temperatures.c, une saisie
+ * hors borne OU non numerique => notification d'erreur, AUCUN gcode envoye. */
+static void chauffant_clavier_rappel(const char *valeur, void *contexte)
+{
+    ecran_accueil_hub_chauffant_info_t *info = contexte;
+    if (valeur == NULL || info == NULL) {
+        return;
+    }
+
+    /* strtol() plutot que sscanf("%d") : rend un pointeur de fin qu'on peut
+     * comparer au terme de la chaine, la seule facon fiable de distinguer
+     * "210" (valide) de "210abc"/"12.5"/""/"  " (non numerique). Chaine vide
+     * (clavier valide sans rien saisir) : `fin == valeur`, rejetee
+     * explicitement ci-dessous. */
+    char *fin = NULL;
+    errno = 0;
+    long cible = strtol(valeur, &fin, 10);
+    bool numerique = (fin != valeur) && (fin != NULL) && (*fin == '\0') && (errno == 0);
+    bool dans_bornes = numerique && cible >= ECRAN_TEMPERATURES_TEMP_MIN && cible <= ECRAN_TEMPERATURES_TEMP_MAX;
+
+    if (!dans_bornes) {
+        habillage_notifier("Invalid temperature (0-350)", true);
+        return;
+    }
+
+    char chauffeur[40];
+    if (!chauffant_info_nom_chauffeur(info, chauffeur, sizeof(chauffeur))) {
+        return; /* ne devrait jamais arriver : indice/tampon toujours valides depuis ce clavier */
+    }
+    char script[KLIPPER_GCODE_MAX];
+    if (!klipper_gcode_consigne_temp(script, sizeof(script), chauffeur, (uint16_t)cible)) {
+        return; /* ne devrait jamais arriver : chauffeur/cible deja valides ci-dessus */
+    }
+    envoyer_gcode(script);
+}
+
+/* Tap sur le label VALEUR d'une ligne de chauffant. `info` est passe
+ * DIRECTEMENT comme `contexte` a clavier_ouvrir() -- meme raisonnement que
+ * cellule_bouton_cb() de ecran_temperatures.c : aucun etat "en attente" a
+ * poser avant l'ouverture, clavier_ouvrir() est deja lui-meme un singleton
+ * qui refuse une seconde ouverture (voir clavier.h). */
+static void chauffant_valeur_cb(lv_event_t *e)
+{
+    ecran_accueil_hub_chauffant_info_t *info = lv_event_get_user_data(e);
+    lv_obj_t *cible = lv_event_get_target(e);
+    if (info == NULL || info->ctx == NULL || cible == NULL) {
+        return;
+    }
+
+    const char *titre = info->est_plateau ? ECRAN_TEMPERATURES_TITRE_PLATEAU : ECRAN_TEMPERATURES_TITRE_BUSE;
+    char valeur_initiale[8];
+    snprintf(valeur_initiale, sizeof(valeur_initiale), "%u", (unsigned)info->consigne_courante);
+    clavier_ouvrir(titre, valeur_initiale, CLAVIER_NUMERIQUE, chauffant_clavier_rappel, info);
+}
+
 static lv_obj_t *ligne_creer(lv_obj_t *parent, lv_coord_t y)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -279,10 +467,13 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* --- colonne gauche : lignes de chauffants, lecture seule (voir le
-     * commentaire de tete du .h) -- pool a taille fixe
+    /* --- colonne gauche : lignes de chauffants -- pool a taille fixe
      * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES), masque/rempli par mettre_a_jour()
-     * selon le nombre de chauffants reellement presents. ------------------ */
+     * selon le nombre de chauffants reellement presents. `chauffant_valeur[i]`
+     * est un `lv_label_t` NU (jamais un bouton) : LV_OBJ_FLAG_CLICKABLE doit
+     * etre pose EXPLICITEMENT ici pour qu'il recoive des evenements de clic
+     * (voir le commentaire de tete du fichier, tache 4). `chauffant_nom[i]`,
+     * lui, reste SANS ce flag -- tache 5 du meme sous-projet. --------------- */
     for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
         lv_coord_t y = (lv_coord_t)(CHAUFFANTS_ZONE_Y + i * (CHAUFFANT_LIGNE_HAUTEUR + CHAUFFANT_LIGNE_ECART));
 
@@ -300,7 +491,18 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
         lv_label_set_text(valeur, "");
         lv_obj_set_pos(valeur, GAUCHE_X + CHAUFFANT_VALEUR_X, y);
         lv_obj_set_width(valeur, CHAUFFANT_VALEUR_LARGEUR);
+        lv_obj_add_flag(valeur, LV_OBJ_FLAG_CLICKABLE);
         ctx->chauffant_valeur[i] = valeur;
+
+        /* `ctx` pose ICI, une fois pour toutes -- meme idiome que
+         * ctx->cellule_infos[i].ctx dans ecran_temperatures.c ("jamais NULL
+         * une fois construire() passe"). est_plateau/indice_extrudeur/
+         * consigne_courante restent a leur valeur zero-initialisee (calloc du
+         * contexte, voir ecran.h) tant que mettre_a_jour() n'a pas tourne au
+         * moins une fois pour CETTE ligne -- inoffensif, la ligne est masquee
+         * jusque-la (voir la boucle de visibilite dans mettre_a_jour()). */
+        ctx->chauffant_infos[i].ctx = ctx;
+        lv_obj_add_event_cb(valeur, chauffant_valeur_cb, LV_EVENT_CLICKED, &ctx->chauffant_infos[i]);
     }
 
     /* --- colonne gauche : resume, trois lignes en lecture seule -- Voir le
@@ -423,6 +625,12 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         snprintf(texte_valeur, sizeof(texte_valeur), "%s/%s", valeur, consigne);
         lv_label_set_text(ctx->chauffant_nom[total], nom);
         lv_label_set_text(ctx->chauffant_valeur[total], texte_valeur);
+        /* Identite du chauffeur + consigne courante, relues par
+         * chauffant_valeur_cb()/le clavier au moment du tap -- voir le
+         * commentaire de ecran_accueil_hub_chauffant_info_t (le .h). */
+        ctx->chauffant_infos[total].est_plateau = false;
+        ctx->chauffant_infos[total].indice_extrudeur = i;
+        ctx->chauffant_infos[total].consigne_courante = consigne_u16(e->extrudeurs[i].consigne);
         total++;
     }
     if (e->plateau.presente && total < ECRAN_ACCUEIL_HUB_HEATER_LIGNES) {
@@ -431,6 +639,9 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         snprintf(texte_valeur, sizeof(texte_valeur), "%s/%s", valeur, consigne);
         lv_label_set_text(ctx->chauffant_nom[total], "Bed");
         lv_label_set_text(ctx->chauffant_valeur[total], texte_valeur);
+        ctx->chauffant_infos[total].est_plateau = true;
+        ctx->chauffant_infos[total].indice_extrudeur = 0; /* non utilise, est_plateau=true */
+        ctx->chauffant_infos[total].consigne_courante = consigne_u16(e->plateau.consigne);
         total++;
     }
     for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {

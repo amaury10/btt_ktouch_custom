@@ -12,14 +12,18 @@
  * le chooser d'habillage (accueil_choix.h) le reference -- aucun des trois ne
  * bouge, seul le CONTENU change.
  *
- * Lignes de chauffants EN LECTURE SEULE dans CETTE tache (aucun tap, tache 4/5
- * du meme sous-projet les rendront cliquables -- voir task-3-brief.md) : nom
- * ("T0"/"Bed") et valeur ("actuelle/consigne") sont deux `lv_label_t` DISTINCTS
- * et adjacents, jamais un texte concatene comme l'ancienne ligne de
- * temperatures -- c'est precisement ce qui permettra a la tache 4/5 de poser
- * LV_OBJ_FLAG_CLICKABLE sur chaque paire sans retoucher la mise en page.
- * Regler une temperature reste possible des cette tache-ci via la tuile
- * "Temperature", qui ouvre ECRAN_TEMPERATURES (cible deja cliquable).
+ * Lignes de chauffants (tache 4 du sous-projet "graphes de temperature",
+ * task-4-brief.md) : nom ("T0"/"Bed") et valeur ("actuelle/consigne") sont
+ * deux `lv_label_t` DISTINCTS et adjacents, jamais un texte concatene comme
+ * l'ancienne ligne de temperatures -- c'est precisement ce qui a permis a
+ * cette tache de poser LV_OBJ_FLAG_CLICKABLE SEULEMENT sur le label VALEUR
+ * (chauffant_valeur[i]) sans retoucher la mise en page. Taper la VALEUR ouvre
+ * le clavier numerique pour editer la consigne de CE chauffant precis --
+ * meme parsing/bornes que ecran_temperatures.c (reference, voir le .c).
+ * Le label NOM (chauffant_nom[i]) reste EN LECTURE SEULE dans cette tache
+ * (tache 5 du meme sous-projet le rendra cliquable). Regler une temperature
+ * reste aussi possible via la tuile "Temperature", qui ouvre ECRAN_TEMPERATURES
+ * (cible deja cliquable).
  *
  * Le graphe (`chart`) lit exclusivement klipper_temp_historique.h (tache 1 du
  * meme sous-projet) : jamais de copie du tampon circulaire entier, voir
@@ -65,13 +69,38 @@
 #define ECRAN_ACCUEIL_HUB_MENU_PRINT         4
 #define ECRAN_ACCUEIL_HUB_MENU_NB            5
 
+/* user_data du rappel de clic d'UN label VALEUR de chauffant -- meme forme
+ * que ecran_temperatures_cellule_info_t (ecran_temperatures.h), un tableau
+ * PARALLELE a `chauffant_nom[]`/`chauffant_valeur[]`, indexe EXACTEMENT
+ * pareil (voir ecran_accueil_hub_mettre_a_jour() dans le .c, qui remplit
+ * `chauffant_infos[i]` du meme indice `total` a chaque appel). Passe
+ * DIRECTEMENT comme `contexte` a clavier_ouvrir() -- meme raisonnement que
+ * ecran_temperatures.h : ce pointeur suffit a identifier quel chauffant a
+ * ete tape sans jamais ecrire d'etat partage avant l'ouverture. */
+typedef struct {
+    struct ecran_accueil_hub_ctx_s *ctx; /* jamais NULL une fois construire() passe */
+    bool     est_plateau;      /* true => "heater_bed", false => extrudeurs[indice_extrudeur] */
+    uint8_t  indice_extrudeur; /* valide seulement si !est_plateau */
+    /* Consigne courante (C, entier), rafraichie a CHAQUE mettre_a_jour()
+     * depuis etat_klipper_t::extrudeurs[i].consigne / ::plateau.consigne
+     * (bornee [0, 350], meme borne que ECRAN_TEMPERATURES_TEMP_MAX -- voir
+     * consigne_u16() dans le .c), jamais relue depuis l'etat backend au
+     * moment du clic -- ce que le clic lit doit etre ce que le dernier rendu
+     * a montre a l'utilisateur, pas un etat backend qui a pu changer
+     * entre-temps. */
+    uint16_t consigne_courante;
+} ecran_accueil_hub_chauffant_info_t;
+
 typedef struct ecran_accueil_hub_ctx_s {
-    /* --- colonne gauche : lignes de chauffants (lecture seule, voir le
-     * commentaire de tete ci-dessus) -- `chauffant_nom[i]`/`chauffant_valeur[i]`
-     * sont TOUJOURS la paire de la ligne `i`, masquee (LV_OBJ_FLAG_HIDDEN) si
-     * moins de ECRAN_ACCUEIL_HUB_HEATER_LIGNES chauffants sont presents. ---- */
+    /* --- colonne gauche : lignes de chauffants -- `chauffant_nom[i]`/
+     * `chauffant_valeur[i]` sont TOUJOURS la paire de la ligne `i`, masquee
+     * (LV_OBJ_FLAG_HIDDEN) si moins de ECRAN_ACCUEIL_HUB_HEATER_LIGNES
+     * chauffants sont presents. `chauffant_valeur[i]` est CLIQUABLE (tache 4,
+     * voir le commentaire de tete ci-dessus) ; `chauffant_infos[i]` est le
+     * tableau parallele (meme indice `i`) que son rappel de clic relit. ---- */
     lv_obj_t *chauffant_nom[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];    /* "T0"/"T1"/"Bed" */
     lv_obj_t *chauffant_valeur[ECRAN_ACCUEIL_HUB_HEATER_LIGNES]; /* "205.0/210.0" */
+    ecran_accueil_hub_chauffant_info_t chauffant_infos[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];
 
     /* --- colonne gauche : resume compact, trois lignes empilees sous les
      * chauffants -- voir ecran_accueil_hub.c pour le format exact. --------- */
