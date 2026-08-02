@@ -1,6 +1,10 @@
 /* rail.h — le rail persistant d'accès rapide : une colonne verticale de
- * quatre boutons (Accueil, Home, Macros, STOP) présente en permanence sur le
- * côté de l'écran (jalon refonte accueil/déplacer). Généralisation d'un
+ * quatre boutons (Back, Accueil, Macros, STOP) présente en permanence sur le
+ * côté de l'écran (jalon refonte accueil/déplacer). Back remonte d'UN seul
+ * niveau de navigation (équivalent au bouton retour de la barre du haut,
+ * navigation_depiler()) -- le rail ne fait PLUS de homing (RAIL_HOME a été
+ * retiré : le homing des axes vit désormais uniquement dans ses écrans
+ * dédiés, jamais un raccourci permanent). Généralisation d'un
  * même besoin que selecteur_pas.h/selecteur_choix.h -- N boutons dans une
  * colonne plutôt qu'une rangée -- mais avec une différence de fond : ce
  * widget ne fait NI navigation NI gcode, et un clic ne bascule PAS lui-même
@@ -24,8 +28,8 @@
 #include "lvgl.h"
 
 typedef enum {
+    RAIL_BACK,
     RAIL_ACCUEIL,
-    RAIL_HOME,
     RAIL_MACROS,
     RAIL_STOP,
     RAIL_NB
@@ -42,8 +46,9 @@ typedef struct {
  * large) dans `parent`, et les range dans `r` (déjà alloué par l'appelant,
  * voir le commentaire de tête). `boutons[i]` est toujours le bouton de
  * l'action `i` (donc `boutons[RAIL_STOP]` est le bouton STOP, quel que soit
- * l'ordre de création interne) -- STOP est rouge et affiché en TÊTE (haut) de
- * la colonne, visuellement distinct des trois autres. Un clic sur `boutons[i]`
+ * l'ordre de création interne) -- STOP est rouge et affiché en BAS de la
+ * colonne (hors flux flex), les trois autres (Back/Accueil/Macros) empilés en
+ * HAUT, visuellement distinct des trois autres. Un clic sur `boutons[i]`
  * appelle `sur_action(i, ctx)` si `sur_action` n'est pas NULL (NULL est
  * autorisé à la création -- un clic ne fait alors simplement rien, même
  * garde que `cible`/`s` dans bouton_pas_cb() de selecteur_pas.c) ; ce widget

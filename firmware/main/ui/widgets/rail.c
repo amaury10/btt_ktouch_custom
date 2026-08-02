@@ -5,6 +5,10 @@
 #define COULEUR_ACTIF         0x3B82F6 /* meme bleu "actif" que COULEUR_ACTIF dans selecteur_pas.c/ecran_accueil_hub.c */
 #define COULEUR_STOP          0xE5484D /* rouge -- imposee par le brief de la tache */
 #define COULEUR_TEXTE_BOUTON  0xFFFFFF
+/* Meme sombre que COULEUR_FOND des ecrans (ecran_deplacer.c/ecran_accueil_hub.c
+ * etc.) -- rend la colonne du rail OPAQUE (voir rail_creer()) plutot que de
+ * laisser transparaitre ce qui vit derriere elle. */
+#define COULEUR_FOND          0x10161D
 
 /* Taille par defaut de `racine`, PAS LV_SIZE_CONTENT -- meme piege, meme
  * choix que RACINE_LARGEUR_DEFAUT/RACINE_HAUTEUR_DEFAUT dans
@@ -16,23 +20,24 @@
  * boutons de BOUTON_HAUTEUR_DEFAUT px + trois ecarts de ECART_BOUTONS px.
  * Contrairement a selecteur_pas.c/selecteur_choix.c (rangee HORIZONTALE,
  * boutons en flex_grow pour repartir la LARGEUR), les boutons ici ont une
- * hauteur FIXE plutot qu'un flex_grow sur la hauteur : les quatre restent
- * compacts en haut de la colonne (STOP en tete, voir rail_creer()),
- * l'eventuel espace libre tombant en bas quand l'appelant agrandit `racine`
- * -- plutot que de se dilater chacun pour remplir toute la hauteur. */
+ * hauteur FIXE plutot qu'un flex_grow sur la hauteur : Back/Accueil/Macros
+ * restent compacts en HAUT de la colonne (flex column START), STOP est sorti
+ * du flux et ancre en BAS (voir rail_creer()), l'eventuel espace libre entre
+ * les deux groupes tombant au milieu quand l'appelant agrandit `racine` --
+ * plutot que de se dilater chacun pour remplir toute la hauteur. */
 #define RACINE_LARGEUR_DEFAUT   58
 #define BOUTON_HAUTEUR_DEFAUT   80
 #define ECART_BOUTONS            8
 #define RACINE_HAUTEUR_DEFAUT   (RAIL_NB * BOUTON_HAUTEUR_DEFAUT + (RAIL_NB - 1) * ECART_BOUTONS)
 
-static const char *const LIBELLES[RAIL_NB] = { "Accueil", "Home", "Macros", "STOP" };
-/* Icones distinctes malgre le risque de confusion entre "Accueil" (retour a
- * l'ecran d'accueil idle) et "Home" (homing des axes) : LV_SYMBOL_HOME (une
- * maison) pour l'ecran d'accueil, LV_SYMBOL_GPS (une cible) pour le homing,
- * jamais le meme symbole pour les deux malgre le nom anglais partage. */
+static const char *const LIBELLES[RAIL_NB] = { "Back", "Accueil", "Macros", "STOP" };
+/* LV_SYMBOL_LEFT (fleche) pour Back -- remonte d'un niveau de navigation,
+ * meme symbole que le bouton retour de la barre du haut (habillage.c) ;
+ * LV_SYMBOL_HOME (une maison) pour l'ecran d'accueil, jamais confondu avec
+ * Back malgre leur proximite dans la colonne. */
 static const char *const ICONES[RAIL_NB] = {
+    LV_SYMBOL_LEFT,
     LV_SYMBOL_HOME,
-    LV_SYMBOL_GPS,
     LV_SYMBOL_LIST,
     LV_SYMBOL_STOP,
 };
@@ -86,6 +91,15 @@ void rail_creer(rail_t *r, lv_obj_t *parent, void (*sur_action)(rail_action_t, v
     r->racine = lv_obj_create(parent);
     lv_obj_remove_style_all(r->racine);
     lv_obj_set_size(r->racine, RACINE_LARGEUR_DEFAUT, RACINE_HAUTEUR_DEFAUT);
+    /* Colonne OPAQUE (fix du rond jaune) : lv_obj_remove_style_all() ci-dessus
+     * repasse `racine` transparent (meme piege que bg_opa sur les boutons plus
+     * bas) -- sans ceci, un artefact vivant DERRIERE le rail (repere de coin
+     * de build_test_pattern(), voir app_main.c) transparaissait par le bas de
+     * la colonne, restee vide depuis que STOP est sorti du flux flex. Rien a
+     * voir avec la mire elle-meme (jamais modifiee ici) : seul le rail devient
+     * opaque pour la couvrir. */
+    lv_obj_set_style_bg_color(r->racine, lv_color_hex(COULEUR_FOND), 0);
+    lv_obj_set_style_bg_opa(r->racine, LV_OPA_COVER, 0);
     lv_obj_clear_flag(r->racine, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(r->racine, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(r->racine, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER);
@@ -128,21 +142,22 @@ void rail_creer(rail_t *r, lv_obj_t *parent, void (*sur_action)(rail_action_t, v
         lv_obj_add_event_cb(b, bouton_rail_cb, LV_EVENT_CLICKED, r);
     }
 
-    /* STOP en TETE de colonne (haut du rail) plutot qu'en bas : le bandeau de
-     * notification, ancre en bas de l'ecran sur toute la largeur (voir
-     * habillage.c), recouvrait sinon le bouton d'arret d'urgence pendant ses
-     * 4 s -- inacceptable pour LE controle de securite. lv_obj_move_to_index(
-     * ..., 0) le replace comme PREMIER enfant du flex column : les enfants
-     * sont rendus dans l'ordre de creation, STOP passe donc tout en haut,
-     * suivi d'Accueil/Home/Macros. Il reste dans le flux flex normal (pas
-     * d'IGNORE_LAYOUT/align comme avant) : les quatre boutons sont alors
-     * simplement empiles compactement en haut, l'espace libre eventuel tombant
-     * en bas, la ou le bandeau peut le recouvrir sans masquer aucun bouton.
-     * STOP demeure visuellement distinct par son rouge (bg_color ci-dessus),
-     * et son declenchement passe de toute facon par une confirmation (voir
-     * rail_actions.c) : sa proximite avec Accueil ne risque donc pas un arret
-     * d'urgence sur simple effleurement. */
-    lv_obj_move_to_index(r->boutons[RAIL_STOP], 0);
+    /* STOP ancre en BAS de la colonne, HORS du flux flex (revue de la tache :
+     * le placer en tete confondait dangereusement le tout premier bouton de
+     * la colonne -- celui qu'un utilisateur vise par reflexe pour "revenir en
+     * arriere" -- avec l'arret d'urgence). LV_OBJ_FLAG_IGNORE_LAYOUT le
+     * retire du calcul flex column (qui n'empile donc plus que Back/Accueil/
+     * Macros, en HAUT) ; lv_obj_align(BOTTOM_MID) le recale explicitement en
+     * bas de `racine`, largeur explicite LV_PCT(100) puisqu'un objet hors
+     * flux ne recoit plus le LV_PCT(100) pose plus haut par flex. Desormais
+     * le bandeau de notification degage le rail entierement (voir
+     * habillage.c, construire_bandeau()) : STOP au fond de la colonne n'est
+     * donc plus jamais recouvert par lui. STOP demeure visuellement distinct
+     * par son rouge (bg_color ci-dessus), et son declenchement passe de toute
+     * facon par une confirmation (voir rail_actions.c). */
+    lv_obj_add_flag(r->boutons[RAIL_STOP], LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_width(r->boutons[RAIL_STOP], LV_PCT(100));
+    lv_obj_align(r->boutons[RAIL_STOP], LV_ALIGN_BOTTOM_MID, 0, 0);
 }
 
 void rail_marquer_actif(rail_t *r, rail_action_t action)

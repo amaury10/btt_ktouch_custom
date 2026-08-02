@@ -344,8 +344,15 @@ static void construire_bandeau(lv_obj_t *parent)
 {
     g_bandeau = lv_obj_create(parent);
     lv_obj_remove_style_all(g_bandeau);
-    lv_obj_set_size(g_bandeau, LARGEUR_ECRAN, BANDEAU_HAUTEUR);
-    lv_obj_set_pos(g_bandeau, 0, HAUTEUR_ECRAN - BANDEAU_HAUTEUR);
+    /* Degage le rail (RAIL_LARGEUR px de large, colonne gauche persistante,
+     * voir habillage_construire()) : le bandeau couvrait auparavant toute la
+     * largeur de l'ecran et masquait donc le rail -- dont STOP, ancre en bas
+     * de la colonne (voir rail.c) -- pendant ses 4 s d'affichage, inacceptable
+     * pour LE controle de securite. Il continue de couvrir tout le bas de la
+     * zone de contenu a x >= RAIL_LARGEUR (les _Static_assert de clearance des
+     * ecrans restent donc valides). */
+    lv_obj_set_size(g_bandeau, LARGEUR_ECRAN - RAIL_LARGEUR, BANDEAU_HAUTEUR);
+    lv_obj_set_pos(g_bandeau, RAIL_LARGEUR, HAUTEUR_ECRAN - BANDEAU_HAUTEUR);
     lv_obj_set_style_bg_opa(g_bandeau, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(g_bandeau, lv_color_hex(COULEUR_BANDEAU_INFO), 0);
     lv_obj_clear_flag(g_bandeau, LV_OBJ_FLAG_SCROLLABLE);

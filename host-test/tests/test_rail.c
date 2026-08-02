@@ -78,11 +78,11 @@ void suite_rail(void)
     VERIFIER(g_appels == 2);
     VERIFIER(g_dernier == RAIL_ACCUEIL);
 
-    /* --- clic sur HOME puis MACROS : chaque bouton dispatche SA propre
+    /* --- clic sur BACK puis MACROS : chaque bouton dispatche SA propre
      * action (pas juste "toujours le dernier index clique precedemment") -- */
-    lv_obj_send_event(r.boutons[RAIL_HOME], LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(r.boutons[RAIL_BACK], LV_EVENT_CLICKED, NULL);
     VERIFIER(g_appels == 3);
-    VERIFIER(g_dernier == RAIL_HOME);
+    VERIFIER(g_dernier == RAIL_BACK);
 
     lv_obj_send_event(r.boutons[RAIL_MACROS], LV_EVENT_CLICKED, NULL);
     VERIFIER(g_appels == 4);
@@ -104,7 +104,7 @@ void suite_rail(void)
     VERIFIER(!lv_color_eq(couleur_stop, couleur_nav));
     VERIFIER(lv_color_eq(couleur_stop, lv_color_hex(0xE5484D)));
     /* les trois boutons de navigation partagent la meme couleur de base */
-    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(r.boutons[RAIL_HOME], LV_PART_MAIN), couleur_nav));
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(r.boutons[RAIL_BACK], LV_PART_MAIN), couleur_nav));
     VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(r.boutons[RAIL_MACROS], LV_PART_MAIN), couleur_nav));
 
     /* --- rail_marquer_actif() : surligne UN bouton, aucun autre ---------- */
@@ -112,7 +112,7 @@ void suite_rail(void)
     pomper_transitions_style();
     VERIFIER(lv_obj_get_style_border_width(r.boutons[RAIL_MACROS], LV_PART_MAIN) > 0);
     VERIFIER(lv_obj_get_style_border_width(r.boutons[RAIL_ACCUEIL], LV_PART_MAIN) == 0);
-    VERIFIER(lv_obj_get_style_border_width(r.boutons[RAIL_HOME], LV_PART_MAIN) == 0);
+    VERIFIER(lv_obj_get_style_border_width(r.boutons[RAIL_BACK], LV_PART_MAIN) == 0);
     VERIFIER(lv_obj_get_style_border_width(r.boutons[RAIL_STOP], LV_PART_MAIN) == 0);
     /* le surlignage ne change PAS la couleur de fond propre a STOP (rouge) --
      * verifie ici que marquer_actif(RAIL_STOP) ne "banalise" pas son rouge en

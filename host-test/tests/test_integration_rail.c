@@ -122,15 +122,15 @@ void suite_integration_rail(void)
     char action[32];
     char arguments[192];
 
-    /* --- clic HOME : G28 DIRECT, sans confirmation ------------------------- */
+    /* --- clic BACK : depile UN niveau, AUCUNE commande Klipper -------------- */
     size_t avant = source_etat_sim_file_taille();
-    lv_obj_send_event(rail->boutons[RAIL_HOME], LV_EVENT_CLICKED, NULL);
-    VERIFIER(dernier_enfant_calque_superieur() == NULL); /* aucune confirmation pour Home */
-    VERIFIER(source_etat_sim_file_taille() == avant + 1);
-    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
-    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
-    VERIFIER(strstr(arguments, "\"script\":\"G28\"") != NULL);
-    source_etat_sim_cycle(); /* draine avant la suite */
+    VERIFIER(navigation_empiler(&ECRAN_DEPLACER) == ESP_OK);
+    VERIFIER(navigation_profondeur() == 2);
+    lv_obj_send_event(rail->boutons[RAIL_BACK], LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 1);
+    VERIFIER_TEXTE(navigation_id_courant(), ECRAN_ACCUEIL_HUB.id);
+    VERIFIER(dernier_enfant_calque_superieur() == NULL); /* aucune confirmation pour Back */
+    VERIFIER(source_etat_sim_file_taille() == avant); /* aucune commande envoyee */
 
     /* --- clic MACROS : empile l'ecran macros (le rail navigue via l'app) ---- */
     lv_obj_send_event(rail->boutons[RAIL_MACROS], LV_EVENT_CLICKED, NULL);

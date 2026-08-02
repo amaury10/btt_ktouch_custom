@@ -9,8 +9,8 @@
  * l'habillage generique via habillage_definir_action_rail() (voir
  * ui/habillage.h) au demarrage de l'application (app_main.c) :
  *
+ *   RAIL_BACK    -> navigation_depiler()           (remonte d'un niveau)
  *   RAIL_ACCUEIL -> navigation_accueil()          (revient a l'ecran d'accueil)
- *   RAIL_HOME    -> G28 direct (klipper_gcode_home(0)), SANS confirmation
  *   RAIL_MACROS  -> navigation_empiler(&ECRAN_MACROS)
  *   RAIL_STOP    -> confirmation, puis M112 (klipper_gcode_arret_urgence())
  *

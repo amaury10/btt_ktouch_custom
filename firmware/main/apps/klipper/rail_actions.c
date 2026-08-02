@@ -89,15 +89,14 @@ void rail_action_klipper(rail_action_t action, void *ctx)
          * ECRAN_ACCUEIL_HUB au demarrage. */
         navigation_accueil();
         break;
-    case RAIL_HOME: {
-        /* G28 plein (masque 0), DIRECT, sans confirmation (decision du plan) :
-         * le homing n'est pas destructif, contrairement a l'arret d'urgence. */
-        char s[KLIPPER_GCODE_MAX];
-        if (klipper_gcode_home(s, sizeof(s), 0)) {
-            envoyer_gcode(s);
-        }
+    case RAIL_BACK:
+        /* Remonte d'UN seul niveau de navigation -- meme effet que le bouton
+         * retour de la barre du haut (bouton_retour_cb() dans habillage.c),
+         * simplement accessible en permanence depuis le rail. Le rail ne fait
+         * plus de homing (RAIL_HOME retire du plan, voir rail.h) : le homing
+         * des axes vit desormais uniquement dans ses ecrans dedies. */
+        navigation_depiler();
         break;
-    }
     case RAIL_MACROS: {
         /* Garde anti-re-empilement (revue finale de branche, finding I1) : le
          * rail etant persistant et Macros atteignable DEPUIS Macros lui-meme,
