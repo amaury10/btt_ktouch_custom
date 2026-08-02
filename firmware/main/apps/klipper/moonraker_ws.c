@@ -857,17 +857,24 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     config.uri = url;
     config.disable_auto_reconnect = true; /* backoff exponentiel gere par CE fichier, pas la bibliotheque */
     /* Pile de la tache WS : le DEFAUT esp_websocket_client est 4 Ko, INSUFFISANT
-     * ici. ws_event_handler() -> traiter_message_complet() -> rpc_fusionner_*()
-     * tournent tous DANS cette tache, et rpc_fusionner_status()/_instantane()
-     * posent un `etat_klipper_t local = *etat` sur la pile -- or sizeof(etat_
-     * klipper_t) vaut 1808 octets (jusqu'a deux copies vivantes a la fois),
-     * plus la recursion de cJSON_ParseWithLength() sur le payload. Les petites
-     * fixtures vkp tenaient dans 4 Ko ; l'etat REEL complet d'une imprimante
-     * (bien plus gros) faisait deborder la pile -> crash + reboot des la
-     * connexion (constate sur une vraie CR-10/Snapmaker). 12 Ko laisse la marge.
+     * ici. ws_event_handler() -> traiter_message_complet() -> rpc_fusionner_*()/
+     * rpc_lire_fichiers() tournent tous DANS cette tache, et le handler ci-dessus
+     * pose un `etat_klipper_t copie = g_boite.etat` sur la pile (jusqu'a deux
+     * copies vivantes a la fois avec le local de rpc_fusionner_*), plus la
+     * recursion de cJSON_ParseWithLength() sur le payload.
+     *
+     * ATTENTION -- taille de l'etat DOUBLEE depuis le sous-projet navigateur de
+     * fichiers : sizeof(etat_klipper_t) est passe de 1808 a ~3856 octets (champ
+     * `fichiers[32][64]`, +2 Ko). Deux copies = ~7,7 Ko de pile, contre ~3,6 Ko
+     * avant. Les petites fixtures vkp tenaient dans 16 Ko, mais l'etat REEL
+     * complet d'une vraie imprimante (Freebox/CR-10/Snapmaker) faisait de nouveau
+     * deborder la pile -> crash + reboot PILE A LA CONNEXION Moonraker (constate
+     * sur le materiel reel). D'ou 32 Ko ici : marge confortable pour 2x3856 +
+     * cJSON profond sur un gros instantane. (Fix propre a venir : sortir
+     * `fichiers[]` de l'etat toujours-copie pour revenir a ~1808 octets.)
      * buffer_size : 4 Ko (defaut 1 Ko) reduit la fragmentation applicative des
      * grosses trames (le reassemblage g_tampon_msg la gere de toute facon). */
-    config.task_stack = 16384;
+    config.task_stack = 32768;
     config.buffer_size = 4096;
 
     g_client = esp_websocket_client_init(&config);

@@ -45,13 +45,16 @@ static const char *TAG = "boucle";
 #define BOUCLE_ACTION_MAX    32
 #define BOUCLE_ARGUMENTS_MAX 128
 
-/* Pile et priorité de la tâche d'interrogation, reprises de la seule autre
- * tâche créée par ce firmware (rescue.c, tache_sur_echeance) : 8192 octets
- * couvre confortablement esp_http_client en clair (pas de TLS, donc pas de
- * pile mbedtls) plus l'analyse cJSON du corps de réponse, avec de la marge ;
- * tskIDLE_PRIORITY + 5 place cette tâche nettement au-dessus de l'IDLE mais
- * sans rivaliser avec les tâches internes du pilote WiFi ni la tâche LVGL. */
-#define BOUCLE_PILE_OCTETS 8192
+/* Pile et priorité de la tâche d'interrogation. 8192 octets couvraient
+ * esp_http_client en clair + l'analyse cJSON du corps de réponse plus le
+ * `etat_klipper_t nouveau` que le backend pose sur cette pile -- tant que
+ * sizeof(etat_klipper_t) valait 1808 octets. Le sous-projet navigateur de
+ * fichiers l'a porté à ~3856 (champ `fichiers[32][64]`, +2 Ko) : la même marge
+ * n'existe plus, donc 16384 pour rester au large (même risque de débordement
+ * que la tâche WS, voir moonraker_ws.c ; fix propre à venir = sortir
+ * `fichiers[]` de l'état). tskIDLE_PRIORITY + 5 place cette tâche nettement
+ * au-dessus de l'IDLE sans rivaliser avec le pilote WiFi ni la tâche LVGL. */
+#define BOUCLE_PILE_OCTETS 16384
 #define BOUCLE_PRIORITE    (tskIDLE_PRIORITY + 5)
 
 typedef struct {

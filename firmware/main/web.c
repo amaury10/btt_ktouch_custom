@@ -422,6 +422,14 @@ static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)
 esp_err_t web_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    /* Pile de la tache httpd relevee : le DEFAUT est 4 Ko, or gestion_state()
+     * pose un `etat_klipper_t etat` sur cette pile (voir plus haut) -- et
+     * sizeof(etat_klipper_t) a double a ~3856 octets depuis le sous-projet
+     * navigateur de fichiers (champ `fichiers[]`), ce qui ne laisse presque rien
+     * a 4 Ko et deborderait sur une reponse /state serialisee un peu profonde.
+     * Meme cause que les piles WS/boucle (voir moonraker_ws.c/boucle.c ; fix
+     * propre a venir = sortir `fichiers[]` de l'etat). 8 Ko laisse la marge. */
+    config.stack_size = 8192;
 
     httpd_handle_t serveur = NULL;
     esp_err_t erreur = httpd_start(&serveur, &config);
