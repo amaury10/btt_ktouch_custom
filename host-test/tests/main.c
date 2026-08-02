@@ -26,6 +26,7 @@ void suite_ecran_accueil_hub(void);
 void suite_ecran_temperatures(void);
 void suite_ecran_extruder(void);
 void suite_ecran_ventilateurs(void);
+void suite_ecran_reglage_fin(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -173,6 +174,15 @@ int main(void)
      * simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_ventilateurs() dans test_ecran_ventilateurs.c. */
     suite_ecran_ventilateurs();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 2 : l'ecran Fine Tune
+     * (vitesse/flux/offset Z, boutons -/+ + selecteurs de pas) -- meme
+     * garde d'ordonnancement que suite_ecran_deplacer()/
+     * suite_ecran_accueil_hub()/suite_ecran_temperatures()/
+     * suite_ecran_extruder()/suite_ecran_ventilateurs() ci-dessus (habillage
+     * construit + boucle simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_reglage_fin() dans test_ecran_reglage_fin.c. */
+    suite_ecran_reglage_fin();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --

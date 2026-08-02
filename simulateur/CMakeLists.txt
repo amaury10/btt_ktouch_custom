@@ -109,6 +109,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_temperatures.c
     ${ECRANS_DIR}/ecran_extruder.c
     ${ECRANS_DIR}/ecran_ventilateurs.c
+    ${ECRANS_DIR}/ecran_reglage_fin.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c
