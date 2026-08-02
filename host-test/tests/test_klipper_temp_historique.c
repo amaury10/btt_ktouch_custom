@@ -23,17 +23,22 @@ static etat_klipper_t etat_temperatures(float e0, bool e0_presente,
     return e;
 }
 
-/* Cette suite est la SEULE a manipuler klipper_temp_historique (store statique
- * process-wide, meme politique que klipper_fichiers.c) : elle controle donc
- * entierement l'ordre des `pousser()` et peut raisonner sur l'etat cumule
- * plutot que d'exiger une remise a zero inexistante dans le contrat public.
- *
- * Ordre choisi : (b) le wraparound D'ABORD, seul cas a exiger un tampon
- * vierge (130 pousser consecutifs de valeurs 0..129 sur la serie 0). Une
- * fois le tampon plein (120/120), il RESTE plein pour toujours (chaque
- * pousser suivant evince exactement le point le plus ancien) -- les
- * sections suivantes s'appuient sur cette propriete de regime permanent
- * plutot que sur un tampon vide. */
+/* Cette suite DOIT etre la PREMIERE a manipuler klipper_temp_historique
+ * (store statique process-wide, meme politique que klipper_fichiers.c) --
+ * garantie par tests/main.c, qui l'appelle juste avant
+ * suite_ecran_accueil_hub() (sous-projet "graphes de temperature", tache 3 :
+ * ecran_accueil_hub.c construit desormais un `lv_chart` backfille depuis ce
+ * meme store, et sa suite pousse elle-meme quelques points connus PAR-DESSUS
+ * l'etat que CETTE suite laisse derriere elle). Le contrat public de ce store
+ * n'offre aucune remise a zero : (b) le wraparound ci-dessous EXIGE un
+ * tampon VIERGE (130 pousser consecutifs de valeurs 0..129 sur la serie 0,
+ * verifies un a un), pas seulement generation()==0 -- une suite qui
+ * s'executerait avant celle-ci le romprait, meme si elle ne poussait que des
+ * valeurs sans rapport. Une fois le tampon plein (120/120), il RESTE plein
+ * pour toujours (chaque pousser suivant evince exactement le point le plus
+ * ancien) -- les sections suivantes de CETTE suite s'appuient sur cette
+ * propriete de regime permanent plutot que sur un tampon vide, et
+ * suite_ecran_accueil_hub() en herite a son tour. */
 void suite_klipper_temp_historique(void)
 {
     printf("suite : klipper_temp_historique\n");

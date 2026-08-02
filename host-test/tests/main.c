@@ -152,10 +152,28 @@ int main(void)
      * commentaire de tete de suite_ecran_deplacer() dans test_ecran_deplacer.c. */
     suite_ecran_deplacer();
 
-    /* Tache 5 (refonte accueil/deplacer) : l'ecran Accueil-hub (tuiles de
-     * temperature + grille de menu). Meme garde d'ordonnancement que
-     * suite_ecran_deplacer() juste au-dessus -- voir le commentaire de tete
-     * de suite_ecran_accueil_hub() dans test_ecran_accueil_hub.c. */
+    /* Sous-projet "graphes de temperature", tache 1 : le store d'historique
+     * de temperature (tampon circulaire), un singleton process-wide COMME
+     * klipper_fichiers.c -- DOIT rester ICI, juste AVANT
+     * suite_ecran_accueil_hub() : ce store n'a pas de remise a zero dans son
+     * contrat public, et le cas de wraparound de cette suite (130 pousser
+     * consecutifs sur un tampon VIERGE, pas seulement generation()==0) exige
+     * d'etre la toute PREMIERE a le manipuler -- voir le commentaire de tete
+     * de suite_klipper_temp_historique() dans test_klipper_temp_historique.c.
+     * suite_ecran_accueil_hub() (juste en dessous) pousse elle-meme quelques
+     * points connus PAR-DESSUS l'etat que cette suite laisse derriere elle
+     * (regime permanent, tampon plein) pour alimenter son propre graphe --
+     * voir son commentaire de tete dans test_ecran_accueil_hub.c. */
+    suite_klipper_temp_historique();
+
+    /* Tache 5 (refonte accueil/deplacer), reecrite par le sous-projet
+     * "graphes de temperature" tache 3 : l'ecran Accueil-hub (deux colonnes,
+     * lignes de chauffants + resume + graphe a gauche, cinq tuiles de menu a
+     * droite). Meme garde d'ordonnancement que suite_ecran_deplacer() juste
+     * au-dessus (habillage construit + boucle simulee demarree) -- PLUS la
+     * garde suite_klipper_temp_historique() juste au-dessus, voir son
+     * commentaire. Voir le commentaire de tete de suite_ecran_accueil_hub()
+     * dans test_ecran_accueil_hub.c. */
     suite_ecran_accueil_hub();
 
     /* Sous-projet 2 (decoupage KlipperScreen), tache 1 : l'ecran Temperatures
@@ -325,16 +343,6 @@ int main(void)
      * fonction pure sans aucun etat process-wide -- aucune contrainte
      * d'ordre avec les autres suites. */
     suite_accueil_choix();
-
-    /* Tache 1 (sous-projet graphes de temperature) : le store d'historique
-     * de temperature (tampon circulaire), un singleton process-wide COMME
-     * klipper_fichiers.c -- mais a la difference de celui-ci, chaque
-     * pousser() est incremental (pas un remplacement complet), donc cette
-     * suite est la SEULE a le manipuler et controle entierement l'ordre de
-     * ses propres pousser() en interne (voir le commentaire de tete de
-     * suite_klipper_temp_historique() dans test_klipper_temp_historique.c).
-     * Aucune contrainte d'ordre avec les autres suites ci-dessus. */
-    suite_klipper_temp_historique();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

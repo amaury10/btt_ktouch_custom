@@ -1,20 +1,30 @@
 /* Implementation : voir ecran_accueil_hub.h pour le contrat.
  *
  * Mise en page (742x436, dans le conteneur de navigation a droite du rail
- * persistant, sous la barre d'etat construite par habillage.c) : un resume
- * compact de QUATRE lignes en haut (temperatures, position + outil actif,
- * vitesse/flux, mini-progression d'impression), puis une grille de CINQ
- * tuiles de menu en dessous (Homing, Temperature, Actions, Configuration,
- * Print) -- geometrie verifiee par _Static_assert, meme discipline que
+ * persistant, sous la barre d'etat construite par habillage.c) : DEUX
+ * colonnes cote a cote. La colonne GAUCHE porte les lignes de chauffants
+ * (nom + valeur, ECRAN_ACCUEIL_HUB_HEATER_LIGNES au plus), un resume compact
+ * (position + outil actif, vitesse/flux, mini-progression) puis un `lv_chart`
+ * d'historique de temperature qui occupe le reste de la colonne. La colonne
+ * DROITE porte les cinq tuiles de menu, empilees VERTICALEMENT (contre une
+ * rangee horizontale sous le resume dans l'ancienne mise en page une
+ * colonne) -- geometrie verifiee par _Static_assert, meme discipline que
  * ecran_menu_reglages.c/ecran_deplacer.c.
  *
- * ECART delibere par rapport a l'ancien contenu de ce fichier (pool de
- * tuiles de temperature par palier, geometrie klipper_paliers.h) : le resume
- * n'a plus besoin d'accommoder jusqu'a 8 tetes en grand format -- quatre
- * lignes de texte compactes suffisent pour un resume (aucune troncature), le
- * reglage detaille restant derriere la tuile "Temperature" (ECRAN_TEMPERATURES).
- * Le resume est integralement en LECTURE SEULE : aucune de ses quatre lignes
- * n'est LV_OBJ_FLAG_CLICKABLE, contrairement a l'ancien pool de tuiles.
+ * ECART delibere par rapport a l'ancien contenu de ce fichier (resume quatre
+ * lignes pleine largeur + grille 5 cases EN DESSOUS) : le sous-projet
+ * "graphes de temperature" (task-3-brief.md) demande une refonte en deux
+ * colonnes pour loger le graphe d'historique (klipper_temp_historique.h,
+ * tache 1 du meme sous-projet) sans repousser la grille de menu hors de
+ * l'ecran. Toutes les constantes de geometrie sont DERIVEES (jamais
+ * recopiees) et verifiees les unes par rapport aux autres, meme idiome que
+ * ecran_deplacer.c.
+ *
+ * Lignes de chauffants EN LECTURE SEULE (aucun tap) : voir le commentaire de
+ * tete du .h pour pourquoi nom/valeur sont deux `lv_label_t` distincts des
+ * cette tache-ci plutot qu'un texte concatene -- la tache 4/5 du meme
+ * sous-projet posera LV_OBJ_FLAG_CLICKABLE sur chaque paire sans retoucher
+ * cette mise en page.
  *
  * Libelles de menu SANS accent ("Configuration", pas de caractere accentue)
  * -- aucun texte affiche a l'ecran dans ce depot n'utilise de caractere
@@ -32,84 +42,162 @@
 #include "ecran_homing.h"        /* ECRAN_HOMING */
 #include "ecran_menu_reglages.h" /* ECRAN_MENU_REGLAGES */
 #include "ecran_temperatures.h"  /* ECRAN_TEMPERATURES */
-#include "navigation.h"          /* navigation_empiler() */
-#include "tuile.h"                /* ui_format_temperature() */
+#include "klipper_temp_historique.h"
+#include "navigation.h" /* navigation_empiler() */
+#include "tuile.h"      /* ui_format_temperature() */
 
 #define LARGEUR_CONTENU 742 /* 800 - RAIL_LARGEUR (58), voir habillage.c */
-#define HAUTEUR_CONTENU 436 /* 480 - BARRE_HAUTEUR (44), voir habillage.c */
+/* Pas de HAUTEUR_CONTENU ici (contrairement a l'ancien contenu de ce
+ * fichier) : ZONE_CONTENU_MAX plus bas (derivee de BANDEAU_Y_ECRAN, plus
+ * stricte) est le SEUL plafond vertical dont ce fichier a besoin -- le
+ * conserver en plus aurait ete une constante jamais lue. */
 
-#define MARGE      14
-#define ZONE_ECART 14 /* ecart vertical entre le resume et la grille de menu */
+#define MARGE    14
+#define COL_ECART 14 /* ecart horizontal entre les deux colonnes */
 
-/* --- Resume : quatre lignes empilees, chacune un unique lv_label_t sur
- * TOUTE la largeur du contenu -- geometrie plate, derivee (RESUME_HAUTEUR),
- * pas recopiee, meme discipline que PROGRESSION_Y/BOUTONS_Y dans
- * ecran_accueil.c. ------------------------------------------------------- */
-#define RESUME_Y          10
-#define LIGNE_HAUTEUR      26
-#define LIGNE_ECART         8 /* entre deux lignes du resume */
-
-#define TEMPERATURES_Y RESUME_Y
-#define POSITION_Y      (TEMPERATURES_Y + LIGNE_HAUTEUR + LIGNE_ECART)
-#define VITESSE_FLUX_Y   (POSITION_Y + LIGNE_HAUTEUR + LIGNE_ECART)
-#define PROGRESSION_Y    (VITESSE_FLUX_Y + LIGNE_HAUTEUR + LIGNE_ECART)
-
-#define RESUME_HAUTEUR (PROGRESSION_Y + LIGNE_HAUTEUR - RESUME_Y)
-
-/* --- Grille de menu : 5 colonnes x 1 ligne, sous le resume -- geometrie
- * propre a ce hub. 6 (et non un autre ecart) : avec LARGEUR_CONTENU=742, la
- * largeur utile de la grille vaut 714 ; il faut que (714 - 4*ecart) soit
- * divisible par 5 pour que les 5 colonnes la remplissent EXACTEMENT
- * (_Static_assert plus bas). 714 % 5 == 4 impose ecart % 5 == 1 (l'inverse de
- * 4 modulo 5 vaut 4, et 4*4 == 16 == 1 mod 5) ; 6 est le plus petit choix
- * >= 1 qui verifie ecart % 5 == 1 et laisse des cases largement >= 44px. --- */
-#define MENU_COLONNES 5
-#define MENU_ECART_COLONNE 6
-#define MENU_CELL_LARGEUR ((LARGEUR_CONTENU - 2 * MARGE - (MENU_COLONNES - 1) * MENU_ECART_COLONNE) / MENU_COLONNES)
-#define MENU_CELL_HAUTEUR 120 /* >= 44px cible tactile minimale, tuiles "principales" du hub */
-
-#define MENU_ZONE_Y (RESUME_Y + RESUME_HAUTEUR + ZONE_ECART)
+/* --- Deux colonnes qui remplissent exactement la largeur du contenu
+ * (_Static_assert plus bas) -- 350px chacune, le meme partage a peu pres
+ * egal (~360px) que demande task-3-brief.md. -------------------------- */
+#define GAUCHE_X       MARGE
+#define GAUCHE_LARGEUR ((LARGEUR_CONTENU - 2 * MARGE - COL_ECART) / 2)
+#define DROITE_X       (GAUCHE_X + GAUCHE_LARGEUR + COL_ECART)
+#define DROITE_LARGEUR (LARGEUR_CONTENU - MARGE - DROITE_X)
 
 /* Meme convention que BARRE_HAUTEUR_ECRAN/BANDEAU_HAUTEUR_ECRAN/
  * BANDEAU_Y_ECRAN dans ecran_menu_reglages.c (voir son commentaire complet) :
  * bande couverte par le bandeau de notification de habillage.c, en
- * coordonnees ABSOLUES d'ecran. */
+ * coordonnees ABSOLUES d'ecran. ZONE_CONTENU_MAX (DERIVEE) est le plafond
+ * relatif au contenu (jamais recopie) sous lequel les DEUX colonnes doivent
+ * rester -- task-3-brief.md : "the bottom of each column stays above the
+ * banner". */
 #define BARRE_HAUTEUR_ECRAN   44
 #define HAUTEUR_ECRAN_TOTALE 480
 #define BANDEAU_HAUTEUR_ECRAN 60
-#define BANDEAU_Y_ECRAN (HAUTEUR_ECRAN_TOTALE - BANDEAU_HAUTEUR_ECRAN)
+#define BANDEAU_Y_ECRAN     (HAUTEUR_ECRAN_TOTALE - BANDEAU_HAUTEUR_ECRAN)
+#define ZONE_CONTENU_MAX    (BANDEAU_Y_ECRAN - BARRE_HAUTEUR_ECRAN)
 
-_Static_assert(MENU_CELL_HAUTEUR >= 44, "les tuiles de menu doivent rester >= 44px de cible tactile");
-_Static_assert(MENU_COLONNES * MENU_CELL_LARGEUR + (MENU_COLONNES - 1) * MENU_ECART_COLONNE ==
-                    LARGEUR_CONTENU - 2 * MARGE,
-                "la grille de menu ne remplit plus exactement la largeur du contenu");
-_Static_assert(MENU_ZONE_Y + MENU_CELL_HAUTEUR <= HAUTEUR_CONTENU,
-                "le resume + la grille de menu debordent de la hauteur du contenu (436px)");
+#define CONTENU_Y 6 /* Y de depart commun aux deux colonnes */
+
+/* --- Colonne gauche : lignes de chauffants -------------------------------
+ * Nom ("T0"/"Bed", largeur fixe courte) + valeur ("205.0/210.0", le reste de
+ * la colonne) sur la MEME ligne, deux lv_label_t distincts et adjacents (voir
+ * le commentaire de tete du .h). --------------------------------------- */
+#define CHAUFFANT_LIGNE_HAUTEUR 20
+#define CHAUFFANT_LIGNE_ECART    2
+#define CHAUFFANT_NOM_LARGEUR   50
+#define CHAUFFANT_VALEUR_X      (CHAUFFANT_NOM_LARGEUR + 10)
+#define CHAUFFANT_VALEUR_LARGEUR (GAUCHE_LARGEUR - CHAUFFANT_VALEUR_X)
+
+#define CHAUFFANTS_ZONE_Y      CONTENU_Y
+#define CHAUFFANTS_ZONE_HAUTEUR (ECRAN_ACCUEIL_HUB_HEATER_LIGNES * CHAUFFANT_LIGNE_HAUTEUR + \
+                                  (ECRAN_ACCUEIL_HUB_HEATER_LIGNES - 1) * CHAUFFANT_LIGNE_ECART)
+
+/* --- Colonne gauche : resume (position/outil, vitesse-flux, progression) -- */
+#define ZONE_ECART   8 /* ecart vertical entre les "blocs" de la colonne gauche */
+#define LIGNE_HAUTEUR 20
+#define LIGNE_ECART    2
+
+#define POSITION_Y      (CHAUFFANTS_ZONE_Y + CHAUFFANTS_ZONE_HAUTEUR + ZONE_ECART)
+#define VITESSE_FLUX_Y  (POSITION_Y + LIGNE_HAUTEUR + LIGNE_ECART)
+#define PROGRESSION_Y   (VITESSE_FLUX_Y + LIGNE_HAUTEUR + LIGNE_ECART)
+
+/* --- Colonne gauche : graphe -- occupe tout le reste de la colonne jusqu'au
+ * plafond ZONE_CONTENU_MAX (DERIVEE, jamais un nombre choisi a la main) --
+ * c'est ce qui rend le graphe "aussi grand que possible" sans jamais
+ * chevaucher le bandeau de notification. -------------------------------- */
+#define CHART_Y       (PROGRESSION_Y + LIGNE_HAUTEUR + ZONE_ECART)
+#define CHART_HAUTEUR (ZONE_CONTENU_MAX - CHART_Y)
+
+/* --- Colonne droite : cinq tuiles empilees verticalement, meme hauteur
+ * fixe -- TUILE_HAUTEUR est DERIVEE pour que les cinq tuiles + les quatre
+ * ecarts remplissent EXACTEMENT la meme plage verticale que la colonne
+ * gauche (CONTENU_Y .. ZONE_CONTENU_MAX), _Static_assert plus bas. -------- */
+#define TUILE_ECART            10
+#define DROITE_ZONE_HAUTEUR    (ZONE_CONTENU_MAX - CONTENU_Y)
+#define TUILE_HAUTEUR           ((DROITE_ZONE_HAUTEUR - (ECRAN_ACCUEIL_HUB_MENU_NB - 1) * TUILE_ECART) / \
+                                  ECRAN_ACCUEIL_HUB_MENU_NB)
+
+_Static_assert(MARGE + GAUCHE_LARGEUR + COL_ECART + DROITE_LARGEUR + MARGE == LARGEUR_CONTENU,
+                "les deux colonnes ne remplissent plus exactement la largeur du contenu");
+_Static_assert(TUILE_HAUTEUR >= 44, "les tuiles de menu doivent rester >= 44px de cible tactile");
+_Static_assert(ECRAN_ACCUEIL_HUB_MENU_NB * TUILE_HAUTEUR + (ECRAN_ACCUEIL_HUB_MENU_NB - 1) * TUILE_ECART ==
+                    DROITE_ZONE_HAUTEUR,
+                "les cinq tuiles ne remplissent plus exactement la hauteur disponible de la colonne droite");
+_Static_assert(CHART_HAUTEUR > 0, "le graphe ne laisse plus de hauteur disponible dans la colonne gauche");
 /* Meme garde-fou que la grille de menu de ecran_menu_reglages.c (voir son
- * commentaire complet) : le bas de la grille, en coordonnees ABSOLUES
+ * commentaire complet) : le bas de CHAQUE colonne, en coordonnees ABSOLUES
  * d'ecran, doit rester au-dessus du bandeau de notification -- sans quoi une
- * notification recouvrirait ET bloquerait le tap sur les tuiles. */
-_Static_assert(BARRE_HAUTEUR_ECRAN + MENU_ZONE_Y + MENU_CELL_HAUTEUR <= BANDEAU_Y_ECRAN,
-                "la grille de menu chevauche la bande du bandeau de notification de l'habillage");
+ * notification recouvrirait le graphe ET bloquerait le tap sur les tuiles. */
+_Static_assert(BARRE_HAUTEUR_ECRAN + CHART_Y + CHART_HAUTEUR <= BANDEAU_Y_ECRAN,
+                "la colonne gauche (graphe) chevauche la bande du bandeau de notification de l'habillage");
+_Static_assert(BARRE_HAUTEUR_ECRAN + CONTENU_Y + DROITE_ZONE_HAUTEUR <= BANDEAU_Y_ECRAN,
+                "la colonne droite (tuiles) chevauche la bande du bandeau de notification de l'habillage");
 
 #define COULEUR_FOND             0x10161D
+#define COULEUR_FOND_CHART       0x1B2430
 #define COULEUR_TEXTE_SECONDAIRE 0xC9D1D9
 #define COULEUR_GRISE            0x6B7280 /* meme gris de peremption que le reste de ui/ */
 #define COULEUR_BOUTON           0x2A3644
 #define COULEUR_TEXTE_BOUTON     0xFFFFFF
 
-/* Tampon du texte de la ligne de temperatures -- large marge au-dela du pire
- * cas realiste (8 extrudeurs + plateau, chaque entree "T7 205.0/210.0"
- * separee par deux espaces) : le texte est de toute facon tronque a
- * l'affichage par LV_LABEL_LONG_DOT si la ligne deborde la largeur du
- * contenu, ce tampon n'a besoin que de ne jamais ecrire hors limites. */
-#define TEMP_TEXTE_MAX 192
+/* Une couleur distincte par serie du graphe (task-3-brief.md : "distinct
+ * color per series"), indexee EXACTEMENT comme klipper_temp_historique.h
+ * (0..KLIPPER_EXTRUDEURS_MAX-1 = extrudeurs, KLIPPER_EXTRUDEURS_MAX =
+ * plateau) -- le plateau recoit une teinte froide (bleu ardoise) qui ne
+ * ressemble a aucune couleur d'extrudeur, meme si un pire cas a 8 extrudeurs
+ * finit par reutiliser un ton proche (aucune palette de 9 couleurs n'est
+ * parfaitement distinguable a l'oeil, hors de portee de cette tache). */
+static const uint32_t COULEURS_SERIE[KLIPPER_HISTO_SERIES] = {
+    0xEF4444, /* T0 rouge */
+    0xF59E0B, /* T1 ambre */
+    0xEAB308, /* T2 jaune */
+    0x22C55E, /* T3 vert */
+    0x14B8A6, /* T4 sarcelle */
+    0x3B82F6, /* T5 bleu */
+    0x8B5CF6, /* T6 violet */
+    0xEC4899, /* T7 rose */
+    0x94A3B8, /* Bed (indice KLIPPER_EXTRUDEURS_MAX) : bleu ardoise */
+};
+
+/* Bornes Y du graphe (task-3-brief.md : "sensible Y range, e.g. 0..300") --
+ * couvre la plage realiste d'une buse (jusqu'a ~300 C) et d'un plateau (bien
+ * en dessous), sans avoir besoin de s'adapter dynamiquement aux valeurs
+ * courantes -- un axe qui bouge rendrait la courbe plus dure a lire d'un
+ * coup d'oeil que quelques pixels "perdus" en bas du graphe. */
+#define CHART_Y_MIN 0
+#define CHART_Y_MAX 300
+
+/* Cree la serie `i` sur le chart (couleur COULEURS_SERIE[i]) et la backfille
+ * depuis le store -- factorisee entre construire() ET mettre_a_jour() : au
+ * BOOT REEL (app_main.c), navigation_empiler(&ECRAN_ACCUEIL_HUB) tourne
+ * AVANT que le minuteur d'echantillonnage (echantillon_temp_cb(), periode
+ * 5 s) n'ait jamais pousse le moindre point -- klipper_temp_historique_serie_presente()
+ * rend donc FALSE pour toutes les series au moment de construire(), et aucune
+ * n'y est ajoutee. Sans ce rattrapage cote mettre_a_jour() (plus bas), le
+ * chart resterait vide A JAMAIS : son propre garde-fou de generation
+ * n'ajoute jamais de point a une serie qui n'existe pas encore. Verifie
+ * empiriquement par capture --scenario 11 (U1, chauffants non nuls) pendant
+ * l'implementation de cette tache -- le graphe restait plat sans ce
+ * correctif. `tampon` LOCAL, jamais une copie du store entier -- meme regle
+ * que le backfill de construire(). */
+static void chart_ajouter_serie(ecran_accueil_hub_ctx_t *ctx, uint8_t i)
+{
+    ctx->serie[i] = lv_chart_add_series(ctx->chart, lv_color_hex(COULEURS_SERIE[i]), LV_CHART_AXIS_PRIMARY_Y);
+    if (ctx->serie[i] == NULL) {
+        return; /* ne devrait jamais arriver hors epuisement memoire LVGL */
+    }
+    int16_t tampon[KLIPPER_HISTO_POINTS];
+    size_t n = klipper_temp_historique_serie(i, tampon, KLIPPER_HISTO_POINTS);
+    for (size_t k = 0; k < n; k++) {
+        lv_chart_set_next_value(ctx->chart, ctx->serie[i], tampon[k]);
+    }
+}
 
 /* Ecrit "%.1f" si `reference` est vrai, "--" sinon -- copie de formater_axe()
  * de ecran_deplacer.c : ne jamais presenter comme mesuree une position
  * qu'aucun homing n'a etablie. Copie plutot que partagee, meme choix que le
- * reste de ce depot (fonction static, chaque ecran garde la sienne -- voir
- * le commentaire de tete de ecran_zcalibrate.c pour le meme choix ailleurs). */
+ * reste de ce depot (voir le commentaire de tete de ecran_zcalibrate.c pour
+ * le meme choix ailleurs). */
 static void formater_axe(char *sortie, size_t taille, float valeur, bool reference)
 {
     if (!reference) {
@@ -119,64 +207,17 @@ static void formater_axe(char *sortie, size_t taille, float valeur, bool referen
     snprintf(sortie, taille, "%.1f", (double)valeur);
 }
 
-/* Construit la ligne de temperatures compacte : chaque extrudeur present
- * (T0, T1, ...) puis le plateau (Bed), "actuelle/consigne" via
- * ui_format_temperature(), separes par deux espaces. Append borne
- * defensivement (meme idiome que les constructeurs de gcode de
- * klipper_gcode.c : `ecrit < 0 || (size_t)ecrit >= reste` avant d'avancer
- * `pos`) -- un depassement du tampon coupe simplement le reste de la ligne,
- * jamais un acces hors limites ; la troncature visuelle finale reste de
- * toute facon a la charge de LV_LABEL_LONG_DOT sur le label lui-meme. */
-static void construire_texte_temperatures(char *sortie, size_t taille, const etat_klipper_t *e,
-                                           uint8_t nb_extrudeurs)
-{
-    if (sortie == NULL || taille == 0) {
-        return;
-    }
-    sortie[0] = '\0';
-
-    size_t pos = 0;
-    bool   premier = true;
-    char   valeur[16];
-    char   consigne[16];
-
-    for (uint8_t i = 0; i < nb_extrudeurs; i++) {
-        if (!e->extrudeurs[i].presente) {
-            continue;
-        }
-        ui_format_temperature(valeur, sizeof(valeur), e->extrudeurs[i].actuelle);
-        ui_format_temperature(consigne, sizeof(consigne), e->extrudeurs[i].consigne);
-        int ecrit = snprintf(sortie + pos, taille - pos, "%sT%u %s/%s", premier ? "" : "  ", (unsigned)i, valeur,
-                              consigne);
-        if (ecrit < 0 || (size_t)ecrit >= taille - pos) {
-            return;
-        }
-        pos += (size_t)ecrit;
-        premier = false;
-    }
-
-    if (e->plateau.presente) {
-        ui_format_temperature(valeur, sizeof(valeur), e->plateau.actuelle);
-        ui_format_temperature(consigne, sizeof(consigne), e->plateau.consigne);
-        int ecrit = snprintf(sortie + pos, taille - pos, "%sBed %s/%s", premier ? "" : "  ", valeur, consigne);
-        if (ecrit < 0 || (size_t)ecrit >= taille - pos) {
-            return;
-        }
-        pos += (size_t)ecrit;
-    }
-}
-
-static lv_obj_t *ligne_resume_creer(lv_obj_t *parent, lv_coord_t y)
+static lv_obj_t *ligne_creer(lv_obj_t *parent, lv_coord_t y)
 {
     lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
     lv_label_set_text(label, "");
-    lv_obj_set_pos(label, MARGE, y);
+    lv_obj_set_pos(label, GAUCHE_X, y);
     return label;
 }
 
-/* --- Grille de menu : chaque tuile navigue reellement vers un ecran deja
+/* --- Colonne droite : chaque tuile navigue reellement vers un ecran deja
  * construit par un jalon precedent -- aucune case no-op ici, contrairement a
  * l'ancien contenu de ce fichier a ses tout premiers jalons. Echec
  * (ESP_ERR_NO_MEM, pile deja pleine) delibrement ignore, meme raison que
@@ -238,43 +279,96 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
     lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* --- resume, quatre lignes en lecture seule -------------------------
-     * Auto-dimensionnees (LV_SIZE_CONTENT par defaut de lv_label_create(),
-     * comme la ligne de position de ecran_deplacer.c) : PAS de
-     * LV_LABEL_LONG_DOT ici (essaye puis retire -- son calcul de troncature
-     * lit les coordonnees RESOLUES de l'objet, qui exigent une passe de
-     * layout entre le lv_obj_set_size() de construire() et le
-     * lv_label_set_text() de mettre_a_jour() ; sans cette passe -- jamais
-     * declenchee ici, construire()/mettre_a_jour() s'enchainent directement,
-     * y compris cote host-test -- le calcul lit une taille perimee proche de
-     * zero et tronque TOUT le texte en "..."). Une machine reelle a 1-2
-     * extrudeurs (voir machines-klipper-reelles) tient tres largement dans
-     * 714px a la police par defaut ; le cas extreme (8 extrudeurs) deborde
-     * simplement du cadre visuellement plutot que de risquer ce piege. -- */
-    ctx->temperatures = ligne_resume_creer(parent, TEMPERATURES_Y);
-    ctx->position = ligne_resume_creer(parent, POSITION_Y);
-    ctx->vitesse_flux = ligne_resume_creer(parent, VITESSE_FLUX_Y);
-    ctx->progression = ligne_resume_creer(parent, PROGRESSION_Y);
+    /* --- colonne gauche : lignes de chauffants, lecture seule (voir le
+     * commentaire de tete du .h) -- pool a taille fixe
+     * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES), masque/rempli par mettre_a_jour()
+     * selon le nombre de chauffants reellement presents. ------------------ */
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+        lv_coord_t y = (lv_coord_t)(CHAUFFANTS_ZONE_Y + i * (CHAUFFANT_LIGNE_HAUTEUR + CHAUFFANT_LIGNE_ECART));
+
+        lv_obj_t *nom = lv_label_create(parent);
+        lv_obj_set_style_text_font(nom, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(nom, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
+        lv_label_set_text(nom, "");
+        lv_obj_set_pos(nom, GAUCHE_X, y);
+        lv_obj_set_width(nom, CHAUFFANT_NOM_LARGEUR);
+        ctx->chauffant_nom[i] = nom;
+
+        lv_obj_t *valeur = lv_label_create(parent);
+        lv_obj_set_style_text_font(valeur, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(valeur, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
+        lv_label_set_text(valeur, "");
+        lv_obj_set_pos(valeur, GAUCHE_X + CHAUFFANT_VALEUR_X, y);
+        lv_obj_set_width(valeur, CHAUFFANT_VALEUR_LARGEUR);
+        ctx->chauffant_valeur[i] = valeur;
+    }
+
+    /* --- colonne gauche : resume, trois lignes en lecture seule -- Voir le
+     * commentaire de tete de l'ancien contenu de ce fichier (git, avant
+     * cette reecriture) pour pourquoi PAS de LV_LABEL_LONG_DOT ici : son
+     * calcul de troncature lit les coordonnees RESOLUES de l'objet, qui
+     * exigent une passe de layout entre construire() et le premier
+     * mettre_a_jour() -- jamais declenchee ici, les deux s'enchainent
+     * directement y compris cote host-test. --------------------------- */
+    ctx->position = ligne_creer(parent, POSITION_Y);
+    ctx->vitesse_flux = ligne_creer(parent, VITESSE_FLUX_Y);
+    ctx->progression = ligne_creer(parent, PROGRESSION_Y);
     lv_obj_add_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN); /* visible seulement si impression_en_cours, voir mettre_a_jour() */
 
-    /* --- grille de menu, 5 cases a taille fixe (voir MENU_* en tete de
-     * fichier) --------------------------------------------------------- */
+    /* --- colonne gauche : graphe d'historique -- une serie par chauffant
+     * PRESENT au moment de cet appel (jamais ajoutee/retiree ensuite, voir
+     * le commentaire de tete du .h), backfillee depuis le store (tache 1)
+     * SANS JAMAIS copier le tampon entier -- un seul tampon LOCAL de
+     * KLIPPER_HISTO_POINTS points (240 octets), reutilise serie par serie. */
+    ctx->chart = lv_chart_create(parent);
+    lv_obj_remove_style_all(ctx->chart);
+    lv_obj_set_style_bg_color(ctx->chart, lv_color_hex(COULEUR_FOND_CHART), 0);
+    lv_obj_set_style_bg_opa(ctx->chart, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(ctx->chart, 8, 0);
+    /* Largeur de trait seule : la couleur de LV_PART_ITEMS est de toute
+     * facon ecrasee par la couleur PROPRE de chaque serie au dessin (voir
+     * lv_chart.c, chart_draw_series_line() -- `line_dsc.color = ser->color`
+     * inconditionnel), la fixer ici serait une configuration morte. */
+    lv_obj_set_style_line_width(ctx->chart, 2, LV_PART_ITEMS);
+    lv_obj_set_pos(ctx->chart, GAUCHE_X, CHART_Y);
+    lv_obj_set_size(ctx->chart, GAUCHE_LARGEUR, CHART_HAUTEUR);
+    lv_chart_set_type(ctx->chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(ctx->chart, KLIPPER_HISTO_POINTS);
+    lv_chart_set_update_mode(ctx->chart, LV_CHART_UPDATE_MODE_SHIFT);
+    lv_chart_set_range(ctx->chart, LV_CHART_AXIS_PRIMARY_Y, CHART_Y_MIN, CHART_Y_MAX);
+    lv_chart_set_div_line_count(ctx->chart, 3, 0);
+
+    for (uint8_t i = 0; i < KLIPPER_HISTO_SERIES; i++) {
+        if (klipper_temp_historique_serie_presente(i)) {
+            chart_ajouter_serie(ctx, i);
+        } else {
+            ctx->serie[i] = NULL; /* rattrapee par mettre_a_jour() si ce chauffant apparait plus tard, voir chart_ajouter_serie() */
+        }
+    }
+    /* Capturee APRES le backfill : le premier mettre_a_jour() ne doit pas
+     * re-ajouter le dernier point que le backfill vient deja d'inclure. */
+    ctx->derniere_gen = klipper_temp_historique_generation();
+
+    /* --- colonne droite : cinq tuiles empilees verticalement (voir
+     * ECRAN_ACCUEIL_HUB_MENU_* -- meme idiome que la grille de menu de
+     * l'ancien contenu de ce fichier, une seule colonne au lieu d'une
+     * rangee). ------------------------------------------------------------ */
     ctx->zone_menu = lv_obj_create(parent);
     lv_obj_remove_style_all(ctx->zone_menu);
     lv_obj_clear_flag(ctx->zone_menu, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(ctx->zone_menu, LARGEUR_CONTENU - 2 * MARGE, MENU_CELL_HAUTEUR);
-    lv_obj_set_pos(ctx->zone_menu, MARGE, MENU_ZONE_Y);
+    lv_obj_set_size(ctx->zone_menu, DROITE_LARGEUR, DROITE_ZONE_HAUTEUR);
+    lv_obj_set_pos(ctx->zone_menu, DROITE_X, CONTENU_Y);
 
     for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_MENU_NB; i++) {
-        lv_coord_t x = (lv_coord_t)(i * (MENU_CELL_LARGEUR + MENU_ECART_COLONNE));
+        lv_coord_t y = (lv_coord_t)(i * (TUILE_HAUTEUR + TUILE_ECART));
 
         lv_obj_t *bouton = lv_button_create(ctx->zone_menu);
         /* lv_obj_remove_style_all() : meme raison que dans
          * ecran_menu_reglages.c -- theme par defaut + transition animee
          * otes, pour ne pas alourdir style_trans_ll cote host-test. */
         lv_obj_remove_style_all(bouton);
-        lv_obj_set_size(bouton, MENU_CELL_LARGEUR, MENU_CELL_HAUTEUR);
-        lv_obj_set_pos(bouton, x, 0);
+        lv_obj_set_size(bouton, DROITE_LARGEUR, TUILE_HAUTEUR);
+        lv_obj_set_pos(bouton, 0, y);
         lv_obj_set_style_bg_opa(bouton, LV_OPA_COVER, 0);
         lv_obj_set_style_bg_color(bouton, lv_color_hex(COULEUR_BOUTON), 0);
         lv_obj_set_style_border_width(bouton, 0, 0);
@@ -309,10 +403,45 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         nb_extrudeurs = KLIPPER_EXTRUDEURS_MAX;
     }
 
-    /* --- ligne de temperatures ------------------------------------------ */
-    char texte_temperatures[TEMP_TEXTE_MAX];
-    construire_texte_temperatures(texte_temperatures, sizeof(texte_temperatures), e, nb_extrudeurs);
-    lv_label_set_text(ctx->temperatures, texte_temperatures);
+    /* --- lignes de chauffants : extrudeurs presents puis plateau, dans cet
+     * ordre, bornes a ECRAN_ACCUEIL_HUB_HEATER_LIGNES -- systematique a
+     * chaque appel (les lignes au-dela du nombre present sont masquees,
+     * jamais un etat fige depuis le premier passage). --------------------- */
+    uint8_t total = 0;
+    char    valeur[16];
+    char    consigne[16];
+    char    nom[8];
+    char    texte_valeur[40];
+
+    for (uint8_t i = 0; i < nb_extrudeurs && total < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+        if (!e->extrudeurs[i].presente) {
+            continue;
+        }
+        snprintf(nom, sizeof(nom), "T%u", (unsigned)i);
+        ui_format_temperature(valeur, sizeof(valeur), e->extrudeurs[i].actuelle);
+        ui_format_temperature(consigne, sizeof(consigne), e->extrudeurs[i].consigne);
+        snprintf(texte_valeur, sizeof(texte_valeur), "%s/%s", valeur, consigne);
+        lv_label_set_text(ctx->chauffant_nom[total], nom);
+        lv_label_set_text(ctx->chauffant_valeur[total], texte_valeur);
+        total++;
+    }
+    if (e->plateau.presente && total < ECRAN_ACCUEIL_HUB_HEATER_LIGNES) {
+        ui_format_temperature(valeur, sizeof(valeur), e->plateau.actuelle);
+        ui_format_temperature(consigne, sizeof(consigne), e->plateau.consigne);
+        snprintf(texte_valeur, sizeof(texte_valeur), "%s/%s", valeur, consigne);
+        lv_label_set_text(ctx->chauffant_nom[total], "Bed");
+        lv_label_set_text(ctx->chauffant_valeur[total], texte_valeur);
+        total++;
+    }
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+        if (i < total) {
+            lv_obj_clear_flag(ctx->chauffant_nom[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(ctx->chauffant_valeur[i], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(ctx->chauffant_nom[i], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(ctx->chauffant_valeur[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 
     /* --- ligne de position + outil actif --------------------------------
      * meme idiome que ecran_deplacer_mettre_a_jour() : "--" si l'axe n'a
@@ -366,19 +495,52 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         lv_obj_add_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* --- grisage integral du resume, style RESOLU (spec C3, ecran.h) --
-     * systematique a chaque appel, jamais incremental (meme lecon que
-     * tuile_griser()/l'ancien contenu de ce fichier). La grille de menu,
-     * elle, N'EST JAMAIS grisee -- meme choix delibere que la grille de
-     * l'ancien hub ("naviguer... reste sans danger meme avec un etat
-     * perime") : chaque tuile ouvre un ecran qui grise lui-meme son propre
-     * contenu si besoin, et Homing/Actions/Configuration restent sans
-     * danger a atteindre meme hors ligne. -------------------------------- */
+    /* --- grisage integral du resume (chauffants + position/vitesse-flux/
+     * progression), style RESOLU (spec C3, ecran.h) -- systematique a chaque
+     * appel, jamais incremental (meme lecon que tuile_griser()/l'ancien
+     * contenu de ce fichier). Le graphe et la grille de menu, eux, NE SONT
+     * JAMAIS grises -- le graphe reste une trace historique valable meme sur
+     * un etat courant perime, et chaque tuile de menu ouvre un ecran qui
+     * grise lui-meme son propre contenu si besoin (meme choix delibere que
+     * l'ancien hub : "naviguer... reste sans danger meme avec un etat
+     * perime"). -------------------------------------------------------- */
     uint32_t couleur = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
-    lv_obj_set_style_text_color(ctx->temperatures, lv_color_hex(couleur), 0);
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+        lv_obj_set_style_text_color(ctx->chauffant_nom[i], lv_color_hex(couleur), 0);
+        lv_obj_set_style_text_color(ctx->chauffant_valeur[i], lv_color_hex(couleur), 0);
+    }
     lv_obj_set_style_text_color(ctx->position, lv_color_hex(couleur), 0);
     lv_obj_set_style_text_color(ctx->vitesse_flux, lv_color_hex(couleur), 0);
     lv_obj_set_style_text_color(ctx->progression, lv_color_hex(couleur), 0);
+
+    /* --- graphe : rafraichi UNIQUEMENT quand le store (tache 1) a avance
+     * depuis le dernier appel -- l'echantillonneur pousse un point toutes
+     * les 5 s (app_main.c/simulateur/main.c), largement plus lent que la
+     * cadence d'appel de cette fonction (~200 ms, voir habillage_pomper()) :
+     * sans ce garde-fou, ce chart redessinerait ~25x pour rien entre deux
+     * points reels. */
+    uint32_t generation = klipper_temp_historique_generation();
+    if (generation != ctx->derniere_gen) {
+        for (uint8_t i = 0; i < KLIPPER_HISTO_SERIES; i++) {
+            if (ctx->serie[i] == NULL) {
+                /* Chauffant apparu APRES construire() (voir chart_ajouter_serie()
+                 * pour le cas reel qui declenche ceci au boot) : rattrapage
+                 * unique, cree la serie et la backfille d'un coup plutot que
+                 * de la laisser demarrer vide et ne grossir que point par
+                 * point a partir de maintenant. */
+                if (klipper_temp_historique_serie_presente(i)) {
+                    chart_ajouter_serie(ctx, i);
+                }
+                continue;
+            }
+            int16_t dernier;
+            if (klipper_temp_historique_dernier(i, &dernier)) {
+                lv_chart_set_next_value(ctx->chart, ctx->serie[i], dernier);
+            }
+        }
+        lv_chart_refresh(ctx->chart);
+        ctx->derniere_gen = generation;
+    }
 }
 
 const ecran_desc_t ECRAN_ACCUEIL_HUB = {
