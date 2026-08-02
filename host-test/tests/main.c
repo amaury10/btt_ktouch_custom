@@ -51,6 +51,7 @@ void suite_selecteur_choix(void);
 void suite_rail(void);
 void suite_integration_rail(void);
 void suite_bascule_accueil(void);
+void suite_klipper_temp_historique(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -324,6 +325,16 @@ int main(void)
      * fonction pure sans aucun etat process-wide -- aucune contrainte
      * d'ordre avec les autres suites. */
     suite_accueil_choix();
+
+    /* Tache 1 (sous-projet graphes de temperature) : le store d'historique
+     * de temperature (tampon circulaire), un singleton process-wide COMME
+     * klipper_fichiers.c -- mais a la difference de celui-ci, chaque
+     * pousser() est incremental (pas un remplacement complet), donc cette
+     * suite est la SEULE a le manipuler et controle entierement l'ordre de
+     * ses propres pousser() en interne (voir le commentaire de tete de
+     * suite_klipper_temp_historique() dans test_klipper_temp_historique.c).
+     * Aucune contrainte d'ordre avec les autres suites ci-dessus. */
+    suite_klipper_temp_historique();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

@@ -157,10 +157,12 @@ add_executable(tests
     tests/test_rail.c
     tests/test_integration_rail.c
     tests/test_bascule_accueil.c
+    tests/test_klipper_temp_historique.c
     ${MAIN_DIR}/web_macros.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_fichiers.c
+    ${KLIPPER_DIR}/klipper_temp_historique.c
     ${KLIPPER_DIR}/moonraker_boite.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c

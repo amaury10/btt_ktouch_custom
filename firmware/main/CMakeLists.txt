@@ -2,7 +2,7 @@ idf_component_register(
     SRCS "app_main.c" "rescue.c" "wifi.c" "netlog.c" "web.c" "web_macros.c"
          "core/etat_store.c" "core/liaison.c" "core/backend_factice.c" "core/hote_parse.c" "core/reglages.c"
          "core/boucle.c" "core/boucle_cycle.c" "core/plateforme.c" "core/plateforme_esp.c"
-         "apps/klipper/moonraker_parse.c" "apps/klipper/moonraker_rpc.c" "apps/klipper/moonraker_boite.c" "apps/klipper/klipper_fichiers.c"
+         "apps/klipper/moonraker_parse.c" "apps/klipper/moonraker_rpc.c" "apps/klipper/moonraker_boite.c" "apps/klipper/klipper_fichiers.c" "apps/klipper/klipper_temp_historique.c"
          "apps/klipper/moonraker_ws.c" "apps/klipper/backend_moonraker.c" "apps/klipper/klipper_gcode.c" "apps/klipper/klipper_paliers.c"
          "apps/klipper/accueil_choix.c" "apps/klipper/rail_actions.c"
          "apps/klipper/ecrans/ecran_accueil.c" "apps/klipper/ecrans/ecran_deplacer.c" "apps/klipper/ecrans/ecran_accueil_hub.c" "apps/klipper/ecrans/ecran_temperatures.c" "apps/klipper/ecrans/ecran_extruder.c" "apps/klipper/ecrans/ecran_ventilateurs.c" "apps/klipper/ecrans/ecran_reglage_fin.c" "apps/klipper/ecrans/ecran_zcalibrate.c" "apps/klipper/ecrans/ecran_niveau_lit.c" "apps/klipper/ecrans/ecran_limites.c" "apps/klipper/ecrans/ecran_retraction.c" "apps/klipper/ecrans/ecran_stub.c" "apps/klipper/ecrans/ecran_configuration.c" "apps/klipper/ecrans/ecran_macros.c" "apps/klipper/ecrans/ecran_fichiers.c" "apps/klipper/ecrans/ecran_reglages_wifi.c" "apps/klipper/ecrans/ecran_menu_reglages.c" "apps/klipper/ecrans/ecran_actions.c" "apps/klipper/ecrans/ecran_homing.c"

@@ -128,6 +128,7 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_fichiers.c
+    ${KLIPPER_DIR}/klipper_temp_historique.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c
     ${KLIPPER_DIR}/accueil_choix.c
