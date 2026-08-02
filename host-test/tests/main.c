@@ -31,6 +31,7 @@ void suite_ecran_zcalibrate(void);
 void suite_ecran_niveau_lit(void);
 void suite_ecran_limites(void);
 void suite_ecran_retraction(void);
+void suite_ecran_stub(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -222,6 +223,14 @@ int main(void)
      * commentaire de tete de suite_ecran_retraction() dans
      * test_ecran_retraction.c. */
     suite_ecran_retraction();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 7 : les six ecrans stub
+     * (Power/Bed Mesh/Input Shaper/Spoolman/Updater/Console, backend
+     * absent) -- AUCUNE contrainte d'ordonnancement, contrairement aux
+     * suites d'ecran ci-dessus : ces stubs n'envoient jamais de commande et
+     * ne lisent jamais l'etat backend (mettre_a_jour = NULL), voir le
+     * commentaire de tete de suite_ecran_stub() dans test_ecran_stub.c. */
+    suite_ecran_stub();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --

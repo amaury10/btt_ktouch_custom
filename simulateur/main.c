@@ -72,6 +72,7 @@
 #include "ecran_reglage_fin.h"
 #include "ecran_reglages_wifi.h"
 #include "ecran_retraction.h"
+#include "ecran_stub.h"
 #include "ecran_temperatures.h"
 #include "ecran_ventilateurs.h"
 #include "ecran_zcalibrate.h"
@@ -285,9 +286,12 @@ int main(int argc, char **argv)
              * mode capture, d'un tap reel sur une case de menu -- rien ne simule
              * le tactile en capture). Valeurs reconnues : "macros", "deplacer",
              * "temperatures", "extruder", "ventilateurs", "fichiers", "wifi",
-             * "fin", "zcal", "lit", "limites", "retraction" -- toute autre
-             * retombe sur l'accueil seul (ecran_demande reste NULL), meme
-             * politique defensive que --app. */
+             * "fin", "zcal", "lit", "limites", "retraction", "power", "bed_mesh"
+             * (alias "bedmesh"), "input_shaper" (alias "shaper"), "spoolman",
+             * "updater", "console" -- ces six derniers sont les stubs de la
+             * tache 7 (ecran_stub.h, backend absent) -- toute autre retombe sur
+             * l'accueil seul (ecran_demande reste NULL), meme politique
+             * defensive que --app. */
             const char *valeur = argv[++i];
             if (strcmp(valeur, "macros") == 0)            ecran_demande = &ECRAN_MACROS;
             else if (strcmp(valeur, "deplacer") == 0)     ecran_demande = &ECRAN_DEPLACER;
@@ -301,6 +305,14 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "lit") == 0)          ecran_demande = &ECRAN_NIVEAU_LIT;
             else if (strcmp(valeur, "limites") == 0)      ecran_demande = &ECRAN_LIMITES;
             else if (strcmp(valeur, "retraction") == 0)   ecran_demande = &ECRAN_RETRACTION;
+            else if (strcmp(valeur, "power") == 0)        ecran_demande = &ECRAN_POWER;
+            else if (strcmp(valeur, "bed_mesh") == 0
+                     || strcmp(valeur, "bedmesh") == 0)   ecran_demande = &ECRAN_BED_MESH;
+            else if (strcmp(valeur, "input_shaper") == 0
+                     || strcmp(valeur, "shaper") == 0)    ecran_demande = &ECRAN_INPUT_SHAPER;
+            else if (strcmp(valeur, "spoolman") == 0)     ecran_demande = &ECRAN_SPOOLMAN;
+            else if (strcmp(valeur, "updater") == 0)      ecran_demande = &ECRAN_UPDATER;
+            else if (strcmp(valeur, "console") == 0)      ecran_demande = &ECRAN_CONSOLE;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {
