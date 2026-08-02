@@ -90,3 +90,83 @@ bool klipper_gcode_ventilateur(char *sortie, size_t taille, uint8_t pct);
  * court -- jamais de troncature silencieuse rendue comme un succès (même
  * politique que le reste de ce fichier). */
 bool klipper_gcode_imprimer_fichier(char *sortie, size_t taille, const char *nom);
+
+/* Vitesse d'impression, via M220 :
+ *   M220 S<pct>
+ * `pct` ∈ [1, 300]. */
+bool klipper_gcode_vitesse_impression(char *sortie, size_t taille, uint16_t pct);
+
+/* Flux d'extrusion, via M221 :
+ *   M221 S<pct>
+ * `pct` ∈ [1, 300]. */
+bool klipper_gcode_flux(char *sortie, size_t taille, uint16_t pct);
+
+/* Décalage Z courant (babystepping persistant), via SET_GCODE_OFFSET :
+ *   reset=true  -> "SET_GCODE_OFFSET Z=0 MOVE=1" (delta_um ignoré)
+ *   reset=false -> "SET_GCODE_OFFSET Z_ADJUST=<delta_mm> MOVE=1"
+ * Si !reset, `delta_um` ∈ [-2000, 2000] et non nul (un delta nul n'est un
+ * script valide QUE via reset=true). Formaté en mm, ≤3 décimales, sans zéro
+ * de fin superflu. */
+bool klipper_gcode_offset_z(char *sortie, size_t taille, int32_t delta_um, bool reset);
+
+typedef enum { KLIPPER_ZCAL_PROBE, KLIPPER_ZCAL_ENDSTOP,
+               KLIPPER_ZCAL_ACCEPT, KLIPPER_ZCAL_ABORT } klipper_zcal_action_t;
+/* Étapes de l'assistant de calibration Z (écran dédié) :
+ *   PROBE   -> "PROBE_CALIBRATE"
+ *   ENDSTOP -> "Z_ENDSTOP_CALIBRATE"
+ *   ACCEPT  -> "ACCEPT"
+ *   ABORT   -> "ABORT" */
+bool klipper_gcode_calibration_z(char *sortie, size_t taille, klipper_zcal_action_t action);
+
+/* Ajustement Z pendant la calibration (TESTZ), via :
+ *   TESTZ Z=<±delta_mm>
+ * `delta_um` ∈ [-5000, 5000], non nul. Signe explicite ('+' ou '-') même
+ * pour une valeur positive -- c'est la syntaxe attendue par Klipper pour
+ * TESTZ. Formaté en mm, ≤3 décimales, sans zéro de fin superflu. */
+bool klipper_gcode_testz(char *sortie, size_t taille, int32_t delta_um);
+
+typedef enum { KLIPPER_LIT_SCREWS, KLIPPER_LIT_ZTILT,
+               KLIPPER_LIT_QGL, KLIPPER_LIT_DISABLE } klipper_lit_action_t;
+/* Mise à niveau du plateau :
+ *   SCREWS  -> "SCREWS_TILT_CALCULATE"
+ *   ZTILT   -> "Z_TILT_ADJUST"
+ *   QGL     -> "QUAD_GANTRY_LEVEL"
+ *   DISABLE -> "M84" (coupe les moteurs -- sortie de l'assistant) */
+bool klipper_gcode_niveau_lit(char *sortie, size_t taille, klipper_lit_action_t action);
+
+typedef enum { KLIPPER_LIM_VELOCITY, KLIPPER_LIM_ACCEL,
+               KLIPPER_LIM_SQV, KLIPPER_LIM_ACCEL_TO_DECEL } klipper_lim_champ_t;
+/* Limites de vitesse/accélération globales, via SET_VELOCITY_LIMIT :
+ *   VELOCITY        -> "SET_VELOCITY_LIMIT VELOCITY=<v>"
+ *   ACCEL           -> "SET_VELOCITY_LIMIT ACCEL=<v>"
+ *   SQV             -> "SET_VELOCITY_LIMIT SQUARE_CORNER_VELOCITY=<v>"
+ *   ACCEL_TO_DECEL  -> "SET_VELOCITY_LIMIT ACCEL_TO_DECEL=<v>"
+ * `valeur` entier ∈ [1, 100000]. */
+bool klipper_gcode_limite_vitesse(char *sortie, size_t taille, klipper_lim_champ_t champ, uint32_t valeur);
+
+typedef enum { KLIPPER_RETR_LENGTH, KLIPPER_RETR_SPEED,
+               KLIPPER_RETR_EXTRA, KLIPPER_RETR_UNRETRACT_SPEED } klipper_retr_champ_t;
+/* Longueurs de rétraction, via SET_RETRACTION (uniquement les deux champs de
+ * longueur du même enum -- les deux champs de vitesse rendent false ici,
+ * voir klipper_gcode_retraction_vitesse() ci-dessous) :
+ *   LENGTH -> "SET_RETRACTION RETRACT_LENGTH=<mm>"
+ *   EXTRA  -> "SET_RETRACTION UNRETRACT_EXTRA_LENGTH=<mm>"
+ * `valeur_um` ∈ [0, 20000] (0 accepté -- désactive la rétraction). Formaté
+ * en mm, ≤3 décimales, sans zéro de fin superflu.
+ * Choix figé (task 1, jalon panneaux) : SET_RETRACTION mélange dans un même
+ * enum brief des champs en µm (longueurs) et des champs en mm/s entier
+ * (vitesses) -- domaines non convertibles l'un dans l'autre. Plutôt qu'une
+ * seule fonction ambiguë sur l'unité de son paramètre selon `champ`, on
+ * découpe en deux fonctions dont le NOM porte l'unité, chacune ne reconnaissant
+ * que les deux valeurs d'enum de son domaine. */
+bool klipper_gcode_retraction_longueur(char *sortie, size_t taille, klipper_retr_champ_t champ, uint32_t valeur_um);
+
+/* Vitesses de rétraction, via SET_RETRACTION (uniquement les deux champs de
+ * vitesse du même enum -- les deux champs de longueur rendent false ici,
+ * voir klipper_gcode_retraction_longueur() ci-dessus) :
+ *   SPEED            -> "SET_RETRACTION RETRACT_SPEED=<mm_s>"
+ *   UNRETRACT_SPEED  -> "SET_RETRACTION UNRETRACT_SPEED=<mm_s>"
+ * `mm_s` entier ∈ [1, 1000] -- des mm/s, PAS des µm (contrairement au
+ * paramètre `valeur_um` de klipper_gcode_retraction_longueur() ; voir la
+ * note ci-dessus sur la scission des deux fonctions). */
+bool klipper_gcode_retraction_vitesse(char *sortie, size_t taille, klipper_retr_champ_t champ, uint32_t mm_s);

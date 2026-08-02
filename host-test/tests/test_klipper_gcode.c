@@ -132,4 +132,141 @@ void suite_klipper_gcode(void)
     /* tampon trop court : false */
     char court4[8];
     VERIFIER(klipper_gcode_imprimer_fichier(court4, sizeof(court4), "a.gcode") == false);
+
+    /* --- vitesse d'impression --- */
+    VERIFIER(klipper_gcode_vitesse_impression(g, sizeof(g), 100) == true);
+    VERIFIER_TEXTE(g, "M220 S100");
+    VERIFIER(klipper_gcode_vitesse_impression(g, sizeof(g), 1) == true);
+    VERIFIER_TEXTE(g, "M220 S1");
+    VERIFIER(klipper_gcode_vitesse_impression(g, sizeof(g), 300) == true);
+    VERIFIER_TEXTE(g, "M220 S300");
+    /* bornes exactes rejetées : 0 et 301 */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_vitesse_impression(g, sizeof(g), 0) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_vitesse_impression(g, sizeof(g), 301) == false);
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_vitesse_impression(court, sizeof(court), 100) == false);
+
+    /* --- flux --- */
+    VERIFIER(klipper_gcode_flux(g, sizeof(g), 100) == true);
+    VERIFIER_TEXTE(g, "M221 S100");
+    /* bornes exactes rejetées : 0 et 301 */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_flux(g, sizeof(g), 0) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_flux(g, sizeof(g), 301) == false);
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_flux(court, sizeof(court), 100) == false);
+
+    /* --- offset Z --- */
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), 50, false) == true);
+    VERIFIER_TEXTE(g, "SET_GCODE_OFFSET Z_ADJUST=0.05 MOVE=1");
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), -10, false) == true);
+    VERIFIER_TEXTE(g, "SET_GCODE_OFFSET Z_ADJUST=-0.01 MOVE=1");
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), 2000, false) == true);
+    VERIFIER_TEXTE(g, "SET_GCODE_OFFSET Z_ADJUST=2 MOVE=1");
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), 0, true) == true);
+    VERIFIER_TEXTE(g, "SET_GCODE_OFFSET Z=0 MOVE=1");
+    /* delta nul sans reset, delta hors borne : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), 0, false) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), 2001, false) == false);
+    VERIFIER(klipper_gcode_offset_z(g, sizeof(g), -2001, false) == false);
+    /* tampon trop court : false, sur les deux formes (reset et ajustement) */
+    VERIFIER(klipper_gcode_offset_z(court, sizeof(court), 50, false) == false);
+    VERIFIER(klipper_gcode_offset_z(court, sizeof(court), 0, true) == false);
+
+    /* --- calibration Z --- */
+    VERIFIER(klipper_gcode_calibration_z(g, sizeof(g), KLIPPER_ZCAL_PROBE) == true);
+    VERIFIER_TEXTE(g, "PROBE_CALIBRATE");
+    VERIFIER(klipper_gcode_calibration_z(g, sizeof(g), KLIPPER_ZCAL_ENDSTOP) == true);
+    VERIFIER_TEXTE(g, "Z_ENDSTOP_CALIBRATE");
+    VERIFIER(klipper_gcode_calibration_z(g, sizeof(g), KLIPPER_ZCAL_ACCEPT) == true);
+    VERIFIER_TEXTE(g, "ACCEPT");
+    VERIFIER(klipper_gcode_calibration_z(g, sizeof(g), KLIPPER_ZCAL_ABORT) == true);
+    VERIFIER_TEXTE(g, "ABORT");
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_calibration_z(court, sizeof(court), KLIPPER_ZCAL_PROBE) == false);
+
+    /* --- TESTZ --- */
+    VERIFIER(klipper_gcode_testz(g, sizeof(g), 50) == true);
+    VERIFIER_TEXTE(g, "TESTZ Z=+0.05");
+    VERIFIER(klipper_gcode_testz(g, sizeof(g), -50) == true);
+    VERIFIER_TEXTE(g, "TESTZ Z=-0.05");
+    VERIFIER(klipper_gcode_testz(g, sizeof(g), 5000) == true);
+    VERIFIER_TEXTE(g, "TESTZ Z=+5");
+    /* delta nul, hors borne : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_testz(g, sizeof(g), 0) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_testz(g, sizeof(g), 5001) == false);
+    VERIFIER(klipper_gcode_testz(g, sizeof(g), -5001) == false);
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_testz(court, sizeof(court), 50) == false);
+
+    /* --- niveau du lit --- */
+    VERIFIER(klipper_gcode_niveau_lit(g, sizeof(g), KLIPPER_LIT_SCREWS) == true);
+    VERIFIER_TEXTE(g, "SCREWS_TILT_CALCULATE");
+    VERIFIER(klipper_gcode_niveau_lit(g, sizeof(g), KLIPPER_LIT_ZTILT) == true);
+    VERIFIER_TEXTE(g, "Z_TILT_ADJUST");
+    VERIFIER(klipper_gcode_niveau_lit(g, sizeof(g), KLIPPER_LIT_QGL) == true);
+    VERIFIER_TEXTE(g, "QUAD_GANTRY_LEVEL");
+    VERIFIER(klipper_gcode_niveau_lit(g, sizeof(g), KLIPPER_LIT_DISABLE) == true);
+    VERIFIER_TEXTE(g, "M84");
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_niveau_lit(court, sizeof(court), KLIPPER_LIT_SCREWS) == false);
+
+    /* --- limite de vitesse --- */
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_VELOCITY, 250) == true);
+    VERIFIER_TEXTE(g, "SET_VELOCITY_LIMIT VELOCITY=250");
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_ACCEL, 3000) == true);
+    VERIFIER_TEXTE(g, "SET_VELOCITY_LIMIT ACCEL=3000");
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_SQV, 5) == true);
+    VERIFIER_TEXTE(g, "SET_VELOCITY_LIMIT SQUARE_CORNER_VELOCITY=5");
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_ACCEL_TO_DECEL, 1500) == true);
+    VERIFIER_TEXTE(g, "SET_VELOCITY_LIMIT ACCEL_TO_DECEL=1500");
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_VELOCITY, 100000) == true);
+    VERIFIER_TEXTE(g, "SET_VELOCITY_LIMIT VELOCITY=100000");
+    /* valeur nulle, hors borne haute : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_VELOCITY, 0) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_limite_vitesse(g, sizeof(g), KLIPPER_LIM_VELOCITY, 100001) == false);
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_limite_vitesse(court, sizeof(court), KLIPPER_LIM_VELOCITY, 250) == false);
+
+    /* --- rétraction : longueurs (µm -> mm) --- */
+    VERIFIER(klipper_gcode_retraction_longueur(g, sizeof(g), KLIPPER_RETR_LENGTH, 1500) == true);
+    VERIFIER_TEXTE(g, "SET_RETRACTION RETRACT_LENGTH=1.5");
+    VERIFIER(klipper_gcode_retraction_longueur(g, sizeof(g), KLIPPER_RETR_EXTRA, 0) == true);
+    VERIFIER_TEXTE(g, "SET_RETRACTION UNRETRACT_EXTRA_LENGTH=0");
+    VERIFIER(klipper_gcode_retraction_longueur(g, sizeof(g), KLIPPER_RETR_LENGTH, 20000) == true);
+    VERIFIER_TEXTE(g, "SET_RETRACTION RETRACT_LENGTH=20");
+    /* champs de vitesse rejetés ici, borne haute rejetée : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_retraction_longueur(g, sizeof(g), KLIPPER_RETR_SPEED, 40) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_retraction_longueur(g, sizeof(g), KLIPPER_RETR_UNRETRACT_SPEED, 40) == false);
+    VERIFIER(klipper_gcode_retraction_longueur(g, sizeof(g), KLIPPER_RETR_LENGTH, 20001) == false);
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_retraction_longueur(court, sizeof(court), KLIPPER_RETR_LENGTH, 1500) == false);
+
+    /* --- rétraction : vitesses (mm/s entier) --- */
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_SPEED, 40) == true);
+    VERIFIER_TEXTE(g, "SET_RETRACTION RETRACT_SPEED=40");
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_UNRETRACT_SPEED, 1000) == true);
+    VERIFIER_TEXTE(g, "SET_RETRACTION UNRETRACT_SPEED=1000");
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_SPEED, 1) == true);
+    VERIFIER_TEXTE(g, "SET_RETRACTION RETRACT_SPEED=1");
+    /* champs de longueur rejetés ici, borne basse/haute rejetées : false, sortie intacte */
+    snprintf(g, sizeof(g), "sentinelle");
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_LENGTH, 40) == false);
+    VERIFIER_TEXTE(g, "sentinelle");
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_EXTRA, 40) == false);
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_SPEED, 0) == false);
+    VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_SPEED, 1001) == false);
+    /* tampon trop court : false */
+    VERIFIER(klipper_gcode_retraction_vitesse(court, sizeof(court), KLIPPER_RETR_SPEED, 40) == false);
 }

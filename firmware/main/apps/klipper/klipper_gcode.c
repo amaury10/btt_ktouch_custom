@@ -11,15 +11,19 @@
                             * cassait le build simulateur, dont le path pointe
                             * directement sur firmware/main/core). */
 
-/* Formate `valeur` en millimètres avec au plus 2 décimales, sans zéro de fin
- * superflu ni point isolé ("10.00" -> "10", "-0.10" -> "-0.1", "1.25" ->
- * "1.25"). `snprintf("%.2f")` produit toujours une décimale (précision
- * fixe) ; on retire ensuite les '0' de fin puis, s'il ne reste que le point,
- * le point lui-même. Rend false SANS toucher `sortie` si le tampon est trop
- * court -- même politique que les fonctions publiques de ce fichier. */
-static bool formater_mm(char *sortie, size_t taille, float valeur)
+/* Formate `valeur` avec au plus `decimales` chiffres après la virgule, sans
+ * zéro de fin superflu ni point isolé ("10.00" -> "10", "-0.10" -> "-0.1",
+ * "1.25" -> "1.25"). Si `forcer_signe` est vrai, un '+' explicite précède
+ * toute valeur positive (syntaxe TESTZ) -- une valeur négative garde son '-'
+ * dans les deux cas, `snprintf` ne le double jamais. `snprintf("%+.*f")`
+ * produit toujours `decimales` chiffres (précision fixe) ; on retire ensuite
+ * les '0' de fin puis, s'il ne reste que le point, le point lui-même. Rend
+ * false SANS toucher `sortie` si le tampon est trop court -- même politique
+ * que les fonctions publiques de ce fichier. */
+static bool formater_nombre(char *sortie, size_t taille, float valeur, unsigned decimales, bool forcer_signe)
 {
-    int ecrit = snprintf(sortie, taille, "%.2f", (double)valeur);
+    const char *format = forcer_signe ? "%+.*f" : "%.*f";
+    int ecrit = snprintf(sortie, taille, format, decimales, (double)valeur);
     if (ecrit < 0 || (size_t)ecrit >= taille) {
         return false;
     }
@@ -34,6 +38,23 @@ static bool formater_mm(char *sortie, size_t taille, float valeur)
         sortie[fin] = '\0';
     }
     return true;
+}
+
+/* Formate `valeur` en millimètres avec au plus 2 décimales -- alias historique
+ * de formater_nombre() pour le jog/l'extrusion (distance flottante déjà en
+ * mm, jamais de signe forcé). */
+static bool formater_mm(char *sortie, size_t taille, float valeur)
+{
+    return formater_nombre(sortie, taille, valeur, 2, false);
+}
+
+/* Formate `valeur_um` (un nombre entier de micromètres) en millimètres avec
+ * au plus 3 décimales -- résolution exacte pour convertir un µm entier en mm
+ * (1 µm = 0.001 mm), utilisé par offset_z/testz/retraction_longueur qui
+ * reçoivent tous leur borne en µm plutôt qu'en mm flottant. */
+static bool formater_mm_depuis_um(char *sortie, size_t taille, int32_t valeur_um, bool forcer_signe)
+{
+    return formater_nombre(sortie, taille, (float)valeur_um / 1000.0f, 3, forcer_signe);
 }
 
 bool klipper_gcode_jog(char *sortie, size_t taille,
@@ -291,6 +312,276 @@ bool klipper_gcode_imprimer_fichier(char *sortie, size_t taille, const char *nom
 
     char tampon[KLIPPER_GCODE_MAX];
     int ecrit = snprintf(tampon, sizeof(tampon), "SDCARD_PRINT_FILE FILENAME=%s", nom);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_vitesse_impression(char *sortie, size_t taille, uint16_t pct)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    if (pct < 1 || pct > 300) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "M220 S%u", (unsigned)pct);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_flux(char *sortie, size_t taille, uint16_t pct)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    if (pct < 1 || pct > 300) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "M221 S%u", (unsigned)pct);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_offset_z(char *sortie, size_t taille, int32_t delta_um, bool reset)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit;
+    if (reset) {
+        /* delta_um ignoré -- le reset ramène toujours l'offset à zéro,
+         * quelle que soit la valeur passée par l'appelant. */
+        ecrit = snprintf(tampon, sizeof(tampon), "SET_GCODE_OFFSET Z=0 MOVE=1");
+    } else {
+        if (delta_um == 0) {
+            /* Un delta nul n'est un script valide QUE via reset=true : ici,
+             * ce serait un SET_GCODE_OFFSET Z_ADJUST=0 qui ne fait rien --
+             * signe probable d'un appelant qui a oublié de vérifier avant
+             * d'appeler. */
+            return false;
+        }
+        if (delta_um < -2000 || delta_um > 2000) {
+            return false;
+        }
+        char valeur_texte[16];
+        if (!formater_mm_depuis_um(valeur_texte, sizeof(valeur_texte), delta_um, false)) {
+            return false;
+        }
+        ecrit = snprintf(tampon, sizeof(tampon), "SET_GCODE_OFFSET Z_ADJUST=%s MOVE=1", valeur_texte);
+    }
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_calibration_z(char *sortie, size_t taille, klipper_zcal_action_t action)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    const char *commande;
+    switch (action) {
+        case KLIPPER_ZCAL_PROBE:   commande = "PROBE_CALIBRATE"; break;
+        case KLIPPER_ZCAL_ENDSTOP: commande = "Z_ENDSTOP_CALIBRATE"; break;
+        case KLIPPER_ZCAL_ACCEPT:  commande = "ACCEPT"; break;
+        case KLIPPER_ZCAL_ABORT:   commande = "ABORT"; break;
+        default: return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "%s", commande);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_testz(char *sortie, size_t taille, int32_t delta_um)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+    if (delta_um == 0) {
+        return false;
+    }
+    if (delta_um < -5000 || delta_um > 5000) {
+        return false;
+    }
+
+    char valeur_texte[16];
+    if (!formater_mm_depuis_um(valeur_texte, sizeof(valeur_texte), delta_um, true)) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "TESTZ Z=%s", valeur_texte);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_niveau_lit(char *sortie, size_t taille, klipper_lit_action_t action)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    const char *commande;
+    switch (action) {
+        case KLIPPER_LIT_SCREWS:  commande = "SCREWS_TILT_CALCULATE"; break;
+        case KLIPPER_LIT_ZTILT:   commande = "Z_TILT_ADJUST"; break;
+        case KLIPPER_LIT_QGL:     commande = "QUAD_GANTRY_LEVEL"; break;
+        case KLIPPER_LIT_DISABLE: commande = "M84"; break;
+        default: return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "%s", commande);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_limite_vitesse(char *sortie, size_t taille, klipper_lim_champ_t champ, uint32_t valeur)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    const char *nom_champ;
+    switch (champ) {
+        case KLIPPER_LIM_VELOCITY:       nom_champ = "VELOCITY"; break;
+        case KLIPPER_LIM_ACCEL:          nom_champ = "ACCEL"; break;
+        case KLIPPER_LIM_SQV:            nom_champ = "SQUARE_CORNER_VELOCITY"; break;
+        case KLIPPER_LIM_ACCEL_TO_DECEL: nom_champ = "ACCEL_TO_DECEL"; break;
+        default: return false;
+    }
+    if (valeur < 1 || valeur > 100000) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "SET_VELOCITY_LIMIT %s=%u", nom_champ, (unsigned)valeur);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_retraction_longueur(char *sortie, size_t taille, klipper_retr_champ_t champ, uint32_t valeur_um)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    /* Seuls les deux champs de longueur de l'enum sont reconnus ici -- les
+     * deux champs de vitesse (SPEED/UNRETRACT_SPEED) rendent false : voir
+     * klipper_gcode_retraction_vitesse() pour ceux-là. */
+    const char *nom_champ;
+    switch (champ) {
+        case KLIPPER_RETR_LENGTH: nom_champ = "RETRACT_LENGTH"; break;
+        case KLIPPER_RETR_EXTRA:  nom_champ = "UNRETRACT_EXTRA_LENGTH"; break;
+        default: return false;
+    }
+    if (valeur_um > 20000) {
+        return false;
+    }
+
+    char valeur_texte[16];
+    if (!formater_mm_depuis_um(valeur_texte, sizeof(valeur_texte), (int32_t)valeur_um, false)) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "SET_RETRACTION %s=%s", nom_champ, valeur_texte);
+    if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
+        return false;
+    }
+    if ((size_t)ecrit >= taille) {
+        /* Tampon appelant trop court : jamais de troncature silencieuse. */
+        return false;
+    }
+    memcpy(sortie, tampon, (size_t)ecrit + 1);
+    return true;
+}
+
+bool klipper_gcode_retraction_vitesse(char *sortie, size_t taille, klipper_retr_champ_t champ, uint32_t mm_s)
+{
+    if (sortie == NULL || taille == 0) {
+        return false;
+    }
+
+    /* Seuls les deux champs de vitesse de l'enum sont reconnus ici -- les
+     * deux champs de longueur (LENGTH/EXTRA) rendent false : voir
+     * klipper_gcode_retraction_longueur() pour ceux-là. */
+    const char *nom_champ;
+    switch (champ) {
+        case KLIPPER_RETR_SPEED:           nom_champ = "RETRACT_SPEED"; break;
+        case KLIPPER_RETR_UNRETRACT_SPEED: nom_champ = "UNRETRACT_SPEED"; break;
+        default: return false;
+    }
+    if (mm_s < 1 || mm_s > 1000) {
+        return false;
+    }
+
+    char tampon[KLIPPER_GCODE_MAX];
+    int ecrit = snprintf(tampon, sizeof(tampon), "SET_RETRACTION %s=%u", nom_champ, (unsigned)mm_s);
     if (ecrit < 0 || (size_t)ecrit >= sizeof(tampon)) {
         return false;
     }
