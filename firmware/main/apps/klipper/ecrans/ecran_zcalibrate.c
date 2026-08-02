@@ -286,7 +286,7 @@ static void ecran_zcalibrate_construire(lv_obj_t *parent, void *contexte)
     /* --- six boutons, ORDRE FIXE (brief : "Start Probe, Start Endstop,
      * Raise Nozzle, Lower Nozzle, Accept, Abort") -- trois rangées de deux,
      * même largeur (BOUTON_LARGEUR_2), hauteur propre à chaque rangée. ----- */
-    const struct {
+    static const struct {
         ecran_zcalibrate_role_t role;
         const char             *libelle;
         lv_coord_t              x, y, hauteur;
