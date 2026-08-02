@@ -68,6 +68,7 @@
 #include "ecran_jouet.h"
 #include "ecran_limites.h"
 #include "ecran_macros.h"
+#include "ecran_menu_reglages.h"
 #include "ecran_niveau_lit.h"
 #include "ecran_reglage_fin.h"
 #include "ecran_reglages_wifi.h"
@@ -286,10 +287,13 @@ int main(int argc, char **argv)
              * mode capture, d'un tap reel sur une case de menu -- rien ne simule
              * le tactile en capture). Valeurs reconnues : "macros", "deplacer",
              * "temperatures", "extruder", "ventilateurs", "fichiers", "wifi",
-             * "fin", "zcal", "lit", "limites", "retraction", "power", "bed_mesh"
-             * (alias "bedmesh"), "input_shaper" (alias "shaper"), "spoolman",
-             * "updater", "console" -- ces six derniers sont les stubs de la
-             * tache 7 (ecran_stub.h, backend absent) -- toute autre retombe sur
+             * "fin", "zcal", "lit", "limites", "retraction", "menu" (le
+             * sous-menu Configuration, tache 8 -- ECRAN_MENU_REGLAGES, PAS
+             * ECRAN_CONFIGURATION, voir ecran_menu_reglages.h pour la note de
+             * collision de noms), "power", "bed_mesh" (alias "bedmesh"),
+             * "input_shaper" (alias "shaper"), "spoolman", "updater",
+             * "console" -- ces six derniers sont les stubs de la tache 7
+             * (ecran_stub.h, backend absent) -- toute autre retombe sur
              * l'accueil seul (ecran_demande reste NULL), meme politique
              * defensive que --app. */
             const char *valeur = argv[++i];
@@ -305,6 +309,7 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "lit") == 0)          ecran_demande = &ECRAN_NIVEAU_LIT;
             else if (strcmp(valeur, "limites") == 0)      ecran_demande = &ECRAN_LIMITES;
             else if (strcmp(valeur, "retraction") == 0)   ecran_demande = &ECRAN_RETRACTION;
+            else if (strcmp(valeur, "menu") == 0)         ecran_demande = &ECRAN_MENU_REGLAGES;
             else if (strcmp(valeur, "power") == 0)        ecran_demande = &ECRAN_POWER;
             else if (strcmp(valeur, "bed_mesh") == 0
                      || strcmp(valeur, "bedmesh") == 0)   ecran_demande = &ECRAN_BED_MESH;

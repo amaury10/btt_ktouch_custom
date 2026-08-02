@@ -33,6 +33,7 @@
 #include "ecran_deplacer.h" /* ECRAN_DEPLACER */
 #include "ecran_extruder.h" /* ECRAN_EXTRUDER */
 #include "ecran_fichiers.h" /* ECRAN_FICHIERS */
+#include "ecran_menu_reglages.h" /* ECRAN_MENU_REGLAGES */
 #include "ecran_temperatures.h" /* ECRAN_TEMPERATURES */
 #include "ecran_ventilateurs.h" /* ECRAN_VENTILATEURS */
 #include "klipper_paliers.h"
@@ -220,11 +221,11 @@ static void cellule_creer(ecran_accueil_hub_cellule_t *c, lv_obj_t *parent)
 
 /* --- Grille de menu ------------------------------------------------------
  *
- * DEPLACER, TEMPERATURES, EXTRUDER, VENTILATEURS et desormais IMPRIMER
- * (sous-projet 5, tache 1) ont chacune un rappel de clic reel
- * (navigation_empiler()) ; seule REGLAGES n'a AUCUN rappel attache (voir le
- * commentaire de tete de ecran_accueil_hub.h) -- un no-op scope, pas un
- * ecran bricole. */
+ * DEPLACER, TEMPERATURES, EXTRUDER, VENTILATEURS, IMPRIMER (sous-projet 5,
+ * tache 1) et desormais REGLAGES (sous-projet "panneaux KlipperScreen",
+ * tache 8, voir ouvrir_menu_reglages_cb() plus bas) ont chacune un rappel de
+ * clic reel (navigation_empiler()) -- plus aucune case no-op dans cette
+ * grille. */
 static void menu_deplacer_cb(lv_event_t *e)
 {
     (void)e;
@@ -283,16 +284,31 @@ static void ouvrir_imprimer_cb(lv_event_t *e)
     navigation_empiler(&ECRAN_FICHIERS);
 }
 
+/* Meme idiome que menu_deplacer_cb()/ouvrir_temperatures_cb()/
+ * ouvrir_extruder_cb()/ouvrir_ventilateurs_cb()/ouvrir_imprimer_cb()
+ * ci-dessus, meme echec ignore pour la meme raison -- sous-projet "panneaux
+ * KlipperScreen", tache 8 : la case de menu "Reglages" navigue desormais
+ * reellement vers ECRAN_MENU_REGLAGES (le sous-menu Configuration, id
+ * "menu_reglages" -- voir ecran_menu_reglages.h pour la note sur la collision
+ * de noms avec ECRAN_CONFIGURATION), qui relie a son tour les douze panneaux
+ * de reglage. Derniere case du hub a naviguer reellement -- plus aucune case
+ * no-op apres cette tache. */
+static void ouvrir_menu_reglages_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_MENU_REGLAGES);
+}
+
 static const struct {
     const char *titre;
-    const char *sous_titre; /* "" pour les liens reels (Deplacer, Temperatures, Extruder, Ventilateurs, Imprimer), "A venir" pour la case encore no-op (Reglages) */
+    const char *sous_titre; /* "" pour toutes les cases : chacune navigue desormais reellement (voir ouvrir_menu_reglages_cb() ci-dessus, tache 8, derniere a le devenir) */
 } MENU_DEFS[ECRAN_ACCUEIL_HUB_MENU_NB] = {
     [ECRAN_ACCUEIL_HUB_MENU_DEPLACER]     = { "Deplacer",     "" },
     [ECRAN_ACCUEIL_HUB_MENU_TEMPERATURES] = { "Temperatures", "" },
     [ECRAN_ACCUEIL_HUB_MENU_EXTRUDER]     = { "Extruder",     "" },
     [ECRAN_ACCUEIL_HUB_MENU_VENTILATEURS] = { "Ventilateurs", "" },
     [ECRAN_ACCUEIL_HUB_MENU_IMPRIMER]     = { "Imprimer",     "" },
-    [ECRAN_ACCUEIL_HUB_MENU_REGLAGES]     = { "Reglages",     "A venir" },
+    [ECRAN_ACCUEIL_HUB_MENU_REGLAGES]     = { "Reglages",     "" },
 };
 
 static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
@@ -376,6 +392,8 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
                          LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_IMPRIMER], ouvrir_imprimer_cb, LV_EVENT_CLICKED,
                          NULL);
+    lv_obj_add_event_cb(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_REGLAGES], ouvrir_menu_reglages_cb,
+                         LV_EVENT_CLICKED, NULL);
 }
 
 static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)

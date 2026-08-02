@@ -119,6 +119,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c
     ${ECRANS_DIR}/ecran_reglages_wifi.c
+    ${ECRANS_DIR}/ecran_menu_reglages.c
     ${WIFI_MOCK_DIR}/wifi_mock.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c

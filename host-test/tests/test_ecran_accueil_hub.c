@@ -129,7 +129,7 @@ void suite_ecran_accueil_hub(void)
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_IMPRIMER], 0)),
                    "Imprimer");
     VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(ctx->menu_boutons[ECRAN_ACCUEIL_HUB_MENU_REGLAGES], 0)),
-                   "Reglages\nA venir");
+                   "Reglages");
 
     /* --- perime : grise (nom/valeur/consigne des 3 tuiles visibles), puis
      * redevient normal -- style RESOLU, meme lecon que
@@ -177,12 +177,21 @@ void suite_ecran_accueil_hub(void)
     navigation_depiler();
     VERIFIER(navigation_profondeur() == 1);
 
-    /* --- une case no-op (Reglages, sans rappel de clic attache) ne navigue
-     * jamais -- preuve comportementale du "no-op scope" du brief, pas
-     * seulement une absence documentee en commentaire. -------------------- */
+    /* ---------------------------------------------------------------------
+     * Sous-projet "panneaux KlipperScreen", tache 8 : la case de menu
+     * "Reglages" navigue desormais vers ECRAN_MENU_REGLAGES (id
+     * "menu_reglages", le sous-menu Configuration -- PAS ECRAN_CONFIGURATION,
+     * voir ecran_menu_reglages.h) -- plus aucune case no-op dans cette
+     * grille. Meme technique de parcours/clic que "Deplacer" ci-dessus ;
+     * verification exhaustive du contenu du sous-menu (les 12 cases) dans
+     * test_ecran_menu_reglages.c, pas ici. --------------------------------- */
     lv_obj_t *bouton_reglages = lv_obj_get_child(zone_menu, ECRAN_ACCUEIL_HUB_MENU_REGLAGES);
     VERIFIER(bouton_reglages != NULL);
     lv_obj_send_event(bouton_reglages, LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "menu_reglages");
+
+    navigation_depiler();
     VERIFIER(navigation_profondeur() == 1);
 
     /* ---------------------------------------------------------------------

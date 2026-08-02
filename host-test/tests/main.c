@@ -41,6 +41,7 @@ void suite_web_macros(void);
 void suite_ecran_macros(void);
 void suite_ecran_fichiers(void);
 void suite_ecran_reglages_wifi(void);
+void suite_ecran_menu_reglages(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
@@ -247,6 +248,16 @@ int main(void)
      * d'ordonnancement que les autres suites d'ecran. La facade wifi_* vient de
      * wifi_mock.c (voir wifi_mock.h). */
     suite_ecran_reglages_wifi();
+
+    /* Sous-projet "panneaux KlipperScreen", tache 8 : le sous-menu
+     * Configuration (ECRAN_MENU_REGLAGES, id "menu_reglages" -- PAS
+     * ECRAN_CONFIGURATION, voir ecran_menu_reglages.h pour la note de
+     * collision de noms), grille de 12 cases qui relient tous les panneaux
+     * de reglage entre eux. Meme garde d'ordonnancement que les autres
+     * suites d'ecran ci-dessus (habillage construit + boucle simulee
+     * demarree) -- voir le commentaire de tete de suite_ecran_menu_reglages()
+     * dans test_ecran_menu_reglages.c. */
+    suite_ecran_menu_reglages();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage
