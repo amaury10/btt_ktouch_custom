@@ -650,6 +650,21 @@ esp_err_t ota_appliquer_flux(httpd_req_t *req, char *msg, size_t msg_taille)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Pre-verification de taille (defense en profondeur, revue T5) : si le
+       client annonce une image plus grande que le slot cible, la refuser AVANT
+       esp_ota_begin() -- qui, lui, efface deja la cible (donc BTT au tout
+       premier commit). Inutile d'effacer BTT pour une image qui ne rentre de
+       toute facon pas. content_len == 0 (transfert chunked, taille inconnue) :
+       on laisse passer, esp_ota_write() detectera le debordement plus bas et on
+       abandonnera proprement (image non bootable, la sauvegarde couvre BTT). */
+    if (req->content_len > 0 && (size_t)req->content_len > cible->size) {
+        ota_msg(msg, msg_taille, "refuse : image (%u o) plus grande que le slot '%s' (%u o)",
+                (unsigned)req->content_len, cible->label, (unsigned)cible->size);
+        ESP_LOGE(TAG, "commit OTA refuse : image %u o > slot '%s' %u o",
+                 (unsigned)req->content_len, cible->label, (unsigned)cible->size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     esp_ota_handle_t handle = 0;
     esp_err_t err = esp_ota_begin(cible, OTA_SIZE_UNKNOWN, &handle);
     if (err != ESP_OK) {
@@ -775,14 +790,19 @@ esp_err_t ota_appliquer_flux(httpd_req_t *req, char *msg, size_t msg_taille)
         }
     }
 
-    /* Filet de secours (rescue.c, jamais reimplemente ici) : si la nouvelle
-       image ne parvient jamais a joindre le reseau, ou boucle au demarrage,
-       rescue.c rebascule seul vers le slot precedent. Meme delai que celui
-       arme par app_main.c a chaque demarrage normal (CONFIG_KTOUCH_RESCUE_TIMEOUT_MS,
-       voir Kconfig.projbuild) : ce redemarrage-ci n'est pas different des
-       autres du point de vue du filet de sauvetage. Le rollback natif d'IDF
-       (esp_ota_mark_app_valid_cancel_rollback et consorts) N'EST PAS utilise
-       ici -- rescue.c reste le seul mecanisme de secours de ce firmware. */
+    /* Filet de secours (rescue.c, jamais reimplemente ici). NE PAS surestimer
+       CET appel-ci : le minuteur qu'il arme vit en RAM et est detruit par
+       l'esp_restart() ~500 ms plus bas, bien avant CONFIG_KTOUCH_RESCUE_TIMEOUT_MS
+       -- il ne se declenchera donc quasiment jamais pour la nouvelle image. La
+       VRAIE protection de rollback de la nouvelle image vient de SON PROPRE
+       demarrage : le compteur de boot en memoire RTC (qui, lui, survit au
+       redemarrage) plus le rescue_arm() rearme par app_main.c a chaque boot. Si
+       la nouvelle image boucle au demarrage ou ne joint jamais le reseau, c'est
+       ce compteur (RESCUE_DEMARRAGES_MAX) qui rebascule vers le slot precedent
+       (le firmware qui tourne en ce moment). On garde cet arm-ci comme simple
+       redondance a cout nul pour l'etroite fenetre avant le reboot. Le rollback
+       natif d'IDF (esp_ota_mark_app_valid_cancel_rollback et consorts) N'EST PAS
+       utilise -- rescue.c reste le seul mecanisme de secours de ce firmware. */
     esp_err_t err_rescue = rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS);
     if (err_rescue != ESP_OK) {
         ESP_LOGW(TAG,
