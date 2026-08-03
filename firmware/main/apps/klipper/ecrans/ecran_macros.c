@@ -15,9 +15,10 @@
  * disponible entre GRILLE_Y et la limite absolue imposée par le bandeau de
  * notification (voir le commentaire de PAGINATION_Y plus bas) ne laisse la
  * place que pour 5 boutons de 52px (confortable, largement au-dessus du
- * minimum tactile de 44px) -- 6 boutons de 52px déborderait (voir le calcul
- * dans le rapport de tâche), et 6 boutons de 44px (le minimum strict) aurait
- * sacrifié le confort pour gagner une seule ligne. */
+ * minimum tactile de 44px) -- 6 boutons de 52px déborderait ; et 6 boutons
+ * même au minimum strict de 44px NE PASSERAIENT PAS non plus sans rogner
+ * AUSSI l'écart entre boutons (le calcul absolu dépasse la limite du bandeau
+ * de quelques px), un confort sacrifié pour une seule ligne -- non retenu. */
 #include "ecran_macros.h"
 
 #include <stdio.h>

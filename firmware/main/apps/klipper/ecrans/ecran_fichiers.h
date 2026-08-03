@@ -1,9 +1,10 @@
 /* Écran fichiers (sous-projet 6 « browser de fichiers », tâche 3, dernière
  * tâche) : la preuve de bout en bout du sous-projet -- « lister les fichiers
- * gcode connus de Moonraker et en démarrer l'impression ». Grille paginée de
+ * gcode connus de Moonraker et en démarrer l'impression ». Liste paginée de
  * NOMS, quasi identique à ecran_macros.c (voir son commentaire de tête pour
- * l'ossature complète : grille 4x4 paginée, contexte par emplacement pour le
- * rappel de clic, grisage systématique C3) -- deux différences structurelles :
+ * l'ossature complète : colonne unique de boutons pleine largeur, paginée,
+ * contexte par emplacement pour le rappel de clic, grisage systématique C3) --
+ * deux différences structurelles :
  *
  *   1. La source est le store dédié `klipper_fichiers_lire()` (T1/T2 du
  *      sous-projet), pas `etat->macros[]` -- la liste de fichiers a été
