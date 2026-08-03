@@ -16,6 +16,7 @@
 #include <stddef.h>
 
 #include "esp_err.h"
+#include "esp_http_server.h"
 
 typedef enum {
     OTA_BACKUP_ABSENT,   /* aucune sauvegarde valide en tete de spiffs (magic absent/errone) */
@@ -54,3 +55,27 @@ ota_backup_etat_t ota_backup_etat(void);
    (contrairement a une boucle synchrone qui monopoliserait un coeur assez
    longtemps pour risquer de declencher le chien de garde des taches). */
 esp_err_t ota_backup_btt(char *msg, size_t msg_taille);
+
+/* Tache 4 (jalon OTA firmware) : DRY-RUN de reception d'une image applicative
+ * -- recoit le corps d'une requete POST (`req`) EN FLUX, calcule son SHA-256
+ * a la volee (mbedtls, jamais l'image entiere en RAM/flash), verifie le
+ * magic ESP (premier octet == 0xE9) et que la taille recue tient dans la
+ * partition ciblee par une future mise a jour (esp_ota_get_next_update_partition,
+ * appelee UNIQUEMENT pour lire sa taille -- aucune ecriture, aucun esp_ota_begin).
+ * Si `sha_attendu_hex` est non NULL et non vide (64 caracteres hexadecimaux,
+ * voir ota_hex_vers_sha256() dans ota_image.h), compare le SHA calcule au SHA
+ * fourni.
+ *
+ * GARANTIE DE SURETE : cette fonction N'APPELLE JAMAIS esp_ota_begin(),
+ * esp_ota_write(), esp_ota_set_boot_partition(), ni aucune primitive
+ * esp_partition_erase/write -- lecture/reception/hachage SEULEMENT. Rien de
+ * ce que recoit cet appel n'est jamais ecrit en flash. Le commit OTA reel
+ * (jalon suivant) sera une fonction DISTINCTE, avec ses propres garde-fous.
+ *
+ * `msg`/`msg_taille` : message humain toujours ecrit tant que msg != NULL et
+ * msg_taille > 0 -- le SHA-256 calcule (hexa) suivi du verdict ("image
+ * valide", "magic invalide", "taille hors bornes", "SHA ne correspond pas",
+ * ou une erreur de reception/partition), y compris en cas d'echec. Rend
+ * ESP_OK seulement si l'image est structurellement valide ET (si fourni) que
+ * le SHA fourni correspond. */
+esp_err_t ota_verifier_flux(httpd_req_t *req, const char *sha_attendu_hex, char *msg, size_t msg_taille);

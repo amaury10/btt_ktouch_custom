@@ -45,7 +45,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -67,6 +69,24 @@ static const char *TAG = "ota";
    millisecondes ajoutees au total sur les quelques secondes deja attendues --
    voir le commentaire de tete de ce fichier pour la justification complete. */
 #define OTA_CEDER_TOUS_LES_N_BLOCS 32u
+
+/* Taille plancher plausible d'une image applicative ESP (tache 4, dry-run
+   /ota) : purement defensive -- rejette tot une requete manifestement pas une
+   image (fichier vide, quelques octets de test envoyes par erreur) avant
+   meme de regarder le SHA-256, sans pretendre connaitre la taille exacte
+   d'une vraie image K-Touch (voir ota_image.h : le controle de borne haute,
+   lui, precis, vient de la taille reelle de la partition cible). 64 Kio :
+   nettement en-dessous de toute image ESP-IDF reelle (quelques centaines de
+   Kio a plusieurs Mio pour ce projet), nettement au-dessus d'un envoi
+   accidentel de quelques octets/Kio. */
+#define OTA_TAILLE_MIN_IMAGE (64u * 1024u)
+
+/* Nombre de timeouts consecutifs de httpd_req_recv() tolerees avant
+   d'abandonner la reception (tache 4, dry-run /ota) : un client qui cesse
+   d'envoyer sans jamais fermer la connexion ne doit pas bloquer cette tache
+   httpd indefiniment -- meme esprit defensif que OTA_CEDER_TOUS_LES_N_BLOCS
+   ci-dessus, mais pour un client mal comporte plutot que pour l'ordonnanceur. */
+#define OTA_TIMEOUTS_CONSECUTIFS_MAX 3u
 
 static const esp_partition_t *trouver_app0(void)
 {
@@ -362,4 +382,150 @@ esp_err_t ota_backup_btt(char *msg, size_t msg_taille)
     xSemaphoreTake(ctx.termine, portMAX_DELAY);
     vSemaphoreDelete(ctx.termine);
     return ctx.resultat;
+}
+
+/* Tache 4 (jalon OTA firmware) : dry-run de reception d'image applicative --
+ * voir le contrat complet dans ota.h. Recoit le corps de `req` par blocs de
+ * OTA_TAILLE_BLOC (meme tampon statique et meme discipline de cession que le
+ * reste de ce fichier), SANS jamais l'ecrire nulle part : ni sur une
+ * partition applicative (aucun esp_ota_begin/write ici), ni meme sur spiffs
+ * (contrairement a ota_backup_btt_travail() ci-dessus -- ce chemin-ci ne
+ * garde RIEN de l'image recue au-dela du premier octet et du SHA-256 en
+ * cours de calcul). */
+esp_err_t ota_verifier_flux(httpd_req_t *req, const char *sha_attendu_hex, char *msg, size_t msg_taille)
+{
+    if (req == NULL) {
+        ota_msg(msg, msg_taille, "erreur interne : requete nulle");
+        ESP_LOGE(TAG, "ota_verifier_flux appelee avec req NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Taille annoncee par le client (en-tete Content-Length, seul mecanisme
+       de transfert que gere esp_http_server pour un corps de requete -- pas
+       de Transfer-Encoding: chunked). Sans elle, aucune borne fiable sur ce
+       qui va etre recu : on refuse plutot que de lire un flux de taille
+       inconnue. */
+    size_t taille_annoncee = req->content_len;
+    if (taille_annoncee == 0) {
+        ota_msg(msg, msg_taille, "erreur : corps de requete vide ou Content-Length absent");
+        ESP_LOGW(TAG, "dry-run OTA : corps vide ou Content-Length absent");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    /* Lecture SEULE de la taille de la partition ciblee par une future OTA :
+       esp_ota_get_next_update_partition() ne fait ici que renseigner
+       `cible->size`, borne haute de taille acceptee -- AUCUN esp_ota_begin/
+       write sur cette partition, ni ici ni ailleurs dans cette fonction. */
+    const esp_partition_t *cible = esp_ota_get_next_update_partition(NULL);
+    if (cible == NULL) {
+        ota_msg(msg, msg_taille, "erreur : partition cible (prochaine mise a jour) introuvable");
+        ESP_LOGE(TAG, "dry-run OTA : esp_ota_get_next_update_partition() a rendu NULL");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    mbedtls_sha256_context ctx;
+    mbedtls_sha256_init(&ctx);
+    mbedtls_sha256_starts(&ctx, 0); /* 0 = SHA-256 (pas la variante SHA-224) */
+
+    static uint8_t tampon[OTA_TAILLE_BLOC];
+    uint8_t premier_octet = 0;
+    bool premier_octet_connu = false;
+    size_t position = 0;
+    uint32_t compteur_blocs = 0;
+    uint32_t timeouts_consecutifs = 0;
+    esp_err_t erreur_reception = ESP_OK;
+
+    while (position < taille_annoncee) {
+        size_t reste = taille_annoncee - position;
+        size_t a_lire = reste > sizeof(tampon) ? sizeof(tampon) : reste;
+
+        int recu = httpd_req_recv(req, (char *)tampon, a_lire);
+        if (recu <= 0) {
+            if (recu == HTTPD_SOCK_ERR_TIMEOUT) {
+                /* Client lent, pas forcement fautif : quelques nouvelles
+                   tentatives avant d'abandonner -- voir
+                   OTA_TIMEOUTS_CONSECUTIFS_MAX. */
+                if (++timeouts_consecutifs >= OTA_TIMEOUTS_CONSECUTIFS_MAX) {
+                    erreur_reception = ESP_ERR_TIMEOUT;
+                    break;
+                }
+                continue;
+            }
+            /* recu == 0 (connexion fermee cote client) ou autre erreur
+               negative : flux interrompu, rien a en tirer de plus. */
+            erreur_reception = ESP_FAIL;
+            break;
+        }
+        timeouts_consecutifs = 0;
+
+        if (!premier_octet_connu) {
+            premier_octet = tampon[0];
+            premier_octet_connu = true;
+        }
+
+        mbedtls_sha256_update(&ctx, tampon, (size_t)recu);
+        position += (size_t)recu;
+
+        if (++compteur_blocs % OTA_CEDER_TOUS_LES_N_BLOCS == 0) {
+            vTaskDelay(1);
+        }
+    }
+
+    uint8_t sha[32];
+    mbedtls_sha256_finish(&ctx, sha);
+    mbedtls_sha256_free(&ctx);
+
+    char sha_hex[65];
+    sha_vers_hex(sha, sha_hex, sizeof(sha_hex));
+
+    if (erreur_reception != ESP_OK) {
+        ota_msg(msg, msg_taille,
+                "sha256=%s -- erreur : reception interrompue a %u/%u octets (%s)",
+                sha_hex, (unsigned)position, (unsigned)taille_annoncee,
+                erreur_reception == ESP_ERR_TIMEOUT ? "timeout" : "connexion fermee");
+        ESP_LOGW(TAG, "dry-run OTA : reception interrompue a %u/%u octets",
+                 (unsigned)position, (unsigned)taille_annoncee);
+        return erreur_reception;
+    }
+
+    /* `position` == `taille_annoncee` ici (la boucle ne sort sans erreur que
+       lorsque tout ce qui a ete annonce a ete recu) -- utilise quand meme
+       `position`, pas `taille_annoncee`, comme taille reelle de l'image pour
+       ota_image_entete_valide() : c'est ce qui a effectivement traverse le
+       hachage, la donnee dont ce dry-run peut vraiment repondre. */
+    bool magic_ok = premier_octet_connu && premier_octet == 0xE9;
+    bool entete_ok = ota_image_entete_valide(premier_octet_connu ? &premier_octet : NULL,
+                                              premier_octet_connu ? 1u : 0u, position,
+                                              OTA_TAILLE_MIN_IMAGE, cible->size);
+    if (!entete_ok) {
+        ota_msg(msg, msg_taille, "sha256=%s -- %s (recu %u octets, partition cible '%s' %u octets)",
+                sha_hex, magic_ok ? "taille hors bornes" : "magic invalide",
+                (unsigned)position, cible->label, (unsigned)cible->size);
+        ESP_LOGW(TAG, "dry-run OTA : entete invalide (%s), %u octets recus",
+                 magic_ok ? "taille hors bornes" : "magic invalide", (unsigned)position);
+        return magic_ok ? ESP_ERR_INVALID_SIZE : ESP_ERR_INVALID_VERSION;
+    }
+
+    if (sha_attendu_hex != NULL && sha_attendu_hex[0] != '\0') {
+        uint8_t sha_attendu[32];
+        if (!ota_hex_vers_sha256(sha_attendu_hex, sha_attendu)) {
+            ota_msg(msg, msg_taille,
+                    "sha256=%s -- erreur : sha attendu mal forme (64 caracteres hexadecimaux attendus)",
+                    sha_hex);
+            ESP_LOGW(TAG, "dry-run OTA : sha attendu mal forme");
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (!ota_sha256_egal(sha, sha_attendu)) {
+            ota_msg(msg, msg_taille, "sha256=%s -- SHA ne correspond pas", sha_hex);
+            ESP_LOGW(TAG, "dry-run OTA : sha256=%s ne correspond pas au sha attendu", sha_hex);
+            return ESP_ERR_INVALID_CRC;
+        }
+    }
+
+    ota_msg(msg, msg_taille,
+            "sha256=%s -- image valide (%u octets, magic OK, tient dans '%s') -- "
+            "DRY-RUN : rien ecrit en flash",
+            sha_hex, (unsigned)position, cible->label);
+    ESP_LOGI(TAG, "dry-run OTA : image valide, %u octets, sha256=%s", (unsigned)position, sha_hex);
+    return ESP_OK;
 }

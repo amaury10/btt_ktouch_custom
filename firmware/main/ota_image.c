@@ -1,5 +1,7 @@
 #include "ota_image.h"
 
+#include <string.h>
+
 bool ota_image_entete_valide(const uint8_t *debut, size_t n, size_t taille_image,
                              size_t taille_min, size_t taille_partition)
 {
@@ -83,4 +85,42 @@ size_t ota_taille_alignee(size_t taille, size_t taille_secteur)
         return taille;
     }
     return taille + (taille_secteur - reste);
+}
+
+/* Valeur d'un chiffre hexadecimal (0-9/a-f/A-F), -1 si hors alphabet. */
+static int ota_hex_chiffre(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+bool ota_hex_vers_sha256(const char *hex, uint8_t sortie[32])
+{
+    if (hex == NULL || sortie == NULL || strlen(hex) != 64) {
+        return false;
+    }
+
+    /* Accumule dans un tampon local d'abord : `sortie` ne doit jamais etre
+       modifie a moitie si un caractere invalide apparait tard dans la
+       chaine (ex. le 63e caractere) -- voir le contrat en tete de fichier. */
+    uint8_t tampon[32];
+    for (size_t i = 0; i < 32; i++) {
+        int poids_fort = ota_hex_chiffre(hex[i * 2]);
+        int poids_faible = ota_hex_chiffre(hex[i * 2 + 1]);
+        if (poids_fort < 0 || poids_faible < 0) {
+            return false;
+        }
+        tampon[i] = (uint8_t)((poids_fort << 4) | poids_faible);
+    }
+
+    memcpy(sortie, tampon, sizeof(tampon));
+    return true;
 }

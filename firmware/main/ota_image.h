@@ -40,3 +40,12 @@ bool ota_sha256_egal(const uint8_t a[32], const uint8_t b[32]);
    flash (4096 octets sur cette cible), sans tirer esp_partition.h ici. Rend
    0 si taille_secteur vaut 0 (evite une division/modulo invalide). */
 size_t ota_taille_alignee(size_t taille, size_t taille_secteur);
+
+/* Parse 64 caracteres hexadecimaux (0-9, a-f, A-F) en 32 octets -- format
+   d'un SHA-256 attendu passe en query (`?sha=...`) par /ota (tache 4, dry-run
+   de reception d'image). Pure -- extraite en amont plutot que gardee locale a
+   ota.c pour rester testable hote, meme raison que ota_taille_alignee()
+   ci-dessus. Rend false si `hex` NULL, `sortie` NULL, longueur != 64, ou tout
+   caractere hors de l'alphabet hexadecimal -- `sortie` n'est alors PAS
+   modifie (pas d'ecriture partielle sur une entree invalide). */
+bool ota_hex_vers_sha256(const char *hex, uint8_t sortie[32]);

@@ -108,4 +108,60 @@ void suite_ota_image(void)
        meme si le flux ESP n'utilise en pratique que des secteurs de 4096). */
     VERIFIER(ota_taille_alignee(10, 3) == 12);
     VERIFIER(ota_taille_alignee(9, 3) == 9);
+
+    /* --- ota_hex_vers_sha256 (tache 4, dry-run /ota) --- */
+    uint8_t sha_attendu[32];
+    for (int i = 0; i < 32; i++) {
+        sha_attendu[i] = (uint8_t)(i * 7 + 1);
+    }
+    char hex_correct[65] = {0};
+    for (int i = 0; i < 32; i++) {
+        snprintf(hex_correct + i * 2, 3, "%02x", sha_attendu[i]);
+    }
+
+    uint8_t sortie[32];
+    memset(sortie, 0xAA, sizeof(sortie));
+    VERIFIER(ota_hex_vers_sha256(hex_correct, sortie) == true);
+    VERIFIER(memcmp(sortie, sha_attendu, 32) == 0);
+
+    /* majuscules acceptees, meme resultat */
+    char hex_majuscules[65];
+    for (int i = 0; hex_correct[i] != '\0'; i++) {
+        char c = hex_correct[i];
+        hex_majuscules[i] = (c >= 'a' && c <= 'f') ? (char)(c - 'a' + 'A') : c;
+    }
+    hex_majuscules[64] = '\0';
+    memset(sortie, 0xAA, sizeof(sortie));
+    VERIFIER(ota_hex_vers_sha256(hex_majuscules, sortie) == true);
+    VERIFIER(memcmp(sortie, sha_attendu, 32) == 0);
+
+    /* hex NULL -> false */
+    VERIFIER(ota_hex_vers_sha256(NULL, sortie) == false);
+    /* sortie NULL -> false */
+    VERIFIER(ota_hex_vers_sha256(hex_correct, NULL) == false);
+    /* trop court -> false */
+    VERIFIER(ota_hex_vers_sha256("abcd", sortie) == false);
+    /* trop long -> false */
+    char hex_trop_long[66];
+    memcpy(hex_trop_long, hex_correct, 64);
+    hex_trop_long[64] = '0';
+    hex_trop_long[65] = '\0';
+    VERIFIER(ota_hex_vers_sha256(hex_trop_long, sortie) == false);
+    /* caractere invalide en fin de chaine (63e position) : `sortie` ne doit
+       pas etre modifie -- verifie qu'aucune ecriture partielle n'a eu lieu. */
+    char hex_invalide_fin[65];
+    memcpy(hex_invalide_fin, hex_correct, 65);
+    hex_invalide_fin[63] = 'g'; /* hors alphabet hexa */
+    memset(sortie, 0xAA, sizeof(sortie));
+    VERIFIER(ota_hex_vers_sha256(hex_invalide_fin, sortie) == false);
+    for (int i = 0; i < 32; i++) {
+        VERIFIER(sortie[i] == 0xAA);
+    }
+    /* caractere invalide au debut -> false */
+    char hex_invalide_debut[65];
+    memcpy(hex_invalide_debut, hex_correct, 65);
+    hex_invalide_debut[0] = 'z';
+    VERIFIER(ota_hex_vers_sha256(hex_invalide_debut, sortie) == false);
+    /* chaine vide -> false */
+    VERIFIER(ota_hex_vers_sha256("", sortie) == false);
 }

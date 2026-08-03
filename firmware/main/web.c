@@ -1,5 +1,5 @@
 /* Serveur HTTP : c'est la seule interface de contrôle du firmware une fois le
- * câble série hors jeu. Sept routes :
+ * câble série hors jeu. Neuf routes :
  *   GET  /            page d'état minimale, avec liens vers les autres routes
  *   GET  /status      JSON : slot en cours, version, IP, uptime, mémoire libre,
  *                     tactile disponible, compteur de démarrages, état de la
@@ -15,23 +15,35 @@
  *   POST /backup-btt  copie app0 (BTT) vers spiffs, brut, avec vérification
  *                     SHA-256 après relecture (voir ota.c/ota_backup_btt) --
  *                     N'écrit JAMAIS dans un slot app, seulement dans spiffs
+ *   GET  /ota         page HTML : upload d'une image .bin + état slot/version/
+ *                     sauvegarde (voir gestion_ota_page ci-dessous)
+ *   POST /ota         SEUL `?dry_run=1` est câblé à ce jalon (tâche 4) :
+ *                     reçoit le corps EN FLUX, calcule son SHA-256 à la volée
+ *                     (mbedtls, jamais l'image entière en RAM), vérifie le
+ *                     magic 0xE9 et la taille contre la partition ciblée par
+ *                     une future OTA (voir ota.c/ota_verifier_flux) --
+ *                     N'ÉCRIT RIEN, nulle part (ni app, ni spiffs). `dry_run`
+ *                     absent/différent de "1" répond 501 : le commit réel
+ *                     (écriture flash) est une tâche ultérieure distincte,
+ *                     gardée par ses propres vérifications.
  *
- * Délibérément AUCUNE route de mise à jour OTA à ce jalon (elle viendra dans
- * une tâche ultérieure, gardée par une sauvegarde BTT valide). Ce firmware
- * tourne depuis app1 (le slot que l'OTA du firmware d'origine choisit) ; avec
- * deux slots seulement, le slot inactif vu depuis app1 est app0 — celui du
- * firmware d'origine. Un /update ici n'aurait nulle part ailleurs où écrire,
- * et esp_ota_begin(OTA_SIZE_UNKNOWN) efface la partition cible avant même de
+ * Le commit OTA réel (écriture dans un slot app) reste délibérément ABSENT à
+ * ce jalon (il viendra dans une tâche ultérieure, gardée par une sauvegarde
+ * BTT valide) — POST /ota?dry_run=1 ci-dessus ne fait que RECEVOIR et
+ * VÉRIFIER, jamais écrire. Ce firmware tourne depuis app1 (le slot que l'OTA
+ * du firmware d'origine choisit) ; avec deux slots seulement, le slot
+ * inactif vu depuis app1 est app0 — celui du firmware d'origine. Un commit
+ * OTA ici n'aurait nulle part ailleurs où écrire, et
+ * esp_ota_begin(OTA_SIZE_UNKNOWN) efface la partition cible avant même de
  * recevoir un octet : la première mise à jour effacerait le firmware
  * d'origine, après quoi le sauvetage n'aurait plus rien vers quoi basculer.
  * Aucun esp_ota_begin/esp_ota_write ne doit figurer dans ce fichier, ni dans
  * ota.c — les seules écritures flash de tout le firmware sont celle
  * d'otadata (rescue.c, bascule de slot) et celle de spiffs (ota.c,
- * /backup-btt) : app0 comme app1 restent tous deux INTACTS jusqu'à ce que ce
- * jalon OTA ajoute, plus tard, un pas explicitement gardé qui écrit
- * réellement dans un slot app. L'itération sur le pinout repasse par
- * /revert puis par le /update du firmware d'origine (voir
- * docs/hardware/flashing.md).
+ * /backup-btt) : app0 comme app1 restent tous deux INTACTS jusqu'à ce qu'une
+ * tâche ultérieure ajoute un pas explicitement gardé qui écrit réellement
+ * dans un slot app. L'itération sur le pinout repasse par /revert puis par
+ * le /update du firmware d'origine (voir docs/hardware/flashing.md).
  *
  * La BASCULE elle-même reste en POST délibérément : en GET, n'importe quelle
  * requête d'un navigateur (préchargement d'URL, restauration d'onglet au
@@ -108,6 +120,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/log\">/log</a> — journal réseau</li>"
         "<li><a href=\"/revert\">/revert</a> — bouton de redémarrage (bascule OTA)</li>"
         "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
+        "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (verification a blanc, dry-run)</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
@@ -526,6 +539,131 @@ static esp_err_t gestion_backup_btt(httpd_req_t *req)
     return httpd_resp_sendstr(req, msg);
 }
 
+/* GET /ota : page de mise a jour OTA -- a ce jalon (tache 4), UNIQUEMENT la
+   verification a blanc (dry-run) est cablee ; le commit reel viendra dans
+   une tache ulterieure, deliberement absente ici (voir le commentaire de
+   tete de ce fichier sur l'absence historique de route OTA).
+   Deliberement PAS un <form multipart> classique : ota_verifier_flux() (voir
+   ota.c) lit le corps de la requete comme un flux OCTET BRUT (httpd_req_recv
+   direct, sans parseur multipart/form-data cote firmware) -- un vrai
+   formulaire multipart envelopperait le fichier choisi dans des
+   en-tetes/limites qui casseraient le controle du magic 0xE9 des les
+   premiers octets. La page utilise donc un `<input type="file">` lu cote
+   navigateur (File API) et poste son contenu BRUT via fetch(), ce qui
+   correspond exactement a ce que le firmware sait lire. */
+static esp_err_t gestion_ota_page(httpd_req_t *req)
+{
+    const esp_partition_t *courante = esp_ota_get_running_partition();
+    const esp_app_desc_t *description = esp_app_get_description();
+    const char *backup_btt = ota_backup_etat_nom(ota_backup_etat());
+
+    /* Page HTML + CSS + JS inline : nettement plus large que les pages
+       statiques de ce fichier (/revert, /backup-btt), d'ou une marge large
+       (2048, une page complete ici tient sous 1500 octets) -- voir la note
+       du brief de cette tache sur -Werror=format-truncation, qui ne se
+       declenche que sur la chaine idf (jamais visible cote hote). */
+    char page[2048];
+    int longueur = snprintf(page, sizeof(page),
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Mise a jour OTA (dry-run)</title></head>"
+        "<body style=\"font-family:sans-serif;max-width:32em;margin:2em auto;padding:0 1em\">"
+        "<h1>Mise a jour OTA — verification a blanc</h1>"
+        "<p>Slot actuel : <strong>%s</strong> — version : <strong>%s</strong> — "
+        "sauvegarde BTT : <strong>%s</strong></p>"
+        "<p>A ce jalon, seule la verification SANS ecriture est disponible : le "
+        "fichier .bin choisi est recu et son SHA-256 est calcule au fil de "
+        "l'eau, le magic 0xE9 et la taille sont controles — rien n'est jamais "
+        "efface ni ecrit dans un slot applicatif. La mise a jour reelle "
+        "(ecriture flash) viendra dans une tache ulterieure, gardee par une "
+        "sauvegarde BTT valide.</p>"
+        "<p>SHA-256 attendu (optionnel, 64 caracteres hexadecimaux) :<br>"
+        "<input type=\"text\" id=\"sha\" placeholder=\"ex: 3a7bd3e2...\" size=\"70\"></p>"
+        "<p>Fichier .bin : <input type=\"file\" id=\"fichier\"><br>"
+        "<button type=\"button\" onclick=\"verifier()\">Verifier (dry-run, ne rien ecrire)</button></p>"
+        "<pre id=\"resultat\" style=\"white-space:pre-wrap;background:#eee;padding:.5em\"></pre>"
+        "<script>"
+        "function verifier(){"
+        "var f=document.getElementById('fichier').files[0];"
+        "var r=document.getElementById('resultat');"
+        "if(!f){r.textContent='choisir un fichier .bin d\\'abord';return;}"
+        "var sha=document.getElementById('sha').value;"
+        "var url='/ota?dry_run=1'+(sha?('&sha='+encodeURIComponent(sha)):'');"
+        "r.textContent='verification en cours...';"
+        "fetch(url,{method:'POST',body:f})"
+        ".then(function(resp){return resp.text().then(function(t){"
+        "r.textContent='HTTP '+resp.status+'\\n'+t;});})"
+        ".catch(function(e){r.textContent='erreur reseau : '+e;});"
+        "}"
+        "</script>"
+        "</body></html>",
+        courante != NULL ? courante->label : "?",
+        description != NULL ? description->version : "?",
+        backup_btt);
+
+    if (longueur < 0) {
+        /* Meme garde que gestion_status()/gestion_backup_btt_page() : ne
+           jamais envoyer une reponse tronquee etiquetee comme HTML valide si
+           snprintf a echoue. */
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    size_t a_envoyer = (size_t)longueur < sizeof(page) ? (size_t)longueur : sizeof(page) - 1;
+    return httpd_resp_send(req, page, a_envoyer);
+}
+
+/* POST /ota : route unique, distinguee par la query `?dry_run=1` (+
+   `?sha=...` optionnel). A ce jalon (tache 4), SEUL le dry-run est cable --
+   `dry_run` absent ou different de "1" repond 501 plutot que de silencieusement
+   ne rien faire ou, pire, tenter un commit non implemente. Le commit reel
+   (tache 5) sera garde par ses propres verifications, pas ajoute ici. */
+static esp_err_t gestion_ota_post(httpd_req_t *req)
+{
+    bool dry_run = false;
+    char sha[65] = {0};
+
+    size_t longueur_query = httpd_req_get_url_query_len(req);
+    if (longueur_query > 0) {
+        /* +1 pour le terminateur nul attendu par httpd_req_get_url_query_str().
+           Une query plus longue que ce tampon est tronquee proprement (pas de
+           depassement) -- au pire `dry_run`/`sha` restent absents/vides,
+           traites comme "non fournis" plus bas. */
+        char requete[192];
+        size_t a_lire = longueur_query + 1 < sizeof(requete) ? longueur_query + 1 : sizeof(requete);
+        if (httpd_req_get_url_query_str(req, requete, a_lire) == ESP_OK) {
+            char valeur_dry_run[8];
+            if (httpd_query_key_value(requete, "dry_run", valeur_dry_run, sizeof(valeur_dry_run)) == ESP_OK) {
+                dry_run = (strcmp(valeur_dry_run, "1") == 0);
+            }
+            /* Ignore silencieusement si absent ou trop long (> 64 caracteres,
+               taille de `sha`) : ota_verifier_flux() traite alors sha comme
+               non fourni (chaine vide) plutot que de faire echouer toute la
+               requete pour un parametre optionnel mal forme. */
+            httpd_query_key_value(requete, "sha", sha, sizeof(sha));
+        }
+    }
+
+    if (!dry_run) {
+        httpd_resp_set_status(req, "501 Not Implemented");
+        httpd_resp_set_type(req, "text/plain; charset=utf-8");
+        return httpd_resp_sendstr(req,
+            "le commit OTA (ecriture flash) n'est pas encore implemente a ce jalon -- "
+            "utiliser /ota?dry_run=1 pour la verification a blanc\n");
+    }
+
+    /* ota_verifier_flux() lit le corps de `req` en flux (voir ota.c) : ne
+       consomme jamais l'image entiere en RAM, et n'appelle jamais
+       esp_ota_begin/write -- dry-run reel, pas seulement par convention de
+       nommage de cette route. */
+    char msg[256];
+    esp_err_t resultat = ota_verifier_flux(req, sha[0] != '\0' ? sha : NULL, msg, sizeof(msg));
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    if (resultat != ESP_OK) {
+        httpd_resp_set_status(req, "422 Unprocessable Entity");
+    }
+    return httpd_resp_sendstr(req, msg);
+}
+
 static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)
 {
     esp_err_t erreur = httpd_register_uri_handler(serveur, route);
@@ -570,6 +708,12 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_backup_btt = {
         .uri = "/backup-btt", .method = HTTP_POST, .handler = gestion_backup_btt, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_ota_page = {
+        .uri = "/ota", .method = HTTP_GET, .handler = gestion_ota_page, .user_ctx = NULL,
+    };
+    static const httpd_uri_t route_ota_post = {
+        .uri = "/ota", .method = HTTP_POST, .handler = gestion_ota_post, .user_ctx = NULL,
+    };
 
     enregistrer_route(serveur, &route_racine);
     enregistrer_route(serveur, &route_status);
@@ -579,6 +723,8 @@ esp_err_t web_start(void)
     enregistrer_route(serveur, &route_revert);
     enregistrer_route(serveur, &route_backup_btt_page);
     enregistrer_route(serveur, &route_backup_btt);
+    enregistrer_route(serveur, &route_ota_page);
+    enregistrer_route(serveur, &route_ota_post);
 
     ESP_LOGI(TAG, "serveur HTTP demarre");
     return ESP_OK;
