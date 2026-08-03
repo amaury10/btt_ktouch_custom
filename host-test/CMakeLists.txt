@@ -158,7 +158,9 @@ add_executable(tests
     tests/test_integration_rail.c
     tests/test_bascule_accueil.c
     tests/test_klipper_temp_historique.c
+    tests/test_ota_image.c
     ${MAIN_DIR}/web_macros.c
+    ${MAIN_DIR}/ota_image.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_fichiers.c
