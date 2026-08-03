@@ -53,6 +53,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/sha256.h"
+#include "nvs.h"
+#include "rescue.h"
 
 static const char *TAG = "ota";
 
@@ -87,6 +89,24 @@ static const char *TAG = "ota";
    httpd indefiniment -- meme esprit defensif que OTA_CEDER_TOUS_LES_N_BLOCS
    ci-dessus, mais pour un client mal comporte plutot que pour l'ordonnanceur. */
 #define OTA_TIMEOUTS_CONSECUTIFS_MAX 3u
+
+/* Espace de noms NVS DEDIE au commit OTA (tache 5), distinct de
+   REGLAGES_ESPACE_NOMS ("ktouch", voir core/reglages.h) : ce dernier est deja
+   partage avec les identifiants WiFi saisis par l'utilisateur (nvs_open y est
+   appele avec des cles that reglages.c connait et gere seul) -- un espace
+   separe evite tout risque d'interference avec ce cache, et rend la portee
+   de ce drapeau evidente a la lecture (rien a voir avec les reglages
+   utilisateur). Ni l'un ni l'autre n'est la NVS INTERNE d'esp_wifi (partition
+   "nvs" mais namespace gere par le pilote WiFi lui-meme, jamais touchee par
+   ce firmware -- voir reglages.h) : ce fichier n'ouvre jamais cet espace-la. */
+#define OTA_NVS_ESPACE_NOMS "ota"
+
+/* Vrai des que le tout premier commit OTA reussi a ecrit dans app0 (donc a
+   ecrase le firmware BTT d'origine qui s'y trouvait) -- voir la garde de
+   ota_appliquer_flux() plus bas. Faux par defaut (cle absente = appareil
+   jamais mis a jour depuis ce firmware, ou NVS pas encore ecrite) : c'est la
+   valeur SURE, celle qui declenche l'exigence de sauvegarde. */
+#define OTA_NVS_CLE_BTT_ECRASE "btt_ecrase"
 
 static const esp_partition_t *trouver_app0(void)
 {
@@ -527,5 +547,253 @@ esp_err_t ota_verifier_flux(httpd_req_t *req, const char *sha_attendu_hex, char 
             "DRY-RUN : rien ecrit en flash",
             sha_hex, (unsigned)position, cible->label);
     ESP_LOGI(TAG, "dry-run OTA : image valide, %u octets, sha256=%s", (unsigned)position, sha_hex);
+    return ESP_OK;
+}
+
+/* Lit le drapeau OTA_NVS_CLE_BTT_ECRASE dans l'espace OTA_NVS_ESPACE_NOMS.
+   Rend FAUX (valeur sure -- exige la garde) si l'espace de noms n'a encore
+   jamais ete ouvert en ecriture (aucun commit reussi n'a encore eu lieu, donc
+   nvs_open en lecture seule rend ESP_ERR_NVS_NOT_FOUND -- pas une panne, un
+   etat initial normal) ou si la cle elle-meme est absente. */
+static bool ota_nvs_btt_ecrase_lire(void)
+{
+    nvs_handle_t handle;
+    esp_err_t erreur = nvs_open(OTA_NVS_ESPACE_NOMS, NVS_READONLY, &handle);
+    if (erreur != ESP_OK) {
+        return false;
+    }
+    uint8_t valeur = 0;
+    erreur = nvs_get_u8(handle, OTA_NVS_CLE_BTT_ECRASE, &valeur);
+    nvs_close(handle);
+    return erreur == ESP_OK && valeur != 0;
+}
+
+/* Pose OTA_NVS_CLE_BTT_ECRASE=1, appelee UNIQUEMENT apres qu'un commit ait
+   deja ecrit avec succes dans app0 (voir ota_appliquer_flux() plus bas) --
+   n'ecrit jamais dans REGLAGES_ESPACE_NOMS ("ktouch", partage avec les
+   identifiants WiFi) ni dans la NVS interne d'esp_wifi, seulement dans
+   l'espace dedie OTA_NVS_ESPACE_NOMS ("ota") defini plus haut. Un echec ici
+   n'annule pas le commit deja effectue (l'image est deja active, le
+   sauvetage deja arme) : au pire, un futur commit visant a nouveau app0
+   re-exigera une sauvegarde BTT pourtant deja obsolete -- direction sure
+   (trop prudente), jamais dangereuse (voir l'appelant). */
+static esp_err_t ota_nvs_btt_ecrase_marquer(void)
+{
+    nvs_handle_t handle;
+    esp_err_t erreur = nvs_open(OTA_NVS_ESPACE_NOMS, NVS_READWRITE, &handle);
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_open (espace '%s') a echoue lors du marquage %s : %s",
+                 OTA_NVS_ESPACE_NOMS, OTA_NVS_CLE_BTT_ECRASE, esp_err_to_name(erreur));
+        return erreur;
+    }
+    erreur = nvs_set_u8(handle, OTA_NVS_CLE_BTT_ECRASE, 1);
+    if (erreur == ESP_OK) {
+        erreur = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (erreur != ESP_OK) {
+        ESP_LOGE(TAG, "ecriture NVS %s=1 echouee : %s", OTA_NVS_CLE_BTT_ECRASE, esp_err_to_name(erreur));
+    }
+    return erreur;
+}
+
+/* Tache 5 (jalon OTA firmware) : commit OTA reel -- voir le contrat complet
+ * dans ota.h. Contrairement a ota_backup_btt() plus haut, cette fonction NE
+ * DELEGUE PAS a une tache dediee : elle recoit `req` via httpd_req_recv(),
+ * valide seulement sur la tache proprietaire de la requete (la tache httpd),
+ * donc elle tourne directement sur cette pile-la, exactement comme
+ * ota_verifier_flux() ci-dessus -- meme tampon statique, meme discipline de
+ * cession reguliere a l'ordonnanceur (OTA_CEDER_TOUS_LES_N_BLOCS), qui est
+ * ici le SEUL mecanisme laissant tourner les taches IDLE (donc le chien de
+ * garde des taches) pendant les quelques secondes de ce flux. N'appelle
+ * jamais esp_restart() : c'est a l'appelant (web.c) de repondre au client
+ * HTTP avant de redemarrer, comme /revert. */
+esp_err_t ota_appliquer_flux(httpd_req_t *req, char *msg, size_t msg_taille)
+{
+    if (req == NULL) {
+        ota_msg(msg, msg_taille, "erreur interne : requete nulle");
+        ESP_LOGE(TAG, "ota_appliquer_flux appelee avec req NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t taille_annoncee = req->content_len;
+    if (taille_annoncee == 0) {
+        ota_msg(msg, msg_taille, "erreur : corps de requete vide ou Content-Length absent");
+        ESP_LOGW(TAG, "commit OTA : corps vide ou Content-Length absent");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    /* Cible d'ecriture : TOUJOURS le slot OTA inactif -- jamais le slot en
+       cours d'execution. Meme appel que rescue_switch_to_other_slot()
+       (rescue.c) et que ota_verifier_flux() ci-dessus. */
+    const esp_partition_t *cible = esp_ota_get_next_update_partition(NULL);
+    if (cible == NULL) {
+        ota_msg(msg, msg_taille, "erreur : partition cible (prochaine mise a jour) introuvable");
+        ESP_LOGE(TAG, "commit OTA : esp_ota_get_next_update_partition() a rendu NULL");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    /* GARDE (invariant de surete n 1, le plus important de tout ce fichier) :
+       tant que la cible est app0 (le slot qui porte encore le firmware BTT
+       d'origine, ce qui reste vrai jusqu'au tout premier commit reussi) ET
+       qu'aucun commit precedent n'a deja pose le drapeau NVS btt_ecrase, un
+       backup BTT valide est EXIGE avant d'appeler esp_ota_begin(). Sans
+       cette garde, la toute premiere mise a jour OTA effacerait le seul
+       exemplaire du firmware d'origine avant meme qu'il n'ait ete
+       sauvegarde -- sans port serie sur cet appareil, ce serait
+       irrecuperable. */
+    if (cible->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0 && !ota_nvs_btt_ecrase_lire()
+        && ota_backup_etat() != OTA_BACKUP_VALIDE) {
+        ota_msg(msg, msg_taille, "refuse : sauvegarde BTT absente/invalide, POST /backup-btt d'abord");
+        ESP_LOGE(TAG, "commit OTA refuse : cible '%s' porte encore BTT et aucune sauvegarde valide",
+                 cible->label);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_ota_handle_t handle = 0;
+    esp_err_t err = esp_ota_begin(cible, OTA_SIZE_UNKNOWN, &handle);
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : esp_ota_begin sur '%s' (%s)", cible->label, esp_err_to_name(err));
+        ESP_LOGE(TAG, "esp_ota_begin echoue sur '%s' : %s", cible->label, esp_err_to_name(err));
+        return err;
+    }
+
+    static uint8_t tampon[OTA_TAILLE_BLOC];
+    bool premier_bloc = true;
+    size_t position = 0;
+    uint32_t compteur_blocs = 0;
+    uint32_t timeouts_consecutifs = 0;
+    esp_err_t erreur_flux = ESP_OK;
+
+    while (position < taille_annoncee) {
+        size_t reste = taille_annoncee - position;
+        size_t a_lire = reste > sizeof(tampon) ? sizeof(tampon) : reste;
+
+        int recu = httpd_req_recv(req, (char *)tampon, a_lire);
+        if (recu <= 0) {
+            if (recu == HTTPD_SOCK_ERR_TIMEOUT) {
+                /* Meme tolerance que ota_verifier_flux() : un client lent
+                   n'est pas forcement fautif. */
+                if (++timeouts_consecutifs >= OTA_TIMEOUTS_CONSECUTIFS_MAX) {
+                    erreur_flux = ESP_ERR_TIMEOUT;
+                    break;
+                }
+                continue;
+            }
+            /* recu == 0 (connexion fermee cote client) ou autre erreur
+               negative : flux interrompu. */
+            erreur_flux = ESP_FAIL;
+            break;
+        }
+        timeouts_consecutifs = 0;
+
+        if (premier_bloc) {
+            /* Magic ESP (0xE9) verifie sur le TOUT PREMIER octet recu, AVANT
+               le moindre esp_ota_write() : un flux qui commence mal est
+               abandonne sans avoir ecrit un seul octet dans la cible.
+               esp_ota_abort() plus bas n'annule que ce qu'esp_ota_begin() a
+               deja prepare (effacement d'entete interne a esp_ota_ops) --
+               sans consequence, la cible est de toute facon le slot INACTIF,
+               jamais celui en cours d'execution. */
+            if (tampon[0] != 0xE9u) {
+                erreur_flux = ESP_ERR_INVALID_VERSION;
+                break;
+            }
+            premier_bloc = false;
+        }
+
+        err = esp_ota_write(handle, tampon, (size_t)recu);
+        if (err != ESP_OK) {
+            erreur_flux = err;
+            break;
+        }
+        position += (size_t)recu;
+
+        /* Cede la main a l'ordonnanceur tous les OTA_CEDER_TOUS_LES_N_BLOCS
+           blocs -- voir le commentaire de tete de cette fonction : ce flux
+           tourne sur la tache httpd, jamais sur une tache dediee, donc cette
+           cession reguliere est le SEUL mecanisme qui laisse les taches IDLE
+           s'executer (et donc le chien de garde des taches etre nourri)
+           pendant les quelques secondes de ce transfert de ~4,5 Mio. */
+        if (++compteur_blocs % OTA_CEDER_TOUS_LES_N_BLOCS == 0) {
+            vTaskDelay(1);
+        }
+    }
+
+    if (erreur_flux != ESP_OK) {
+        /* Echec a toute etape de reception/ecriture : abort, message, PAS de
+           set_boot -- esp_ota_end() n'est meme pas atteint. */
+        esp_ota_abort(handle);
+        const char *cause;
+        if (erreur_flux == ESP_ERR_INVALID_VERSION) {
+            cause = "magic invalide (premier octet != 0xE9)";
+        } else if (erreur_flux == ESP_ERR_TIMEOUT) {
+            cause = "timeout de reception";
+        } else if (erreur_flux == ESP_FAIL) {
+            cause = "connexion fermee";
+        } else {
+            cause = esp_err_to_name(erreur_flux);
+        }
+        ota_msg(msg, msg_taille, "erreur : ecriture interrompue a %u/%u octets (%s)",
+                (unsigned)position, (unsigned)taille_annoncee, cause);
+        ESP_LOGE(TAG, "commit OTA : ecriture interrompue a %u/%u octets (%s)",
+                 (unsigned)position, (unsigned)taille_annoncee, cause);
+        return erreur_flux;
+    }
+
+    /* esp_ota_end() est la SEULE porte de validation avant set_boot_partition
+       ci-dessous : elle verifie que l'image ecrite est structurellement
+       complete et coherente (taille, en-tete, sommes de controle internes a
+       esp_ota_ops). Si elle echoue, l'image ecrite ne doit JAMAIS devenir la
+       cible de demarrage -- esp_ota_set_boot_partition() n'est pas appele
+       dans ce cas. */
+    err = esp_ota_end(handle);
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : validation de l'image echouee (esp_ota_end : %s)",
+                esp_err_to_name(err));
+        ESP_LOGE(TAG, "commit OTA : esp_ota_end echoue : %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_ota_set_boot_partition(cible);
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : esp_ota_set_boot_partition echoue (%s)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "commit OTA : esp_ota_set_boot_partition echoue : %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (cible->subtype == ESP_PARTITION_SUBTYPE_APP_OTA_0) {
+        /* Ce commit vient d'ecrire app0 pour la premiere fois (la garde
+           ci-dessus l'exigeait) : poser le drapeau pour que les commits
+           SUIVANTS ciblant app0 n'exigent plus une sauvegarde BTT -- BTT
+           n'existe alors plus dans app0, la sauvegarde spiffs (si presente)
+           reste la seule trace de l'original. */
+        esp_err_t err_nvs = ota_nvs_btt_ecrase_marquer();
+        if (err_nvs != ESP_OK) {
+            ESP_LOGW(TAG, "drapeau NVS %s non pose (%s) -- sans consequence sur ce commit",
+                     OTA_NVS_CLE_BTT_ECRASE, esp_err_to_name(err_nvs));
+        }
+    }
+
+    /* Filet de secours (rescue.c, jamais reimplemente ici) : si la nouvelle
+       image ne parvient jamais a joindre le reseau, ou boucle au demarrage,
+       rescue.c rebascule seul vers le slot precedent. Meme delai que celui
+       arme par app_main.c a chaque demarrage normal (CONFIG_KTOUCH_RESCUE_TIMEOUT_MS,
+       voir Kconfig.projbuild) : ce redemarrage-ci n'est pas different des
+       autres du point de vue du filet de sauvetage. Le rollback natif d'IDF
+       (esp_ota_mark_app_valid_cancel_rollback et consorts) N'EST PAS utilise
+       ici -- rescue.c reste le seul mecanisme de secours de ce firmware. */
+    esp_err_t err_rescue = rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS);
+    if (err_rescue != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "rescue_arm a echoue apres le commit OTA (%s) -- le sauvetage sera quand meme "
+                 "arme au prochain demarrage normal par app_main.c",
+                 esp_err_to_name(err_rescue));
+    }
+
+    ota_msg(msg, msg_taille, "OK : image ecrite dans '%s' (%u octets), demarrage programme dessus",
+            cible->label, (unsigned)position);
+    ESP_LOGW(TAG, "commit OTA reussi : '%s' (%u octets), redemarrage imminent", cible->label,
+             (unsigned)position);
     return ESP_OK;
 }

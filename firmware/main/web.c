@@ -17,33 +17,39 @@
  *                     N'écrit JAMAIS dans un slot app, seulement dans spiffs
  *   GET  /ota         page HTML : upload d'une image .bin + état slot/version/
  *                     sauvegarde (voir gestion_ota_page ci-dessous)
- *   POST /ota         SEUL `?dry_run=1` est câblé à ce jalon (tâche 4) :
- *                     reçoit le corps EN FLUX, calcule son SHA-256 à la volée
- *                     (mbedtls, jamais l'image entière en RAM), vérifie le
- *                     magic 0xE9 et la taille contre la partition ciblée par
- *                     une future OTA (voir ota.c/ota_verifier_flux) --
- *                     N'ÉCRIT RIEN, nulle part (ni app, ni spiffs). `dry_run`
- *                     absent/différent de "1" répond 501 : le commit réel
- *                     (écriture flash) est une tâche ultérieure distincte,
- *                     gardée par ses propres vérifications.
+ *   POST /ota         `?dry_run=1` : reçoit le corps EN FLUX, calcule son
+ *                     SHA-256 à la volée (mbedtls, jamais l'image entière en
+ *                     RAM), vérifie le magic 0xE9 et la taille contre la
+ *                     partition ciblée par une future OTA (voir
+ *                     ota.c/ota_verifier_flux) — N'ÉCRIT RIEN, nulle part (ni
+ *                     app, ni spiffs). Sans `dry_run=1` (absent ou différent
+ *                     de "1") : COMMIT RÉEL (voir ota.c/ota_appliquer_flux) —
+ *                     écrit dans le slot OTA inactif, GARDÉ par une
+ *                     sauvegarde BTT valide tant qu'app0 n'a jamais encore
+ *                     été écrasé (voir plus bas), puis rebascule le
+ *                     démarrage dessus et arme le filet rescue.c avant de
+ *                     répondre au client et de redémarrer.
  *
- * Le commit OTA réel (écriture dans un slot app) reste délibérément ABSENT à
- * ce jalon (il viendra dans une tâche ultérieure, gardée par une sauvegarde
- * BTT valide) — POST /ota?dry_run=1 ci-dessus ne fait que RECEVOIR et
- * VÉRIFIER, jamais écrire. Ce firmware tourne depuis app1 (le slot que l'OTA
- * du firmware d'origine choisit) ; avec deux slots seulement, le slot
- * inactif vu depuis app1 est app0 — celui du firmware d'origine. Un commit
- * OTA ici n'aurait nulle part ailleurs où écrire, et
- * esp_ota_begin(OTA_SIZE_UNKNOWN) efface la partition cible avant même de
- * recevoir un octet : la première mise à jour effacerait le firmware
- * d'origine, après quoi le sauvetage n'aurait plus rien vers quoi basculer.
- * Aucun esp_ota_begin/esp_ota_write ne doit figurer dans ce fichier, ni dans
- * ota.c — les seules écritures flash de tout le firmware sont celle
- * d'otadata (rescue.c, bascule de slot) et celle de spiffs (ota.c,
- * /backup-btt) : app0 comme app1 restent tous deux INTACTS jusqu'à ce qu'une
- * tâche ultérieure ajoute un pas explicitement gardé qui écrit réellement
- * dans un slot app. L'itération sur le pinout repasse par /revert puis par
- * le /update du firmware d'origine (voir docs/hardware/flashing.md).
+ * Le commit OTA réel (écriture dans un slot app) est désormais câblé, mais
+ * GARDÉ : ota_appliquer_flux() (ota.c) refuse d'appeler esp_ota_begin() sur
+ * app0 tant qu'aucune sauvegarde BTT valide (ota_backup_etat() ==
+ * OTA_BACKUP_VALIDE) n'existe ET qu'aucun commit précédent n'a déjà écrasé
+ * app0 (drapeau NVS dédié, posé au premier commit réussi visant app0) — voir
+ * le commentaire de tête de ota_appliquer_flux() dans ota.h pour le détail
+ * de la garde et de la séquence esp_ota_begin/write/end/set_boot_partition.
+ * Ce firmware tourne depuis app1 (le slot que l'OTA du firmware d'origine
+ * choisit) ; avec deux slots seulement, le slot inactif vu depuis app1 est
+ * app0 — celui du firmware d'origine, jusqu'à ce que la garde ci-dessus
+ * l'autorise à être écrasé. Ce fichier (web.c) ne contient TOUJOURS aucun
+ * esp_ota_begin/esp_ota_write — il délègue entièrement à ota.c
+ * (ota_appliquer_flux), qui porte seul ces appels et ses propres
+ * vérifications ; ce fichier se contente de recevoir la réponse, de répondre
+ * au client, puis de redémarrer après un court délai (même discipline que
+ * /revert ci-dessous). rescue.c (rollback automatique) n'est pas
+ * réimplémenté ici ni dans ota.c : ota_appliquer_flux() se contente
+ * d'appeler rescue_arm() après un set_boot_partition() réussi. L'itération
+ * sur le pinout repasse par /revert puis par le /update du firmware
+ * d'origine (voir docs/hardware/flashing.md).
  *
  * La BASCULE elle-même reste en POST délibérément : en GET, n'importe quelle
  * requête d'un navigateur (préchargement d'URL, restauration d'onglet au
@@ -120,7 +126,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/log\">/log</a> — journal réseau</li>"
         "<li><a href=\"/revert\">/revert</a> — bouton de redémarrage (bascule OTA)</li>"
         "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
-        "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (verification a blanc, dry-run)</li>"
+        "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (verification a blanc, ecriture reelle en POST direct)</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
@@ -566,17 +572,20 @@ static esp_err_t gestion_ota_page(httpd_req_t *req)
     int longueur = snprintf(page, sizeof(page),
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Mise a jour OTA (dry-run)</title></head>"
+        "<title>Mise a jour OTA</title></head>"
         "<body style=\"font-family:sans-serif;max-width:32em;margin:2em auto;padding:0 1em\">"
-        "<h1>Mise a jour OTA — verification a blanc</h1>"
+        "<h1>Mise a jour OTA</h1>"
         "<p>Slot actuel : <strong>%s</strong> — version : <strong>%s</strong> — "
         "sauvegarde BTT : <strong>%s</strong></p>"
-        "<p>A ce jalon, seule la verification SANS ecriture est disponible : le "
+        "<p>La verification ci-dessous (bouton \"Verifier\") est un DRY-RUN : le "
         "fichier .bin choisi est recu et son SHA-256 est calcule au fil de "
         "l'eau, le magic 0xE9 et la taille sont controles — rien n'est jamais "
-        "efface ni ecrit dans un slot applicatif. La mise a jour reelle "
-        "(ecriture flash) viendra dans une tache ulterieure, gardee par une "
-        "sauvegarde BTT valide.</p>"
+        "efface ni ecrit dans un slot applicatif. L'ecriture reelle (POST /ota "
+        "sans dry_run, voir docs/hardware/flashing.md) reste volontairement "
+        "hors de cette page — declenchee en ligne de commande (curl), jamais "
+        "d'un simple clic navigateur — et refusee tant qu'app0 n'a pas encore "
+        "ete sauvegarde (POST /backup-btt) si le firmware BTT s'y trouve "
+        "encore.</p>"
         "<p>SHA-256 attendu (optionnel, 64 caracteres hexadecimaux) :<br>"
         "<input type=\"text\" id=\"sha\" placeholder=\"ex: 3a7bd3e2...\" size=\"70\"></p>"
         "<p>Fichier .bin : <input type=\"file\" id=\"fichier\"><br>"
@@ -613,10 +622,12 @@ static esp_err_t gestion_ota_page(httpd_req_t *req)
 }
 
 /* POST /ota : route unique, distinguee par la query `?dry_run=1` (+
-   `?sha=...` optionnel). A ce jalon (tache 4), SEUL le dry-run est cable --
-   `dry_run` absent ou different de "1" repond 501 plutot que de silencieusement
-   ne rien faire ou, pire, tenter un commit non implemente. Le commit reel
-   (tache 5) sera garde par ses propres verifications, pas ajoute ici. */
+   `?sha=...` optionnel, dry-run seulement). `dry_run=1` route vers
+   ota_verifier_flux() (tache 4, inchangee) -- RIEN n'est jamais ecrit en
+   flash sur ce chemin. Tout le reste (absent, ou different de "1") route
+   desormais vers le COMMIT REEL, ota_appliquer_flux() (tache 5, ota.c) --
+   garde par une sauvegarde BTT valide tant qu'app0 n'a pas deja ete ecrase
+   (voir ota.h pour le detail de la garde). */
 static esp_err_t gestion_ota_post(httpd_req_t *req)
 {
     bool dry_run = false;
@@ -643,25 +654,61 @@ static esp_err_t gestion_ota_post(httpd_req_t *req)
         }
     }
 
-    if (!dry_run) {
-        httpd_resp_set_status(req, "501 Not Implemented");
+    if (dry_run) {
+        /* ota_verifier_flux() lit le corps de `req` en flux (voir ota.c) : ne
+           consomme jamais l'image entiere en RAM, et n'appelle jamais
+           esp_ota_begin/write -- dry-run reel, pas seulement par convention de
+           nommage de cette route. */
+        char msg[256];
+        esp_err_t resultat = ota_verifier_flux(req, sha[0] != '\0' ? sha : NULL, msg, sizeof(msg));
         httpd_resp_set_type(req, "text/plain; charset=utf-8");
-        return httpd_resp_sendstr(req,
-            "le commit OTA (ecriture flash) n'est pas encore implemente a ce jalon -- "
-            "utiliser /ota?dry_run=1 pour la verification a blanc\n");
+        if (resultat != ESP_OK) {
+            httpd_resp_set_status(req, "422 Unprocessable Entity");
+        }
+        return httpd_resp_sendstr(req, msg);
     }
 
-    /* ota_verifier_flux() lit le corps de `req` en flux (voir ota.c) : ne
-       consomme jamais l'image entiere en RAM, et n'appelle jamais
-       esp_ota_begin/write -- dry-run reel, pas seulement par convention de
-       nommage de cette route. */
+    /* Commit reel : ota_appliquer_flux() (ota.c) porte a elle seule la garde
+       (refus sans sauvegarde BTT valide tant qu'app0 n'a pas deja ete
+       ecrase), la reception/ecriture en flux, la validation esp_ota_end(),
+       esp_ota_set_boot_partition() et l'armement du filet rescue.c -- tout
+       cela AVANT de revenir ici. Ce fichier ne fait toujours jamais lui-meme
+       esp_ota_begin/write (voir le commentaire de tete de ce fichier). */
     char msg[256];
-    esp_err_t resultat = ota_verifier_flux(req, sha[0] != '\0' ? sha : NULL, msg, sizeof(msg));
+    esp_err_t resultat = ota_appliquer_flux(req, msg, sizeof(msg));
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     if (resultat != ESP_OK) {
-        httpd_resp_set_status(req, "422 Unprocessable Entity");
+        /* 409 : la garde a refuse (sauvegarde BTT absente/invalide) -- le
+           client peut corriger (POST /backup-btt) et reessayer, ce n'est pas
+           une erreur sur cette requete-ci. 400 : image structurellement
+           invalide (magic errone/taille aberrante/argument invalide). Tout
+           le reste (reception interrompue, echec d'ecriture ou de validation
+           esp_ota_end/set_boot_partition) reste une erreur serveur : rien de
+           tout cela n'est imputable au contenu envoye. */
+        if (resultat == ESP_ERR_INVALID_STATE) {
+            httpd_resp_set_status(req, "409 Conflict");
+        } else if (resultat == ESP_ERR_INVALID_VERSION || resultat == ESP_ERR_INVALID_SIZE
+                   || resultat == ESP_ERR_INVALID_ARG) {
+            httpd_resp_set_status(req, "400 Bad Request");
+        } else {
+            httpd_resp_set_status(req, "500 Internal Server Error");
+        }
+        return httpd_resp_sendstr(req, msg);
     }
-    return httpd_resp_sendstr(req, msg);
+
+    /* Succes : repondre AVANT de redemarrer, pour que le client recoive
+       confirmation avant que le reseau ne soit coupe -- meme principe que
+       gestion_revert() ci-dessus. esp_restart() est appele ICI, directement
+       -- PAS rescue_switch_now() : ce dernier basculerait vers l'AUTRE slot
+       (le precedent), ce qui annulerait le commit qui vient de reussir.
+       ota_appliquer_flux() a deja appele esp_ota_set_boot_partition() sur la
+       BONNE cible et arme rescue_arm() (le filet de sauvetage normal, pour
+       le cas ou CETTE nouvelle image ne rejoindrait jamais le reseau) avant
+       de revenir ici. */
+    httpd_resp_sendstr(req, "mise a jour ecrite, redemarrage\n");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
 }
 
 static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)

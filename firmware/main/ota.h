@@ -79,3 +79,42 @@ esp_err_t ota_backup_btt(char *msg, size_t msg_taille);
  * ESP_OK seulement si l'image est structurellement valide ET (si fourni) que
  * le SHA fourni correspond. */
 esp_err_t ota_verifier_flux(httpd_req_t *req, const char *sha_attendu_hex, char *msg, size_t msg_taille);
+
+/* Tache 5 (jalon OTA firmware) : COMMIT reel -- recoit le corps d'une requete
+ * POST (`req`) EN FLUX, sur la tache appelante (la tache httpd : httpd_req_recv()
+ * n'est valide que sur la tache proprietaire de la requete, contrairement au
+ * travail flash de ota_backup_btt() ci-dessus, qui ne touche jamais `req` et
+ * peut donc tourner sur une tache dediee), et l'ecrit reellement dans le slot
+ * OTA inactif (esp_ota_get_next_update_partition() -- jamais le slot en cours
+ * d'execution).
+ *
+ * GARDE DE SURETE (invariant le plus important de tout ce fichier) : tant que
+ * la cible est app0 (le slot qui porte encore le firmware BTT d'origine, ce
+ * qui reste vrai jusqu'au tout premier commit reussi de ce module) ET qu'aucun
+ * commit precedent n'a deja ecrase app0 (drapeau NVS persistant), un backup
+ * BTT valide (ota_backup_etat() == OTA_BACKUP_VALIDE) est EXIGE avant
+ * d'appeler esp_ota_begin() -- sinon REFUS immediat, aucune ecriture flash.
+ * Sans cette garde, la toute premiere mise a jour ecraserait le seul
+ * exemplaire du firmware d'origine avant meme qu'il ait ete sauvegarde --
+ * irrecuperable sur un appareil sans port serie.
+ *
+ * Sequence apres la garde : esp_ota_begin() -> reception par blocs (magic
+ * 0xE9 verifie sur le tout PREMIER bloc avant d'ecrire quoi que ce soit) ->
+ * esp_ota_write() par bloc -> esp_ota_end() (SEULE porte de validation de
+ * l'image ; echoue => esp_ota_abort() deja fait, PAS de set_boot) ->
+ * esp_ota_set_boot_partition() (jamais appele si esp_ota_end() a echoue) ->
+ * si la cible etait app0, pose du drapeau NVS (les commits SUIVANTS visant
+ * app0 n'exigeront alors plus de backup, BTT n'existant alors plus) ->
+ * rescue_arm() (meme filet de sauvetage que le demarrage normal : si la
+ * nouvelle image ne rejoint jamais le reseau, rescue.c rebascule seul vers le
+ * slot precedent). N'appelle JAMAIS esp_restart() elle-meme : c'est a
+ * l'appelant (web.c) de repondre au client HTTP d'abord, puis de redemarrer
+ * apres un court delai -- meme discipline que /revert.
+ *
+ * `msg`/`msg_taille` : message humain toujours ecrit tant que msg != NULL et
+ * msg_taille > 0 (succes avec le nombre d'octets ecrits, refus de la garde
+ * avec l'invite explicite a lancer /backup-btt, ou description de l'erreur
+ * de reception/ecriture/validation), y compris en cas d'echec. Rend ESP_OK
+ * SEULEMENT si l'image a ete ecrite, validee par esp_ota_end() et le
+ * demarrage programme dessus. */
+esp_err_t ota_appliquer_flux(httpd_req_t *req, char *msg, size_t msg_taille);
