@@ -115,6 +115,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_limites.c
     ${ECRANS_DIR}/ecran_retraction.c
     ${ECRANS_DIR}/ecran_stub.c
+    ${ECRANS_DIR}/ecran_updater.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c

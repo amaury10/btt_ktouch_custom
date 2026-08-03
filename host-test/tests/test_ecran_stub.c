@@ -1,8 +1,11 @@
-/* Sous-projet "panneaux KlipperScreen", tache 7 : smoke test des six ecrans
- * stub (Power/Bed Mesh/Input Shaper/Spoolman/Updater/Console) -- backend
+/* Sous-projet "panneaux KlipperScreen", tache 7 : smoke test des cinq ecrans
+ * stub restants (Power/Bed Mesh/Input Shaper/Spoolman/Console) -- backend
  * absent pour chacun (voir ecran_stub.h), donc rien a verifier au-dela du
  * contrat minimal : id/titre non vides et attendus, construire() ne plante
- * pas. Construction directe (calloc du contexte a la taille du descripteur,
+ * pas. Le sixieme stub d'origine, Updater, est parti dans
+ * test_ecran_updater.c depuis Task 2 (jalon OTA firmware) -- ecran_updater.c
+ * affiche desormais un vrai etat, plus un placeholder "backend absent".
+ * Construction directe (calloc du contexte a la taille du descripteur,
  * puis <ECRAN>.construire()) plutot que navigation_empiler() -- meme choix
  * que test_ecran_niveau_lit.c/test_ecran_zcalibrate.c, pour la meme raison
  * (tester uniquement le contrat de cet ecran).
@@ -68,7 +71,6 @@ void suite_ecran_stub(void)
         { &ECRAN_BED_MESH, "bed_mesh", "Bed Mesh" },
         { &ECRAN_INPUT_SHAPER, "input_shaper", "Input Shaper" },
         { &ECRAN_SPOOLMAN, "spoolman", "Spoolman" },
-        { &ECRAN_UPDATER, "updater", "Updater" },
         { &ECRAN_CONSOLE, "console", "Console" },
     };
 

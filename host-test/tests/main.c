@@ -32,6 +32,7 @@ void suite_ecran_niveau_lit(void);
 void suite_ecran_limites(void);
 void suite_ecran_retraction(void);
 void suite_ecran_stub(void);
+void suite_ecran_updater(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
 void suite_ecran_configuration(void);
@@ -247,13 +248,21 @@ int main(void)
      * test_ecran_retraction.c. */
     suite_ecran_retraction();
 
-    /* Sous-projet "panneaux KlipperScreen", tache 7 : les six ecrans stub
-     * (Power/Bed Mesh/Input Shaper/Spoolman/Updater/Console, backend
+    /* Sous-projet "panneaux KlipperScreen", tache 7 : les cinq ecrans stub
+     * restants (Power/Bed Mesh/Input Shaper/Spoolman/Console, backend
      * absent) -- AUCUNE contrainte d'ordonnancement, contrairement aux
      * suites d'ecran ci-dessus : ces stubs n'envoient jamais de commande et
      * ne lisent jamais l'etat backend (mettre_a_jour = NULL), voir le
      * commentaire de tete de suite_ecran_stub() dans test_ecran_stub.c. */
     suite_ecran_stub();
+
+    /* Task 2 (jalon OTA firmware) : l'ecran Updater, ex-sixieme stub de la
+     * tache 7 -- affiche desormais slot/version en lecture seule au lieu du
+     * placeholder "backend absent". Meme absence de contrainte
+     * d'ordonnancement que suite_ecran_stub() juste au-dessus (aucune
+     * commande envoyee, mettre_a_jour = NULL) -- voir le commentaire de tete
+     * de suite_ecran_updater() dans test_ecran_updater.c. */
+    suite_ecran_updater();
 
     /* Sous-projet 6 (browser de fichiers), tache 3 : l'ecran Fichiers
      * (grille paginee de noms + confirmation + demarrage d'impression) --

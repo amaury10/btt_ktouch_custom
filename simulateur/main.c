@@ -77,6 +77,7 @@
 #include "ecran_retraction.h"
 #include "ecran_stub.h"
 #include "ecran_temperatures.h"
+#include "ecran_updater.h"
 #include "ecran_ventilateurs.h"
 #include "ecran_zcalibrate.h"
 #include "etat_klipper.h"
@@ -332,9 +333,11 @@ int main(int argc, char **argv)
              * sous-menu Configuration, tache 8 -- ECRAN_MENU_REGLAGES, PAS
              * ECRAN_CONFIGURATION, voir ecran_menu_reglages.h pour la note de
              * collision de noms), "power", "bed_mesh" (alias "bedmesh"),
-             * "input_shaper" (alias "shaper"), "spoolman", "updater",
-             * "console" -- ces six derniers sont les stubs de la tache 7
-             * (ecran_stub.h, backend absent) -- "actions" (le sous-menu
+             * "input_shaper" (alias "shaper"), "spoolman", "console" -- ces
+             * cinq derniers sont les stubs restants de la tache 7
+             * (ecran_stub.h, backend absent) ; "updater" est desormais
+             * l'ecran d'etat reel de Task 2 (jalon OTA firmware,
+             * ecran_updater.h) -- "actions" (le sous-menu
              * Actions, refonte IHM KlipperScreen tache 2 -- ECRAN_ACTIONS,
              * voir ecran_actions.h), "homing" (le panneau Homing, refonte
              * IHM KlipperScreen tache 3 -- ECRAN_HOMING, voir ecran_homing.h)

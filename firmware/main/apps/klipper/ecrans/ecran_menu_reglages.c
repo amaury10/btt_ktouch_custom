@@ -25,7 +25,8 @@
 #include "ecran_niveau_lit.h"    /* ECRAN_NIVEAU_LIT */
 #include "ecran_reglages_wifi.h" /* ECRAN_REGLAGES_WIFI */
 #include "ecran_retraction.h"    /* ECRAN_RETRACTION */
-#include "ecran_stub.h"          /* ECRAN_POWER/ECRAN_BED_MESH/ECRAN_INPUT_SHAPER/ECRAN_SPOOLMAN/ECRAN_UPDATER/ECRAN_CONSOLE */
+#include "ecran_stub.h"          /* ECRAN_POWER/ECRAN_BED_MESH/ECRAN_INPUT_SHAPER/ECRAN_SPOOLMAN/ECRAN_CONSOLE */
+#include "ecran_updater.h"       /* ECRAN_UPDATER (Task 2, jalon OTA firmware -- plus un stub) */
 #include "ecran_zcalibrate.h"    /* ECRAN_ZCALIBRATE */
 #include "navigation.h"          /* navigation_empiler() */
 
