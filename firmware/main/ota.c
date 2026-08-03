@@ -817,3 +817,242 @@ esp_err_t ota_appliquer_flux(httpd_req_t *req, char *msg, size_t msg_taille)
              (unsigned)position);
     return ESP_OK;
 }
+
+/* Tache 6 (jalon OTA firmware, dernier) : fait le travail reel de la
+   restauration BTT -- voir le contrat complet dans ota.h. Relit l'en-tete de
+   sauvegarde spiffs puis l'image sauvegardee, bloc par bloc, vers le slot OTA
+   inactif via le MEME chemin qu'un commit OTA normal (esp_ota_begin/write/
+   end/set_boot_partition, comme ota_appliquer_flux() ci-dessus) -- BTT est
+   une image applicative ESP comme une autre du point de vue de ce chemin,
+   donc esp_ota_end() la valide exactement de la meme facon. Tourne sur la
+   tache dediee creee par ota_restaurer_btt() plus bas, jamais sur la pile de
+   l'appelant (meme motif que ota_backup_btt_travail() plus haut : ce travail
+   ne touche jamais une httpd_req_t, contrairement a ota_appliquer_flux(), qui
+   doit donc rester sur la tache httpd -- cette fonction-ci, elle, peut
+   tourner sur une tache dediee comme la sauvegarde). */
+static esp_err_t ota_restaurer_btt_travail(char *msg, size_t msg_taille)
+{
+    /* Garde (exigee par le contrat, voir ota.h) : une sauvegarde valide doit
+       exister AVANT de commencer quoi que ce soit -- ota_backup_etat() relit
+       independamment depuis spiffs et recalcule son propre SHA-256, ce n'est
+       pas un etat mis en cache qui pourrait etre perime. */
+    ota_backup_etat_t etat_backup = ota_backup_etat();
+    if (etat_backup != OTA_BACKUP_VALIDE) {
+        ota_msg(msg, msg_taille,
+                "refuse : aucune sauvegarde BTT valide (etat=%d) -- POST /backup-btt d'abord",
+                (int)etat_backup);
+        ESP_LOGE(TAG, "restauration BTT refusee : sauvegarde non valide (etat=%d)", (int)etat_backup);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_partition_t *spiffs = trouver_spiffs();
+    if (spiffs == NULL) {
+        ota_msg(msg, msg_taille, "erreur : partition spiffs introuvable");
+        ESP_LOGE(TAG, "restauration BTT : partition spiffs introuvable");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    uint8_t entete_brut[OTA_BACKUP_ENTETE_TAILLE];
+    esp_err_t err = esp_partition_read(spiffs, 0, entete_brut, sizeof(entete_brut));
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : lecture de l'en-tete spiffs (%s)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "restauration BTT : lecture de l'en-tete spiffs echouee : %s", esp_err_to_name(err));
+        return err;
+    }
+    ota_backup_entete_t entete;
+    if (!ota_backup_entete_parser(entete_brut, sizeof(entete_brut), &entete)) {
+        /* Ne peut arriver en pratique : ota_backup_etat() vient de rendre
+           OTA_BACKUP_VALIDE, donc ce meme en-tete a deja ete parse avec
+           succes il y a quelques instants -- garde defensive seulement,
+           meme discipline que le reste de ce fichier (jamais de lecture non
+           gardee, meme quand l'appelant "sait" que ca ne peut pas echouer). */
+        ota_msg(msg, msg_taille, "erreur interne : en-tete de sauvegarde illisible malgre etat valide");
+        ESP_LOGE(TAG, "restauration BTT : parsing de l'en-tete echoue malgre OTA_BACKUP_VALIDE");
+        return ESP_FAIL;
+    }
+
+    /* Cible d'ecriture : le slot OTA INACTIF -- jamais celui en cours
+       d'execution. Meme appel que ota_appliquer_flux() (tache 5) et
+       ota_verifier_flux() (tache 4) plus haut. */
+    const esp_partition_t *cible = esp_ota_get_next_update_partition(NULL);
+    if (cible == NULL) {
+        ota_msg(msg, msg_taille, "erreur : partition cible (prochaine mise a jour) introuvable");
+        ESP_LOGE(TAG, "restauration BTT : esp_ota_get_next_update_partition() a rendu NULL");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    /* Pre-verification de taille (meme defense en profondeur que
+       ota_appliquer_flux(), tache 5) : refuser AVANT esp_ota_begin() (qui
+       efface deja la cible) si l'image sauvegardee ne peut pas tenir dans le
+       slot cible. En pratique cela n'arrive jamais (la sauvegarde couvre
+       app0->size tout entiere, et les deux slots OTA de ce projet ont la
+       meme taille -- voir partitions.csv), mais le controler explicitement
+       avant d'ecrire ne coute rien et evite de deviner. */
+    if ((uint64_t)entete.taille > cible->size) {
+        ota_msg(msg, msg_taille, "refuse : image sauvegardee (%u o) plus grande que le slot '%s' (%u o)",
+                (unsigned)entete.taille, cible->label, (unsigned)cible->size);
+        ESP_LOGE(TAG, "restauration BTT refusee : image %u o > slot '%s' %u o",
+                 (unsigned)entete.taille, cible->label, (unsigned)cible->size);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_ota_handle_t handle = 0;
+    err = esp_ota_begin(cible, OTA_SIZE_UNKNOWN, &handle);
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : esp_ota_begin sur '%s' (%s)", cible->label, esp_err_to_name(err));
+        ESP_LOGE(TAG, "restauration BTT : esp_ota_begin echoue sur '%s' : %s", cible->label,
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    static uint8_t tampon[OTA_TAILLE_BLOC];
+    size_t position = 0;
+    uint32_t compteur_blocs = 0;
+    esp_err_t erreur_flux = ESP_OK;
+
+    while (position < entete.taille) {
+        size_t reste = entete.taille - position;
+        size_t bloc = reste > sizeof(tampon) ? sizeof(tampon) : reste;
+
+        err = esp_partition_read(spiffs, OTA_BACKUP_ENTETE_TAILLE + position, tampon, bloc);
+        if (err != ESP_OK) {
+            erreur_flux = err;
+            break;
+        }
+
+        err = esp_ota_write(handle, tampon, bloc);
+        if (err != ESP_OK) {
+            erreur_flux = err;
+            break;
+        }
+        position += bloc;
+
+        /* Cede la main a l'ordonnanceur tous les OTA_CEDER_TOUS_LES_N_BLOCS
+           blocs -- meme discipline que le reste de ce fichier (voir le
+           commentaire de tete). Cette fonction tourne sur une tache dediee
+           (voir ota_restaurer_btt() plus bas), mais la cession reste une
+           defense en profondeur peu couteuse, pas seulement necessaire ici. */
+        if (++compteur_blocs % OTA_CEDER_TOUS_LES_N_BLOCS == 0) {
+            vTaskDelay(1);
+        }
+    }
+
+    if (erreur_flux != ESP_OK) {
+        /* Echec en cours de lecture spiffs ou d'ecriture flash cible : abort,
+           message, PAS de set_boot -- esp_ota_end() n'est meme pas atteint.
+           Meme discipline que ota_appliquer_flux() (tache 5). */
+        esp_ota_abort(handle);
+        ota_msg(msg, msg_taille, "erreur : restauration interrompue a %u/%u octets (%s)",
+                (unsigned)position, (unsigned)entete.taille, esp_err_to_name(erreur_flux));
+        ESP_LOGE(TAG, "restauration BTT : interrompue a %u/%u octets (%s)",
+                 (unsigned)position, (unsigned)entete.taille, esp_err_to_name(erreur_flux));
+        return erreur_flux;
+    }
+
+    /* esp_ota_end() est la SEULE porte de validation avant set_boot_partition
+       ci-dessous, exactement comme dans ota_appliquer_flux() (tache 5) : BTT
+       est une image applicative ESP comme une autre de son point de vue,
+       donc elle la valide de la meme facon (taille, en-tete, sommes de
+       controle internes a esp_ota_ops). Si elle echoue, l'image restauree ne
+       doit JAMAIS devenir la cible de demarrage -- esp_ota_set_boot_partition()
+       n'est pas appele dans ce cas. */
+    err = esp_ota_end(handle);
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : validation de l'image echouee (esp_ota_end : %s)",
+                esp_err_to_name(err));
+        ESP_LOGE(TAG, "restauration BTT : esp_ota_end echoue : %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_ota_set_boot_partition(cible);
+    if (err != ESP_OK) {
+        ota_msg(msg, msg_taille, "erreur : esp_ota_set_boot_partition echoue (%s)", esp_err_to_name(err));
+        ESP_LOGE(TAG, "restauration BTT : esp_ota_set_boot_partition echoue : %s", esp_err_to_name(err));
+        return err;
+    }
+
+    /* Pas de drapeau NVS btt_ecrase touche ici (voir ota.h) : la restauration
+       ne change rien a l'HISTORIQUE d'ecrasement d'app0, seulement a ce qui
+       s'y trouve MAINTENANT -- si le drapeau etait deja a 1 (BTT ecrase une
+       premiere fois, puis restaure ici), il le reste : la sauvegarde spiffs
+       reste la seule source de verite sur la presence reelle de BTT dans un
+       slot, jamais ce drapeau, qui ne sert qu'a decider si un FUTUR commit
+       (ota_appliquer_flux(), tache 5) doit exiger une sauvegarde avant
+       d'ecrire dans app0. */
+
+    /* Filet de secours (rescue.c, jamais reimplemente ici) -- meme appel et
+       meme reserve que ota_appliquer_flux() (tache 5) : le minuteur qu'il
+       arme est detruit par l'esp_restart() a venir bien avant d'expirer ; la
+       VRAIE protection vient du compteur de boot en RAM RTC et du rescue_arm()
+       rearme par app_main.c au demarrage de l'image restauree. */
+    esp_err_t err_rescue = rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS);
+    if (err_rescue != ESP_OK) {
+        ESP_LOGW(TAG,
+                 "rescue_arm a echoue apres la restauration BTT (%s) -- le sauvetage sera quand meme "
+                 "arme au prochain demarrage normal par app_main.c",
+                 esp_err_to_name(err_rescue));
+    }
+
+    ota_msg(msg, msg_taille, "OK : BTT restaure dans '%s' (%u octets), demarrage programme dessus",
+            cible->label, (unsigned)position);
+    ESP_LOGW(TAG, "restauration BTT reussie : '%s' (%u octets), redemarrage imminent", cible->label,
+             (unsigned)position);
+    return ESP_OK;
+}
+
+/* Contexte passe a la tache dediee de restauration -- meme forme et meme
+   garantie de duree de vie que ota_backup_ctx_t plus haut : `msg`/`msg_taille`
+   pointent vers le tampon de l'appelant, qui reste vivant tout le temps de
+   l'appel puisque ota_restaurer_btt() bloque sur `termine` jusqu'a ce que la
+   tache ait fini de s'en servir. */
+typedef struct {
+    char *msg;
+    size_t msg_taille;
+    esp_err_t resultat;
+    SemaphoreHandle_t termine;
+} ota_restaurer_ctx_t;
+
+static void ota_restaurer_tache(void *arg)
+{
+    ota_restaurer_ctx_t *ctx = (ota_restaurer_ctx_t *)arg;
+    ctx->resultat = ota_restaurer_btt_travail(ctx->msg, ctx->msg_taille);
+    xSemaphoreGive(ctx->termine);
+    vTaskDelete(NULL);
+}
+
+esp_err_t ota_restaurer_btt(char *msg, size_t msg_taille)
+{
+    ota_restaurer_ctx_t ctx = {
+        .msg = msg,
+        .msg_taille = msg_taille,
+        .resultat = ESP_FAIL,
+        .termine = NULL,
+    };
+    ctx.termine = xSemaphoreCreateBinary();
+    if (ctx.termine == NULL) {
+        ota_msg(msg, msg_taille, "erreur : semaphore de restauration indisponible (memoire epuisee)");
+        ESP_LOGE(TAG, "creation du semaphore de restauration echouee");
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* Pile 8192, meme priorite que ota_backup_tache() plus haut et que
+       rescue.c/tache_sur_echeance() : ce travail porte esp_partition_read +
+       esp_ota_write (contexte esp_ota_ops interne) + le tampon statique
+       OTA_TAILLE_BLOC (BSS, pas la pile). */
+    BaseType_t cree = xTaskCreate(ota_restaurer_tache, "ota_restaurer", 8192, &ctx,
+                                   tskIDLE_PRIORITY + 5, NULL);
+    if (cree != pdPASS) {
+        vSemaphoreDelete(ctx.termine);
+        ota_msg(msg, msg_taille, "erreur : tache de restauration non creee (memoire epuisee)");
+        ESP_LOGE(TAG, "creation de la tache de restauration echouee");
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* Bloque jusqu'a la fin de la tache dediee, sur un semaphore -- meme
+       discipline et meme justification que ota_backup_btt() plus haut :
+       jamais de boucle d'E/S flash directement sur la pile de l'appelant
+       (potentiellement la tache httpd). */
+    xSemaphoreTake(ctx.termine, portMAX_DELAY);
+    vSemaphoreDelete(ctx.termine);
+    return ctx.resultat;
+}

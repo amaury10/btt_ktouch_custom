@@ -1,5 +1,5 @@
 /* Serveur HTTP : c'est la seule interface de contrôle du firmware une fois le
- * câble série hors jeu. Neuf routes :
+ * câble série hors jeu. Douze routes :
  *   GET  /            page d'état minimale, avec liens vers les autres routes
  *   GET  /status      JSON : slot en cours, version, IP, uptime, mémoire libre,
  *                     tactile disponible, compteur de démarrages, état de la
@@ -29,6 +29,16 @@
  *                     été écrasé (voir plus bas), puis rebascule le
  *                     démarrage dessus et arme le filet rescue.c avant de
  *                     répondre au client et de redémarrer.
+ *   GET  /restore-btt page HTML : état de la sauvegarde BTT + bouton (même
+ *                     principe que /revert et /backup-btt ci-dessus, un GET
+ *                     ne déclenche rien)
+ *   POST /restore-btt écrit la sauvegarde BTT (spiffs) dans le slot OTA
+ *                     inactif (voir ota.c/ota_restaurer_btt) — l'assurance
+ *                     qui rend l'OTA réversible. EXIGE une sauvegarde BTT
+ *                     valide (refuse sinon, sans écrire quoi que ce soit),
+ *                     puis rebascule le démarrage dessus, arme le filet
+ *                     rescue.c, répond au client et redémarre — même
+ *                     discipline que POST /ota ci-dessus.
  *
  * Le commit OTA réel (écriture dans un slot app) est désormais câblé, mais
  * GARDÉ : ota_appliquer_flux() (ota.c) refuse d'appeler esp_ota_begin() sur
@@ -127,6 +137,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/revert\">/revert</a> — bouton de redémarrage (bascule OTA)</li>"
         "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
         "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (verification a blanc, ecriture reelle en POST direct)</li>"
+        "<li><a href=\"/restore-btt\">/restore-btt</a> — restauration du firmware BTT depuis la sauvegarde</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
@@ -711,6 +722,86 @@ static esp_err_t gestion_ota_post(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t gestion_restore_btt_page(httpd_req_t *req)
+{
+    /* GET /restore-btt : meme principe que GET /revert et GET /backup-btt
+       ci-dessus -- sert une page HTML avec un bouton qui, lui, fait le POST.
+       Un GET ne declenche JAMAIS la restauration (aucune ecriture flash ici),
+       meme raison de securite que les routes soeurs : un prechargement, un
+       scanner ou un aspirateur de liens ne doit jamais avoir d'effet de bord
+       flash. */
+    ota_backup_etat_t etat = ota_backup_etat();
+    char page[1200];
+    int longueur = snprintf(page, sizeof(page),
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Restauration du firmware BTT</title></head>"
+        "<body style=\"font-family:sans-serif;max-width:32em;margin:2em auto;padding:0 1em\">"
+        "<h1>Restauration du firmware BTT</h1>"
+        "<p>Etat actuel de la sauvegarde : <strong>%s</strong></p>"
+        "<p>Ecrit la sauvegarde BTT (partition spiffs) dans le slot OTA inactif "
+        "puis redemarre dessus — l'assurance qui rend une mise a jour OTA "
+        "reversible. Refuse si aucune sauvegarde BTT valide n'existe (voir "
+        "/backup-btt) — aucune ecriture flash dans ce cas. "
+        "<strong>Redemarre l'appareil sur BTT en cas de succes.</strong> "
+        "Prend quelques secondes.</p>"
+        "<form method=\"POST\" action=\"/restore-btt\">"
+        "<button type=\"submit\" style=\"font-size:1.2em;padding:.6em 1.2em\">"
+        "Restaurer BTT maintenant</button></form>"
+        "</body></html>",
+        ota_backup_etat_nom(etat));
+
+    if (longueur < 0) {
+        /* Meme garde que gestion_status()/gestion_backup_btt_page() : ne
+           jamais envoyer une reponse tronquee etiquetee comme HTML valide si
+           snprintf a echoue. */
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    size_t a_envoyer = (size_t)longueur < sizeof(page) ? (size_t)longueur : sizeof(page) - 1;
+    return httpd_resp_send(req, page, a_envoyer);
+}
+
+/* POST /restore-btt : restauration reelle -- ota_restaurer_btt() (ota.c)
+   porte a elle seule la garde (refus sans sauvegarde BTT valide), la lecture
+   spiffs, l'ecriture du slot OTA inactif, la validation esp_ota_end(),
+   esp_ota_set_boot_partition() et l'armement du filet rescue.c -- tout cela
+   AVANT de revenir ici. Ce fichier ne fait toujours jamais lui-meme
+   esp_ota_begin/write (voir le commentaire de tete de ce fichier). */
+static esp_err_t gestion_restore_btt(httpd_req_t *req)
+{
+    /* ota_restaurer_btt() delegue le travail flash (lecture spiffs, ecriture
+       du slot OTA inactif, relecture/validation -- quelques secondes) a sa
+       propre tache dediee interne (voir ota.c), meme motif que
+       ota_backup_btt() plus haut : cet appel bloque jusqu'a la fin, mais sur
+       un semaphore, jamais en boucle d'E/S flash active sur CETTE pile-ci
+       (celle de la tache httpd). */
+    char msg[256];
+    esp_err_t resultat = ota_restaurer_btt(msg, sizeof(msg));
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    if (resultat != ESP_OK) {
+        /* 409 : la garde a refuse (sauvegarde BTT absente/invalide, voir
+           ota_restaurer_btt()) -- le client peut corriger (POST /backup-btt)
+           et reessayer, ce n'est pas une erreur sur cette requete-ci. Tout le
+           reste (partition introuvable, image trop grande pour le slot,
+           echec de lecture/ecriture/validation) reste une erreur serveur :
+           rien de tout cela n'est imputable au client. */
+        httpd_resp_set_status(req, resultat == ESP_ERR_INVALID_STATE ? "409 Conflict"
+                                                                      : "500 Internal Server Error");
+        return httpd_resp_sendstr(req, msg);
+    }
+
+    /* Succes : repondre AVANT de redemarrer, pour que le client recoive
+       confirmation avant que le reseau ne soit coupe -- meme principe que
+       gestion_revert()/gestion_ota_post() ci-dessus. ota_restaurer_btt() a
+       deja appele esp_ota_set_boot_partition() sur la BONNE cible (le slot
+       qui vient de recevoir BTT) et arme rescue_arm() avant de revenir ici. */
+    httpd_resp_sendstr(req, "restauration ecrite, redemarrage sur BTT\n");
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
+    return ESP_OK;
+}
+
 static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)
 {
     esp_err_t erreur = httpd_register_uri_handler(serveur, route);
@@ -761,6 +852,12 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_ota_post = {
         .uri = "/ota", .method = HTTP_POST, .handler = gestion_ota_post, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_restore_btt_page = {
+        .uri = "/restore-btt", .method = HTTP_GET, .handler = gestion_restore_btt_page, .user_ctx = NULL,
+    };
+    static const httpd_uri_t route_restore_btt = {
+        .uri = "/restore-btt", .method = HTTP_POST, .handler = gestion_restore_btt, .user_ctx = NULL,
+    };
 
     enregistrer_route(serveur, &route_racine);
     enregistrer_route(serveur, &route_status);
@@ -772,6 +869,8 @@ esp_err_t web_start(void)
     enregistrer_route(serveur, &route_backup_btt);
     enregistrer_route(serveur, &route_ota_page);
     enregistrer_route(serveur, &route_ota_post);
+    enregistrer_route(serveur, &route_restore_btt_page);
+    enregistrer_route(serveur, &route_restore_btt);
 
     ESP_LOGI(TAG, "serveur HTTP demarre");
     return ESP_OK;

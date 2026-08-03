@@ -118,3 +118,40 @@ esp_err_t ota_verifier_flux(httpd_req_t *req, const char *sha_attendu_hex, char 
  * SEULEMENT si l'image a ete ecrite, validee par esp_ota_end() et le
  * demarrage programme dessus. */
 esp_err_t ota_appliquer_flux(httpd_req_t *req, char *msg, size_t msg_taille);
+
+/* Tache 6 (jalon OTA firmware, dernier) : RESTAURATION BTT -- l'assurance qui
+ * rend tout le reste de ce module reversible. Relit la sauvegarde spiffs
+ * (en-tete puis image, voir ota_backup_etat()/ota_backup_btt() plus haut) et
+ * l'ecrit dans le slot OTA inactif (esp_ota_get_next_update_partition() --
+ * jamais le slot en cours d'execution) via le MEME chemin qu'un commit OTA
+ * normal : esp_ota_begin() -> ecriture par blocs -> esp_ota_end() (SEULE
+ * porte de validation ; BTT est une image applicative ESP comme une autre de
+ * son point de vue, donc elle la valide de la meme facon) -> si et seulement
+ * si esp_ota_end() reussit, esp_ota_set_boot_partition() -> rescue_arm()
+ * (meme filet de sauvetage que le demarrage normal et que le commit OTA).
+ * N'appelle jamais esp_restart() elle-meme : c'est a l'appelant (web.c) de
+ * repondre au client HTTP d'abord, meme discipline que /revert et /ota.
+ *
+ * GARDE DE SURETE : exige ota_backup_etat() == OTA_BACKUP_VALIDE AVANT
+ * d'appeler quoi que ce soit d'autre -- REFUS immediat sinon, aucune
+ * ecriture flash, aucun esp_ota_begin(). Contrairement a la garde de
+ * ota_appliquer_flux() ci-dessus (qui protege la TOUTE PREMIERE ecriture
+ * dans app0 tant qu'il porte encore BTT), cette garde-ci n'est pas
+ * conditionnee a la cible ou au drapeau NVS btt_ecrase : une restauration
+ * sans sauvegarde fiable n'a de toute facon aucun sens (rien a restaurer).
+ * Ne pose ni ne lit le drapeau NVS btt_ecrase : la restauration ne change
+ * rien a l'HISTORIQUE d'ecrasement d'app0, seulement a ce qui s'y trouve
+ * maintenant -- ce drapeau reste la propriete exclusive de
+ * ota_appliquer_flux().
+ *
+ * Sur toute erreur en cours de flux (lecture spiffs, ecriture) :
+ * esp_ota_abort(), message, PAS de set_boot -- meme discipline que
+ * ota_appliquer_flux().
+ *
+ * `msg`/`msg_taille` : message humain toujours ecrit tant que msg != NULL et
+ * msg_taille > 0 (succes avec le nombre d'octets ecrits, refus de la garde
+ * si la sauvegarde n'est pas valide, ou description de l'erreur de
+ * lecture/ecriture/validation), y compris en cas d'echec. Rend ESP_OK
+ * SEULEMENT si l'image sauvegardee a ete ecrite, validee par esp_ota_end()
+ * et le demarrage programme dessus. */
+esp_err_t ota_restaurer_btt(char *msg, size_t msg_taille);
