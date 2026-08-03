@@ -1,11 +1,17 @@
 /* Ecran Accueil-hub (sous-projet "graphes de temperature", tache 3 ; lignes de
- * chauffants affinees en boutons scrollables, tache de suivi) : reecriture
- * main_panel EN DEUX COLONNES -- a gauche, les lignes de chauffants (nom +
- * valeur, chacune un BOUTON >= 44px de haut, voir plus bas) dans un conteneur
- * SCROLLABLE a hauteur fixe, suivies d'un resume compact (position + outil
- * actif, vitesse/flux, mini-progression) puis d'un `lv_chart` d'historique de
- * temperature ; a droite, la grille de CINQ tuiles de menu (Homing,
- * Temperature, Actions, Configuration, Print). REMPLACE le contenu precedent
+ * chauffants affinees en boutons scrollables, tache de suivi ; gouttiere de
+ * defilement + ligne de statut pleine largeur, tache de suivi -- refinement
+ * 2) : reecriture main_panel EN DEUX COLONNES -- a gauche, les lignes de
+ * chauffants (nom + valeur, chacune un BOUTON >= 44px de haut, voir plus bas)
+ * dans un conteneur SCROLLABLE a hauteur fixe, suivies directement d'un
+ * `lv_chart` d'historique de temperature qui occupe le reste de la colonne ;
+ * a droite, la grille de CINQ tuiles de menu (Homing, Temperature, Actions,
+ * Configuration, Print). SOUS les deux colonnes, une ligne de statut pleine
+ * largeur (position + outil actif + vitesse/flux + progression, voir
+ * `ecran_accueil_hub_ctx_t::statut` plus bas) -- l'ancien resume compact
+ * (trois lignes empilees dans la colonne gauche, entre les chauffants et le
+ * chart) est PARTI, fusionne en cette seule ligne pour agrandir le chart.
+ * REMPLACE le contenu precedent
  * de ce fichier (resume une colonne + grille 5 cases sous le resume, tache 4
  * de la refonte IHM KlipperScreen -- voir l'historique git) -- le symbole
  * ECRAN_ACCUEIL_HUB, son id ("accueil_hub") et son titre ("Home") restent
@@ -137,8 +143,8 @@ typedef struct ecran_accueil_hub_ctx_s {
      * repositionnees de facon CONTIGUE (0..total-1) a chaque
      * mettre_a_jour(), voir son commentaire dans le .c. `zone_chauffants` est
      * le conteneur SCROLLABLE a hauteur fixe qui les porte (LV_DIR_VER,
-     * LV_SCROLLBAR_MODE_AUTO) -- le CHART/le resume/la grille de menu
-     * n'en font pas partie. `chauffant_valeur[i]` (tache 4) ET
+     * LV_SCROLLBAR_MODE_AUTO) -- le CHART/la ligne de statut/la grille de
+     * menu n'en font pas partie. `chauffant_valeur[i]` (tache 4) ET
      * `chauffant_nom[i]` (tache 5) sont TOUS DEUX CLIQUABLES (lv_button_create()
      * pose LV_OBJ_FLAG_CLICKABLE par defaut) -- `chauffant_infos[i]` est le
      * tableau parallele (meme indice `i`) que les DEUX rappels de clic
@@ -150,11 +156,21 @@ typedef struct ecran_accueil_hub_ctx_s {
     lv_obj_t *chauffant_valeur[ECRAN_ACCUEIL_HUB_HEATER_LIGNES]; /* bouton "205.0/210.0" */
     ecran_accueil_hub_chauffant_info_t chauffant_infos[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];
 
-    /* --- colonne gauche : resume compact, trois lignes empilees sous les
-     * chauffants -- voir ecran_accueil_hub.c pour le format exact. --------- */
-    lv_obj_t *position;     /* "X:.. Y:.. Z:..  T<outil_actif>" (formater_axe -- "--" si non reference) */
-    lv_obj_t *vitesse_flux; /* "Speed: NN%  Flow: NN%" */
-    lv_obj_t *progression;  /* "Printing: NN%" -- masque (LV_OBJ_FLAG_HIDDEN) hors impression */
+    /* --- ligne de statut pleine largeur, SOUS les deux colonnes (tache de
+     * suivi, refinement 2) -- remplace les trois lignes de resume qui
+     * vivaient auparavant empilees dans la colonne gauche, entre les
+     * chauffants et le chart (historique git). Format exact (voir
+     * mettre_a_jour() dans le .c) : "X:.. Y:.. Z:..  T<outil_actif>
+     * Speed: NN%  Flow: NN%" ("--" par axe non reference, formater_axe()),
+     * suivi de "  Printing: NN%" SEULEMENT si `impression_en_cours` -- jamais
+     * un widget masque/demasque comme l'ancienne ligne `progression`, la
+     * sous-chaine est simplement absente/presente selon le cas (une SEULE
+     * ligne visuelle en TOUTE circonstance, jamais un flag LV_OBJ_FLAG_HIDDEN
+     * sur `statut` lui-meme). LECTURE SEULE (aucun lv_obj_add_event_cb
+     * dessus) -- c'est ce qui la rend exemptee de l'assertion "au-dessus du
+     * bandeau de notification" que respectent le chart et les tuiles (voir
+     * STATUT_Y dans le .c pour le detail complet du compromis). */
+    lv_obj_t *statut;
 
     /* --- colonne gauche : graphe d'historique de temperature -- une serie
      * par chauffant PRESENT, ajoutee au plus tot des que

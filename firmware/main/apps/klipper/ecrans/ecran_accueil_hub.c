@@ -3,13 +3,20 @@
  * Mise en page (742x436, dans le conteneur de navigation a droite du rail
  * persistant, sous la barre d'etat construite par habillage.c) : DEUX
  * colonnes cote a cote. La colonne GAUCHE porte les lignes de chauffants
- * (nom + valeur, ECRAN_ACCUEIL_HUB_HEATER_LIGNES au plus), un resume compact
- * (position + outil actif, vitesse/flux, mini-progression) puis un `lv_chart`
- * d'historique de temperature qui occupe le reste de la colonne. La colonne
- * DROITE porte les cinq tuiles de menu, empilees VERTICALEMENT (contre une
- * rangee horizontale sous le resume dans l'ancienne mise en page une
- * colonne) -- geometrie verifiee par _Static_assert, meme discipline que
- * ecran_menu_reglages.c/ecran_deplacer.c.
+ * (nom + valeur, ECRAN_ACCUEIL_HUB_HEATER_LIGNES au plus) puis DIRECTEMENT un
+ * `lv_chart` d'historique de temperature qui occupe le reste de la colonne.
+ * La colonne DROITE porte les cinq tuiles de menu, empilees VERTICALEMENT
+ * (contre une rangee horizontale sous le resume dans l'ancienne mise en page
+ * une colonne) -- geometrie verifiee par _Static_assert, meme discipline que
+ * ecran_menu_reglages.c/ecran_deplacer.c. SOUS les deux colonnes, une ligne
+ * de statut UNIQUE pleine largeur (`ctx->statut`, position + outil actif +
+ * vitesse/flux + progression) -- tache de suivi (refinement 2) : remplace
+ * l'ancien resume compact TROIS lignes qui vivait empile dans la colonne
+ * gauche entre les chauffants et le chart, ce qui agrandit le chart d'autant
+ * (voir CHART_Y/STATUT_Y plus bas). Meme tache de suivi : `zone_chauffants`
+ * reserve desormais une petite gouttiere a droite du bouton VALEUR pour que
+ * sa barre de defilement (LV_PART_SCROLLBAR) ne recouvre plus son bord droit
+ * (voir CHAUFFANT_GOUTTIERE_SCROLLBAR plus bas).
  *
  * ECART delibere par rapport a l'ancien contenu de ce fichier (resume quatre
  * lignes pleine largeur + grille 5 cases EN DESSOUS) : le sous-projet
@@ -123,7 +130,18 @@
 #define CHAUFFANT_LIGNE_ECART      8
 #define CHAUFFANT_NOM_LARGEUR     70
 #define CHAUFFANT_VALEUR_X      (CHAUFFANT_NOM_LARGEUR + 8)
-#define CHAUFFANT_VALEUR_LARGEUR (GAUCHE_LARGEUR - CHAUFFANT_VALEUR_X)
+/* Gouttiere de defilement (tache de suivi, refinement 2) : `zone_chauffants`
+ * garde LV_PART_SCROLLBAR opaque et large de 4px (voir construire() plus
+ * bas), dessinee au ras du bord DROIT du conteneur -- sans cette gouttiere,
+ * le bouton VALEUR remplissait exactement la largeur du conteneur
+ * (CHAUFFANT_VALEUR_X + CHAUFFANT_VALEUR_LARGEUR == GAUCHE_LARGEUR) et la
+ * barre venait recouvrir ses 4 derniers pixels. 8px (marge visuelle en plus
+ * des 4px de la barre elle-meme) plutot que d'ajouter un padding au
+ * conteneur -- reduire la largeur du bouton VALEUR est la modification la
+ * plus locale, aucun autre enfant de `zone_chauffants` n'a besoin d'etre
+ * touche. */
+#define CHAUFFANT_GOUTTIERE_SCROLLBAR 8
+#define CHAUFFANT_VALEUR_LARGEUR (GAUCHE_LARGEUR - CHAUFFANT_VALEUR_X - CHAUFFANT_GOUTTIERE_SCROLLBAR)
 
 /* Nombre de lignes-boutons visibles SANS defiler dans `zone_chauffants` --
  * DELIBEREMENT 2 (et non 3, malgre "~2-3 button rows" de la spec) : c'est ce
@@ -138,21 +156,35 @@
 #define CHAUFFANTS_ZONE_HAUTEUR (CHAUFFANT_LIGNES_VISIBLES * CHAUFFANT_LIGNE_HAUTEUR + \
                                   (CHAUFFANT_LIGNES_VISIBLES - 1) * CHAUFFANT_LIGNE_ECART)
 
-/* --- Colonne gauche : resume (position/outil, vitesse-flux, progression) -- */
+/* --- Colonne gauche : graphe -- juste SOUS les lignes de chauffants (tache
+ * de suivi, refinement 2 : plus de resume compact entre les deux, voir
+ * STATUT_Y plus bas pour ou il est parti) -- occupe tout le reste de la
+ * colonne jusqu'au plafond ZONE_CONTENU_MAX (DERIVEE, jamais un nombre
+ * choisi a la main) -- c'est ce qui rend le graphe "aussi grand que
+ * possible" sans jamais chevaucher le bandeau de notification. ---------- */
 #define ZONE_ECART   8 /* ecart vertical entre les "blocs" de la colonne gauche */
-#define LIGNE_HAUTEUR 20
-#define LIGNE_ECART    2
-
-#define POSITION_Y      (CHAUFFANTS_ZONE_Y + CHAUFFANTS_ZONE_HAUTEUR + ZONE_ECART)
-#define VITESSE_FLUX_Y  (POSITION_Y + LIGNE_HAUTEUR + LIGNE_ECART)
-#define PROGRESSION_Y   (VITESSE_FLUX_Y + LIGNE_HAUTEUR + LIGNE_ECART)
-
-/* --- Colonne gauche : graphe -- occupe tout le reste de la colonne jusqu'au
- * plafond ZONE_CONTENU_MAX (DERIVEE, jamais un nombre choisi a la main) --
- * c'est ce qui rend le graphe "aussi grand que possible" sans jamais
- * chevaucher le bandeau de notification. -------------------------------- */
-#define CHART_Y       (PROGRESSION_Y + LIGNE_HAUTEUR + ZONE_ECART)
+#define CHART_Y       (CHAUFFANTS_ZONE_Y + CHAUFFANTS_ZONE_HAUTEUR + ZONE_ECART)
 #define CHART_HAUTEUR (ZONE_CONTENU_MAX - CHART_Y)
+
+/* --- Ligne de statut pleine largeur, SOUS les deux colonnes (tache de
+ * suivi, refinement 2) -- position + outil actif + vitesse/flux +
+ * progression, voir mettre_a_jour() pour le format exact et
+ * ecran_accueil_hub_ctx_t::statut (le .h) pour le detail complet. Spec de ce
+ * refinement : la ligne doit couvrir LARGEUR_CONTENU - 2*MARGE, positionnee
+ * au ras du bas des DEUX colonnes -- STATUT_Y >= ZONE_CONTENU_MAX (le bas
+ * commun du chart ET des tuiles, voir les deux _Static_assert plus bas qui
+ * le garantissent) place donc cette ligne SOUS les deux colonnes, jamais un
+ * chevauchement visuel avec elles. Centree dans la bande du bandeau de
+ * notification (BANDEAU_HAUTEUR_ECRAN de haut, qui commence PRECISEMENT a
+ * ZONE_CONTENU_MAX) plutot que collee a son sommet -- purement esthetique,
+ * cette ligne EST AUTORISEE a y entrer (contrairement au chart/aux tuiles)
+ * car elle est LECTURE SEULE
+ * (jamais de lv_obj_add_event_cb dessus) : une notification qui la recouvre
+ * temporairement est un compromis deja accepte ailleurs dans ce depot pour
+ * du contenu non interactif (meme raisonnement que la rangee d'etat
+ * d'impression de l'ancien hub, historique git). ------------------------- */
+#define STATUT_HAUTEUR 20
+#define STATUT_Y       (ZONE_CONTENU_MAX + (BANDEAU_HAUTEUR_ECRAN - STATUT_HAUTEUR) / 2)
 
 /* --- Colonne droite : cinq tuiles empilees verticalement, meme hauteur
  * fixe -- TUILE_HAUTEUR est DERIVEE pour que les cinq tuiles + les quatre
@@ -171,8 +203,8 @@ _Static_assert(ECRAN_ACCUEIL_HUB_MENU_NB * TUILE_HAUTEUR + (ECRAN_ACCUEIL_HUB_ME
                 "les cinq tuiles ne remplissent plus exactement la hauteur disponible de la colonne droite");
 _Static_assert(CHAUFFANT_LIGNE_HAUTEUR >= 44,
                 "les boutons NOM/VALEUR des lignes de chauffants doivent rester >= 44px de cible tactile");
-_Static_assert(CHAUFFANT_VALEUR_X + CHAUFFANT_VALEUR_LARGEUR == GAUCHE_LARGEUR,
-                "les boutons NOM+VALEUR d'une ligne de chauffant ne remplissent plus exactement la colonne gauche");
+_Static_assert(CHAUFFANT_VALEUR_X + CHAUFFANT_VALEUR_LARGEUR + CHAUFFANT_GOUTTIERE_SCROLLBAR == GAUCHE_LARGEUR,
+                "les boutons NOM+VALEUR + la gouttiere de defilement ne remplissent plus exactement la colonne gauche");
 _Static_assert(CHAUFFANT_VALEUR_LARGEUR >= 100,
                 "le bouton VALEUR d'une ligne de chauffant est trop etroit pour afficher \"actuelle/consigne\"");
 /* CHART_HAUTEUR >= 180 (task-3-brief.md/spec de ce refinement : "usable
@@ -189,6 +221,16 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + CHART_Y + CHART_HAUTEUR <= BANDEAU_Y_ECRAN,
                 "la colonne gauche (graphe) chevauche la bande du bandeau de notification de l'habillage");
 _Static_assert(BARRE_HAUTEUR_ECRAN + CONTENU_Y + DROITE_ZONE_HAUTEUR <= BANDEAU_Y_ECRAN,
                 "la colonne droite (tuiles) chevauche la bande du bandeau de notification de l'habillage");
+/* La ligne de statut, elle, est DELIBEREMENT EXEMPTEE des deux garde-fous
+ * ci-dessus (voir le commentaire complet de STATUT_Y plus haut : LECTURE
+ * SEULE, jamais une cible de clic) -- ces deux assertions verifient
+ * seulement qu'elle reste (a) au ras ou sous le bas commun des deux colonnes
+ * (jamais un chevauchement visuel PAR-DESSUS le chart/les tuiles) et (b)
+ * entierement a l'interieur de l'ecran (jamais coupee en bas). */
+_Static_assert(STATUT_Y >= ZONE_CONTENU_MAX,
+                "la ligne de statut chevauche le bas du chart/des tuiles");
+_Static_assert(BARRE_HAUTEUR_ECRAN + STATUT_Y + STATUT_HAUTEUR <= HAUTEUR_ECRAN_TOTALE,
+                "la ligne de statut deborde du bas de l'ecran");
 
 #define COULEUR_FOND             0x10161D
 #define COULEUR_FOND_CHART       0x1B2430
@@ -554,13 +596,22 @@ static lv_obj_t *chauffant_bouton_creer(lv_obj_t *parent, lv_coord_t x, lv_coord
     return bouton;
 }
 
-static lv_obj_t *ligne_creer(lv_obj_t *parent, lv_coord_t y)
+/* Cree `ctx->statut`, la ligne de statut pleine largeur SOUS les deux
+ * colonnes (tache de suivi, refinement 2) -- positionnee a MARGE (== GAUCHE_X,
+ * le meme bord gauche que le contenu des deux colonnes au-dessus) et
+ * STATUT_Y, sans largeur fixee explicitement (auto-dimensionnee au contenu,
+ * meme choix que l'ancien resume compact : le texte reste largement sous
+ * LARGEUR_CONTENU - 2*MARGE meme au pire cas, jamais besoin d'un
+ * LV_LABEL_LONG_DOT/CLIP qui exigerait une passe de layout resolue, voir le
+ * commentaire de l'ancien resume dans construire() pour la meme raison
+ * ailleurs dans ce fichier). */
+static lv_obj_t *statut_ligne_creer(lv_obj_t *parent)
 {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
     lv_label_set_text(label, "");
-    lv_obj_set_pos(label, GAUCHE_X, y);
+    lv_obj_set_pos(label, MARGE, STATUT_Y);
     return label;
 }
 
@@ -695,17 +746,19 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
         lv_obj_add_event_cb(nom, chauffant_nom_cb, LV_EVENT_CLICKED, &ctx->chauffant_infos[i]);
     }
 
-    /* --- colonne gauche : resume, trois lignes en lecture seule -- Voir le
-     * commentaire de tete de l'ancien contenu de ce fichier (git, avant
-     * cette reecriture) pour pourquoi PAS de LV_LABEL_LONG_DOT ici : son
-     * calcul de troncature lit les coordonnees RESOLUES de l'objet, qui
-     * exigent une passe de layout entre construire() et le premier
-     * mettre_a_jour() -- jamais declenchee ici, les deux s'enchainent
-     * directement y compris cote host-test. --------------------------- */
-    ctx->position = ligne_creer(parent, POSITION_Y);
-    ctx->vitesse_flux = ligne_creer(parent, VITESSE_FLUX_Y);
-    ctx->progression = ligne_creer(parent, PROGRESSION_Y);
-    lv_obj_add_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN); /* visible seulement si impression_en_cours, voir mettre_a_jour() */
+    /* --- ligne de statut pleine largeur, SOUS les deux colonnes -- tache de
+     * suivi (refinement 2), remplace l'ancien resume compact trois lignes de
+     * la colonne gauche (voir statut_ligne_creer()/STATUT_Y plus haut).
+     * JAMAIS masquee (contrairement a l'ancienne ligne `progression`) : la
+     * sous-chaine de progression est simplement absente du texte hors
+     * impression plutot qu'un widget separe qu'on cache/montre, voir
+     * mettre_a_jour(). PAS de LV_LABEL_LONG_DOT/CLIP ici, meme raison que
+     * l'ancien resume (git, avant cette reecriture) : son calcul de
+     * troncature lit les coordonnees RESOLUES de l'objet, qui exigeraient une
+     * passe de layout entre construire() et le premier mettre_a_jour() --
+     * jamais declenchee ici, les deux s'enchainent directement y compris
+     * cote host-test. ------------------------------------------------------- */
+    ctx->statut = statut_ligne_creer(parent);
 
     /* --- colonne gauche : graphe d'historique -- une serie par chauffant
      * PRESENT au moment de cet appel (jamais ajoutee/retiree ensuite, voir
@@ -858,9 +911,20 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         }
     }
 
-    /* --- ligne de position + outil actif --------------------------------
-     * meme idiome que ecran_deplacer_mettre_a_jour() : "--" si l'axe n'a
-     * jamais ete reference par un homing. */
+    /* --- ligne de statut pleine largeur : position + outil actif + vitesse/
+     * flux + progression, SOUS les deux colonnes (tache de suivi, refinement
+     * 2 -- remplace les trois lignes empilees de l'ancien resume compact,
+     * voir ecran_accueil_hub_ctx_t::statut dans le .h). "--" par axe non
+     * reference (formater_axe(), meme idiome que ecran_deplacer_mettre_a_jour())
+     * ; le segment de progression est simplement ABSENT du texte hors
+     * impression -- jamais un widget separe qu'on masque/demasque comme
+     * l'ancienne ligne `progression` (re-evalue a CHAQUE appel, systematique,
+     * meme discipline que bouton_macros dans ecran_accueil.c : une
+     * impression qui se termine ne doit pas laisser un pourcentage perime
+     * affiche). isnan()/isinf() d'abord, meme garde-fou que
+     * progression_definir() (progression.c) -- `e->progression` vient de
+     * Moonraker, une source qui peut renvoyer n'importe quoi pendant un
+     * redemarrage de klippy. -------------------------------------------- */
     bool axe_x_reference = (e->axes_references & 0x1u) != 0;
     bool axe_y_reference = (e->axes_references & 0x2u) != 0;
     bool axe_z_reference = (e->axes_references & 0x4u) != 0;
@@ -870,29 +934,17 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
     formater_axe(pos_x, sizeof(pos_x), e->position[0], axe_x_reference);
     formater_axe(pos_y, sizeof(pos_y), e->position[1], axe_y_reference);
     formater_axe(pos_z, sizeof(pos_z), e->position[2], axe_z_reference);
-    char texte_position[48];
+
+    char texte_statut[96];
+    int ecrit;
     if (nb_extrudeurs > 0) {
-        snprintf(texte_position, sizeof(texte_position), "X:%s Y:%s Z:%s  T%u", pos_x, pos_y, pos_z,
-                  (unsigned)e->outil_actif);
+        ecrit = snprintf(texte_statut, sizeof(texte_statut), "X:%s Y:%s Z:%s  T%u  Speed: %u%%  Flow: %u%%", pos_x,
+                          pos_y, pos_z, (unsigned)e->outil_actif, (unsigned)e->vitesse_pct, (unsigned)e->flux_pct);
     } else {
-        snprintf(texte_position, sizeof(texte_position), "X:%s Y:%s Z:%s  T--", pos_x, pos_y, pos_z);
+        ecrit = snprintf(texte_statut, sizeof(texte_statut), "X:%s Y:%s Z:%s  T--  Speed: %u%%  Flow: %u%%", pos_x,
+                          pos_y, pos_z, (unsigned)e->vitesse_pct, (unsigned)e->flux_pct);
     }
-    lv_label_set_text(ctx->position, texte_position);
-
-    /* --- ligne vitesse / flux -------------------------------------------- */
-    char texte_vitesse_flux[32];
-    snprintf(texte_vitesse_flux, sizeof(texte_vitesse_flux), "Speed: %u%%  Flow: %u%%", (unsigned)e->vitesse_pct,
-              (unsigned)e->flux_pct);
-    lv_label_set_text(ctx->vitesse_flux, texte_vitesse_flux);
-
-    /* --- mini-progression, visible SEULEMENT si une impression est en
-     * cours -- re-evaluee a CHAQUE appel (systematique, meme discipline que
-     * bouton_macros dans ecran_accueil.c) : une impression qui se termine ne
-     * doit pas laisser cette ligne visible sur la foi d'un etat perime.
-     * isnan()/isinf() d'abord, meme garde-fou que progression_definir()
-     * (progression.c) -- `e->progression` vient de Moonraker, une source qui
-     * peut renvoyer n'importe quoi pendant un redemarrage de klippy. --------- */
-    if (e->impression_en_cours) {
+    if (e->impression_en_cours && ecrit > 0 && (size_t)ecrit < sizeof(texte_statut)) {
         float fraction = e->progression;
         if (isnan(fraction) || isinf(fraction)) {
             fraction = (isinf(fraction) && fraction > 0.0f) ? 1.0f : 0.0f;
@@ -902,23 +954,18 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
             fraction = 1.0f;
         }
         unsigned pct = (unsigned)(fraction * 100.0f + 0.5f);
-        char texte_progression[24];
-        snprintf(texte_progression, sizeof(texte_progression), "Printing: %u%%", pct);
-        lv_label_set_text(ctx->progression, texte_progression);
-        lv_obj_clear_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN);
+        snprintf(texte_statut + ecrit, sizeof(texte_statut) - (size_t)ecrit, "  Printing: %u%%", pct);
     }
+    lv_label_set_text(ctx->statut, texte_statut);
 
-    /* --- grisage integral du resume (chauffants + position/vitesse-flux/
-     * progression), style RESOLU (spec C3, ecran.h) -- systematique a chaque
-     * appel, jamais incremental (meme lecon que tuile_griser()/l'ancien
-     * contenu de ce fichier). Le graphe et la grille de menu, eux, NE SONT
-     * JAMAIS grises -- le graphe reste une trace historique valable meme sur
-     * un etat courant perime, et chaque tuile de menu ouvre un ecran qui
-     * grise lui-meme son propre contenu si besoin (meme choix delibere que
-     * l'ancien hub : "naviguer... reste sans danger meme avec un etat
-     * perime"). --------------------------------------------------------
+    /* --- grisage integral du resume (chauffants + ligne de statut), style
+     * RESOLU (spec C3, ecran.h) -- systematique a chaque appel, jamais
+     * incremental (meme lecon que tuile_griser()/l'ancien contenu de ce
+     * fichier). Le graphe et la grille de menu, eux, NE SONT JAMAIS grises --
+     * le graphe reste une trace historique valable meme sur un etat courant
+     * perime, et chaque tuile de menu ouvre un ecran qui grise lui-meme son
+     * propre contenu si besoin (meme choix delibere que l'ancien hub :
+     * "naviguer... reste sans danger meme avec un etat perime"). ---------
      *
      * Label NOM (tache 5, task-5-brief.md ; couleur de courbe ajoutee dans une
      * tache de suivi) : SEUL cas ou ce grisage C3 ne suffit pas seul --
@@ -948,9 +995,7 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         lv_obj_set_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[i]), lv_color_hex(couleur_nom), 0);
         lv_obj_set_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[i]), lv_color_hex(couleur), 0);
     }
-    lv_obj_set_style_text_color(ctx->position, lv_color_hex(couleur), 0);
-    lv_obj_set_style_text_color(ctx->vitesse_flux, lv_color_hex(couleur), 0);
-    lv_obj_set_style_text_color(ctx->progression, lv_color_hex(couleur), 0);
+    lv_obj_set_style_text_color(ctx->statut, lv_color_hex(couleur), 0);
 
     /* --- graphe : rafraichi UNIQUEMENT quand le store (tache 1) a avance
      * depuis le dernier appel -- l'echantillonneur pousse un point toutes

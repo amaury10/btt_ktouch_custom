@@ -1,7 +1,9 @@
 /* Sous-projet "graphes de temperature", tache 3 : l'ecran Accueil-hub
- * REECRIT en deux colonnes (lignes de chauffants + resume + graphe a gauche,
- * cinq tuiles de menu a droite) -- voir ecran_accueil_hub.h/.c pour le
- * contrat et la mise en page.
+ * REECRIT en deux colonnes (lignes de chauffants + graphe a gauche, cinq
+ * tuiles de menu a droite) plus une ligne de statut pleine largeur SOUS les
+ * deux colonnes (position + outil actif + vitesse/flux + progression, tache
+ * de suivi refinement 2) -- voir ecran_accueil_hub.h/.c pour le contrat et la
+ * mise en page.
  *
  * Deux parties, meme technique que l'ancien fichier (tache 4/5 de la refonte
  * IHM KlipperScreen) : la premiere construit ECRAN_ACCUEIL_HUB directement
@@ -12,7 +14,7 @@
  * l'arbre LVGL -- navigation_empiler() cree toujours le conteneur du nouvel
  * ecran comme DERNIER enfant du conteneur racine, et
  * ecran_accueil_hub_construire() cree toujours zone_menu en DERNIER, apres
- * les lignes de chauffants et les trois lignes de resume).
+ * les lignes de chauffants, la ligne de statut et le chart).
  *
  * DOIT rester APRES suite_ecran_configuration() (habillage construit, voir
  * habillage_est_construit()) ET suite_commandes() (boucle simulee demarree,
@@ -164,17 +166,17 @@ void suite_ecran_accueil_hub(void)
         VERIFIER(chauffant_bouton_label(ctx->chauffant_nom[i]) != NULL);
         VERIFIER(chauffant_bouton_label(ctx->chauffant_valeur[i]) != NULL);
     }
-    VERIFIER(ctx->position != NULL);
-    VERIFIER(ctx->vitesse_flux != NULL);
-    VERIFIER(ctx->progression != NULL);
+    VERIFIER(ctx->statut != NULL);
     VERIFIER(ctx->chart != NULL);
     VERIFIER(ctx->zone_menu != NULL);
     for (int i = 0; i < ECRAN_ACCUEIL_HUB_MENU_NB; i++) {
         VERIFIER(ctx->menu_boutons[i] != NULL);
     }
-    /* la mini-progression reste masquee tant que mettre_a_jour() n'a jamais
-     * tourne (aucune impression connue) */
-    VERIFIER(lv_obj_has_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN));
+    /* la ligne de statut demarre vide (mettre_a_jour() n'a jamais tourne) --
+     * tache de suivi (refinement 2) : contrairement a l'ancienne ligne
+     * `progression`, ce widget n'a plus de flag LV_OBJ_FLAG_HIDDEN a suivre,
+     * le segment de progression est simplement absent du texte. */
+    VERIFIER_TEXTE(lv_label_get_text(ctx->statut), "");
 
     /* --- le graphe a une serie PAR CHAUFFANT PRESENT (extrudeurs 0 et 1,
      * plateau = indice KLIPPER_EXTRUDEURS_MAX) -- aucune pour les indices
@@ -211,11 +213,14 @@ void suite_ecran_accueil_hub(void)
         VERIFIER(lv_obj_has_flag(ctx->chauffant_nom[i], LV_OBJ_FLAG_HIDDEN));
         VERIFIER(lv_obj_has_flag(ctx->chauffant_valeur[i], LV_OBJ_FLAG_HIDDEN));
     }
-    VERIFIER_TEXTE(lv_label_get_text(ctx->position), "X:10.0 Y:20.0 Z:5.0  T0");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->vitesse_flux), "Speed: 100%  Flow: 95%");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->progression), "Printing: 42%");
-    /* impression en cours -- la mini-progression redevient visible */
-    VERIFIER(!lv_obj_has_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN));
+    /* --- ligne de statut consolidee (tache de suivi, refinement 2) :
+     * position + outil actif + vitesse/flux + progression sur UNE seule
+     * ligne pleine largeur, sous les deux colonnes -- remplace les trois
+     * VERIFIER_TEXTE separes de l'ancien resume (ctx->position/
+     * ->vitesse_flux/->progression, desormais fusionnes dans ctx->statut).
+     * Impression en cours (etat de test : 42%) -- le segment "Printing: 42%"
+     * est present. */
+    VERIFIER_TEXTE(lv_label_get_text(ctx->statut), "X:10.0 Y:20.0 Z:5.0  T0  Speed: 100%  Flow: 95%  Printing: 42%");
 
     /* ---------------------------------------------------------------------
      * Tache 4 (task-4-brief.md) : taper le label VALEUR d'une ligne de
@@ -373,12 +378,15 @@ void suite_ecran_accueil_hub(void)
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
     VERIFIER(!lv_obj_has_flag(ctx->chauffant_nom[2], LV_OBJ_FLAG_HIDDEN));
 
-    /* --- impression terminee : la mini-progression redisparait, re-evaluee
-     * a CHAQUE appel (jamais un etat fige depuis le premier passage). ----- */
+    /* --- impression terminee : le segment de progression disparait du texte
+     * de la ligne de statut, re-evalue a CHAQUE appel (jamais un etat fige
+     * depuis le premier passage) -- tache de suivi (refinement 2) : plus de
+     * flag LV_OBJ_FLAG_HIDDEN a verifier ici, le texte entier ne contient
+     * simplement plus "Printing". ------------------------------------------ */
     etat_klipper_t etat_repos = etat;
     etat_repos.impression_en_cours = false;
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat_repos, false, ctx);
-    VERIFIER(lv_obj_has_flag(ctx->progression, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->statut), "X:10.0 Y:20.0 Z:5.0  T0  Speed: 100%  Flow: 95%");
 
     /* --- perime : grise (chauffants + resume), puis redevient normal --
      * style RESOLU, meme lecon que tuile_griser()/l'ancien contenu de ce
@@ -393,9 +401,7 @@ void suite_ecran_accueil_hub(void)
                           lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[0]), 0),
                           lv_color_hex(0x6B7280)));
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->position, 0), lv_color_hex(0x6B7280)));
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->vitesse_flux, 0), lv_color_hex(0x6B7280)));
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->progression, 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->statut, 0), lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label_tuile_homing, 0), couleur_tuile_avant));
 
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
@@ -403,9 +409,7 @@ void suite_ecran_accueil_hub(void)
                           lv_color_hex(couleur_serie_t0)));
     VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[0]), 0),
                            lv_color_hex(0x6B7280)));
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->position, 0), lv_color_hex(0x6B7280)));
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->vitesse_flux, 0), lv_color_hex(0x6B7280)));
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->progression, 0), lv_color_hex(0x6B7280)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->statut, 0), lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label_tuile_homing, 0), couleur_tuile_avant));
 
     /* ---------------------------------------------------------------------
@@ -499,12 +503,13 @@ void suite_ecran_accueil_hub(void)
     lv_obj_t *conteneur = lv_obj_get_child(ecran, lv_obj_get_child_count(ecran) - 1);
     VERIFIER(conteneur != NULL);
     /* 1 zone_chauffants (le pool entier de lignes-boutons vit DEDANS, voir
-     * plus bas) + 3 lignes de resume (position/vitesse_flux/progression) +
-     * 1 chart + 1 zone_menu = 6 -- depuis la tache de suivi "chauffants en
-     * boutons scrollables", les lignes de chauffants ne sont PLUS des
-     * enfants directs de `conteneur` (elles l'etaient quand nom/valeur
-     * etaient des lv_label_t nus). */
-    VERIFIER(lv_obj_get_child_count(conteneur) == 6u);
+     * plus bas) + 1 ligne de statut (position/outil/vitesse-flux/progression
+     * consolides, tache de suivi refinement 2 -- remplace les TROIS lignes de
+     * l'ancien resume) + 1 chart + 1 zone_menu = 4 -- depuis la tache de
+     * suivi "chauffants en boutons scrollables", les lignes de chauffants ne
+     * sont PLUS des enfants directs de `conteneur` (elles l'etaient quand
+     * nom/valeur etaient des lv_label_t nus). */
+    VERIFIER(lv_obj_get_child_count(conteneur) == 4u);
     lv_obj_t *zone_chauffants = lv_obj_get_child(conteneur, 0);
     VERIFIER(zone_chauffants != NULL);
     /* (ECRAN_ACCUEIL_HUB_HEATER_LIGNES * 2) boutons nom+valeur, pool entier
