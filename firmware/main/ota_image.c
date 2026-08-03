@@ -72,3 +72,15 @@ bool ota_sha256_egal(const uint8_t a[32], const uint8_t b[32])
     }
     return diff == 0;
 }
+
+size_t ota_taille_alignee(size_t taille, size_t taille_secteur)
+{
+    if (taille_secteur == 0) {
+        return 0;
+    }
+    size_t reste = taille % taille_secteur;
+    if (reste == 0) {
+        return taille;
+    }
+    return taille + (taille_secteur - reste);
+}

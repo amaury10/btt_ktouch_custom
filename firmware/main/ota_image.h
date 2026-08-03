@@ -32,3 +32,11 @@ bool ota_backup_entete_parser(const uint8_t *src, size_t taille, ota_backup_ente
 /* Compare deux SHA-256 en TEMPS CONSTANT (pas de court-circuit -- accumule le
    OU des XOR sur les 32 octets). Rend true si egaux. */
 bool ota_sha256_egal(const uint8_t a[32], const uint8_t b[32]);
+
+/* Arrondit `taille` au multiple de `taille_secteur` superieur ou egal (taille
+   deja alignee -> inchangee). Pure -- extrait de ota.c (tache 3, sauvegarde
+   BTT vers spiffs) pour rester testable hote : sert a dimensionner
+   esp_partition_erase_range(), qui exige un effacement aligne au secteur
+   flash (4096 octets sur cette cible), sans tirer esp_partition.h ici. Rend
+   0 si taille_secteur vaut 0 (evite une division/modulo invalide). */
+size_t ota_taille_alignee(size_t taille, size_t taille_secteur);

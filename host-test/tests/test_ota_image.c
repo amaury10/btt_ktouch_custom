@@ -89,4 +89,23 @@ void suite_ota_image(void)
     sha_b[0] = sha_a[0];
     sha_b[31] ^= 0x01;
     VERIFIER(ota_sha256_egal(sha_a, sha_b) == false);
+
+    /* --- ota_taille_alignee (tache 3, extrait de ota.c) --- */
+    /* deja alignee : inchangee (0 est un multiple de tout secteur). */
+    VERIFIER(ota_taille_alignee(0, 4096) == 0);
+    VERIFIER(ota_taille_alignee(4096, 4096) == 4096);
+    VERIFIER(ota_taille_alignee(8192, 4096) == 8192);
+    /* non alignee : arrondie au multiple SUPERIEUR. */
+    VERIFIER(ota_taille_alignee(1, 4096) == 4096);
+    VERIFIER(ota_taille_alignee(4095, 4096) == 4096);
+    VERIFIER(ota_taille_alignee(4097, 4096) == 8192);
+    /* valeur realiste : en-tete (40) + image app0 pleine (0x480000). */
+    VERIFIER(ota_taille_alignee(0x480028u, 4096) == 0x481000u);
+    /* secteur nul : 0 (evite une division par zero cote appelant). */
+    VERIFIER(ota_taille_alignee(1234, 0) == 0);
+    /* secteur non-puissance-de-2 : arrondi au multiple superieur quand meme
+       (l'implementation utilise %, pas un masque de bits -- reste correcte
+       meme si le flux ESP n'utilise en pratique que des secteurs de 4096). */
+    VERIFIER(ota_taille_alignee(10, 3) == 12);
+    VERIFIER(ota_taille_alignee(9, 3) == 9);
 }

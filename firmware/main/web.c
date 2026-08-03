@@ -1,26 +1,37 @@
 /* Serveur HTTP : c'est la seule interface de contrôle du firmware une fois le
- * câble série hors jeu. Cinq routes :
- *   GET  /        page d'état minimale, avec liens vers les autres routes
- *   GET  /status  JSON : slot en cours, version, IP, uptime, mémoire libre,
- *                 tactile disponible, compteur de démarrages
- *   GET  /state   JSON : état de la liaison avec l'hôte, génération et
- *                 dernier état Klipper connu (voir gestion_state() plus bas)
- *   GET  /log     texte brut, contenu du journal réseau (netlog_snapshot())
- *   GET  /revert  page HTML avec un bouton qui déclenche le POST (pratique
- *                 depuis un navigateur : Firefox, sans outil POST)
- *   POST /revert  bascule vers l'autre slot et redémarre
+ * câble série hors jeu. Sept routes :
+ *   GET  /            page d'état minimale, avec liens vers les autres routes
+ *   GET  /status      JSON : slot en cours, version, IP, uptime, mémoire libre,
+ *                     tactile disponible, compteur de démarrages, état de la
+ *                     sauvegarde BTT (voir /backup-btt ci-dessous)
+ *   GET  /state       JSON : état de la liaison avec l'hôte, génération et
+ *                     dernier état Klipper connu (voir gestion_state() plus bas)
+ *   GET  /log         texte brut, contenu du journal réseau (netlog_snapshot())
+ *   GET  /revert      page HTML avec un bouton qui déclenche le POST (pratique
+ *                     depuis un navigateur : Firefox, sans outil POST)
+ *   POST /revert      bascule vers l'autre slot et redémarre
+ *   GET  /backup-btt  page HTML : état de la sauvegarde BTT + bouton (même
+ *                     principe que /revert ci-dessus, un GET ne déclenche rien)
+ *   POST /backup-btt  copie app0 (BTT) vers spiffs, brut, avec vérification
+ *                     SHA-256 après relecture (voir ota.c/ota_backup_btt) --
+ *                     N'écrit JAMAIS dans un slot app, seulement dans spiffs
  *
- * Délibérément AUCUNE route de mise à jour. Ce firmware tourne depuis app1
- * (le slot que l'OTA du firmware d'origine choisit) ; avec deux slots
- * seulement, le slot inactif vu depuis app1 est app0 — celui du firmware
- * d'origine. Un /update ici n'aurait nulle part ailleurs où écrire, et
- * esp_ota_begin(OTA_SIZE_UNKNOWN) efface la partition cible avant même de
+ * Délibérément AUCUNE route de mise à jour OTA à ce jalon (elle viendra dans
+ * une tâche ultérieure, gardée par une sauvegarde BTT valide). Ce firmware
+ * tourne depuis app1 (le slot que l'OTA du firmware d'origine choisit) ; avec
+ * deux slots seulement, le slot inactif vu depuis app1 est app0 — celui du
+ * firmware d'origine. Un /update ici n'aurait nulle part ailleurs où écrire,
+ * et esp_ota_begin(OTA_SIZE_UNKNOWN) efface la partition cible avant même de
  * recevoir un octet : la première mise à jour effacerait le firmware
  * d'origine, après quoi le sauvetage n'aurait plus rien vers quoi basculer.
- * Aucun esp_ota_begin/esp_ota_write ne doit figurer dans ce fichier — la
- * seule écriture flash de tout le firmware est celle d'otadata, dans
- * rescue.c. L'itération sur le pinout repasse par /revert puis par le
- * /update du firmware d'origine (voir docs/hardware/flashing.md).
+ * Aucun esp_ota_begin/esp_ota_write ne doit figurer dans ce fichier, ni dans
+ * ota.c — les seules écritures flash de tout le firmware sont celle
+ * d'otadata (rescue.c, bascule de slot) et celle de spiffs (ota.c,
+ * /backup-btt) : app0 comme app1 restent tous deux INTACTS jusqu'à ce que ce
+ * jalon OTA ajoute, plus tard, un pas explicitement gardé qui écrit
+ * réellement dans un slot app. L'itération sur le pinout repasse par
+ * /revert puis par le /update du firmware d'origine (voir
+ * docs/hardware/flashing.md).
  *
  * La BASCULE elle-même reste en POST délibérément : en GET, n'importe quelle
  * requête d'un navigateur (préchargement d'URL, restauration d'onglet au
@@ -54,6 +65,7 @@
 #include "klipper_fichiers.h"
 #include "liaison.h"
 #include "netlog.h"
+#include "ota.h"
 #include "rescue.h"
 #include "web_macros.h"
 #include "wifi.h"
@@ -95,9 +107,25 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/state\">/state</a> — état Klipper courant (JSON)</li>"
         "<li><a href=\"/log\">/log</a> — journal réseau</li>"
         "<li><a href=\"/revert\">/revert</a> — bouton de redémarrage (bascule OTA)</li>"
+        "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
+}
+
+/* "absent"/"valide"/"corrompu" -- meme vocabulaire cote JSON (/status) et
+   cote page HTML (/backup-btt) pour l'etat de la sauvegarde BTT. */
+static const char *ota_backup_etat_nom(ota_backup_etat_t etat)
+{
+    switch (etat) {
+    case OTA_BACKUP_VALIDE:
+        return "valide";
+    case OTA_BACKUP_CORROMPU:
+        return "corrompu";
+    case OTA_BACKUP_ABSENT:
+    default:
+        return "absent";
+    }
 }
 
 static esp_err_t gestion_status(httpd_req_t *req)
@@ -107,7 +135,13 @@ static esp_err_t gestion_status(httpd_req_t *req)
     char adresse_ip[16];
     wifi_ip_string(adresse_ip, sizeof(adresse_ip));
 
-    char reponse[448];
+    /* ota_backup_etat() relit spiffs et recalcule un SHA-256 dessus (voir
+       ota.c) : plus couteux qu'un simple champ en mémoire, mais borné (au
+       plus quelques Mio en streaming) et /status n'est pas interrogé en
+       boucle serrée comme /state (voir son commentaire de tête). */
+    const char *backup_btt = ota_backup_etat_nom(ota_backup_etat());
+
+    char reponse[512];
     int longueur = snprintf(reponse, sizeof(reponse),
         "{"
         "\"slot\":\"%s\","
@@ -116,7 +150,8 @@ static esp_err_t gestion_status(httpd_req_t *req)
         "\"uptime_ms\":%" PRId64 ","
         "\"free_heap\":%" PRIu32 ","
         "\"tactile\":%s,"
-        "\"boot_count\":%" PRIu32
+        "\"boot_count\":%" PRIu32 ","
+        "\"backup_btt\":\"%s\""
         "}",
         courante != NULL ? courante->label : "?",
         description != NULL ? description->version : "?",
@@ -124,7 +159,8 @@ static esp_err_t gestion_status(httpd_req_t *req)
         (int64_t)(esp_timer_get_time() / 1000),
         (uint32_t)esp_get_free_heap_size(),
         tactile_disponible ? "true" : "false",
-        compteur_demarrages);
+        compteur_demarrages,
+        backup_btt);
 
     if (longueur < 0) {
         /* snprintf a échoué : ne pas envoyer une réponse tronquée étiquetée
@@ -437,6 +473,59 @@ static esp_err_t gestion_revert(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t gestion_backup_btt_page(httpd_req_t *req)
+{
+    /* GET /backup-btt : meme principe que GET /revert ci-dessus -- sert une
+       page HTML avec un bouton qui, lui, fait le POST. Un GET ne declenche
+       JAMAIS la sauvegarde (aucune ecriture flash ici), pour la meme raison
+       de securite que /revert : un prechargement, un scanner ou un
+       aspirateur de liens ne doit jamais avoir d'effet de bord flash. */
+    ota_backup_etat_t etat = ota_backup_etat();
+    char page[768];
+    int longueur = snprintf(page, sizeof(page),
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        "<title>Sauvegarde du firmware BTT</title></head>"
+        "<body style=\"font-family:sans-serif;max-width:32em;margin:2em auto;padding:0 1em\">"
+        "<h1>Sauvegarde du firmware BTT</h1>"
+        "<p>Etat actuel de la sauvegarde : <strong>%s</strong></p>"
+        "<p>Copie l'image BTT (partition app0) vers la partition spiffs, "
+        "inutilisee par ce firmware, avec verification SHA-256 apres relecture. "
+        "app0 n'est JAMAIS modifiee par cette operation -- relancable a volonte, "
+        "sans le moindre risque pour le demarrage. Prend quelques secondes.</p>"
+        "<form method=\"POST\" action=\"/backup-btt\">"
+        "<button type=\"submit\" style=\"font-size:1.2em;padding:.6em 1.2em\">"
+        "Lancer la sauvegarde maintenant</button></form>"
+        "</body></html>",
+        ota_backup_etat_nom(etat));
+
+    if (longueur < 0) {
+        /* Meme garde que gestion_status() : ne jamais envoyer une reponse
+           tronquee etiquetee comme HTML valide si snprintf a echoue. */
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    size_t a_envoyer = (size_t)longueur < sizeof(page) ? (size_t)longueur : sizeof(page) - 1;
+    return httpd_resp_send(req, page, a_envoyer);
+}
+
+static esp_err_t gestion_backup_btt(httpd_req_t *req)
+{
+    /* ota_backup_btt() delegue le travail flash (lecture app0, effacement +
+       ecriture spiffs, relecture de verification -- quelques secondes) a sa
+       propre tache dediee interne (voir ota.c) : cet appel bloque jusqu'a la
+       fin, mais sur un semaphore, jamais en boucle d'E/S flash active sur
+       CETTE pile-ci (celle de la tache httpd). N'ecrit jamais dans un slot
+       app -- seulement dans spiffs. */
+    char msg[160];
+    esp_err_t resultat = ota_backup_btt(msg, sizeof(msg));
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    if (resultat != ESP_OK) {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+    }
+    return httpd_resp_sendstr(req, msg);
+}
+
 static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)
 {
     esp_err_t erreur = httpd_register_uri_handler(serveur, route);
@@ -475,6 +564,12 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_revert = {
         .uri = "/revert", .method = HTTP_POST, .handler = gestion_revert, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_backup_btt_page = {
+        .uri = "/backup-btt", .method = HTTP_GET, .handler = gestion_backup_btt_page, .user_ctx = NULL,
+    };
+    static const httpd_uri_t route_backup_btt = {
+        .uri = "/backup-btt", .method = HTTP_POST, .handler = gestion_backup_btt, .user_ctx = NULL,
+    };
 
     enregistrer_route(serveur, &route_racine);
     enregistrer_route(serveur, &route_status);
@@ -482,6 +577,8 @@ esp_err_t web_start(void)
     enregistrer_route(serveur, &route_log);
     enregistrer_route(serveur, &route_revert_page);
     enregistrer_route(serveur, &route_revert);
+    enregistrer_route(serveur, &route_backup_btt_page);
+    enregistrer_route(serveur, &route_backup_btt);
 
     ESP_LOGI(TAG, "serveur HTTP demarre");
     return ESP_OK;
