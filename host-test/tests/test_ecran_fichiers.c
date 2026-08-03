@@ -6,7 +6,9 @@
  *   1. Construction + liste vide ("No files") + remplissage simple + ligne
  *      de troncature -- construction directe du contexte, sans navigation ni
  *      boucle simulée.
- *   2. Pagination (20 fichiers, 2 pages).
+ *   2. Pagination (20 fichiers, 4 pages -- ECRAN_FICHIERS_PAGE_TAILLE=5
+ *      depuis la refonte jalon 3b, colonne unique de boutons pleine
+ *      largeur).
  *   3. Grisage systématique sur donnees_perimees -- round-trip complet,
  *      couleurs RÉSOLUES (même lecon que test_ecran_macros.c).
  *   4. Trace du seam : tap -> confirmation OUVERTE (aucun gcode envoyé) ->
@@ -193,7 +195,7 @@ static void groupe_construction_et_etats(void)
 }
 
 /* ------------------------------------------------------------------------
- * Groupe 2 : pagination (20 fichiers -> 2 pages).
+ * Groupe 2 : pagination (20 fichiers -> 4 pages, colonne unique de 5).
  * ------------------------------------------------------------------------ */
 
 static void groupe_pagination(void)
@@ -219,20 +221,30 @@ static void groupe_pagination(void)
     VERIFIER(ctx->nb_fichiers == 20);
     VERIFIER(!lv_obj_has_flag(ctx->bouton_precedent, LV_OBJ_FLAG_HIDDEN));
     VERIFIER(!lv_obj_has_flag(ctx->bouton_suivant, LV_OBJ_FLAG_HIDDEN));
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/2");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/4");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "FILE_01.gcode");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[15]), "FILE_16.gcode");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "FILE_05.gcode");
     /* Precedent desactive (premiere page), Suivant actif. */
     VERIFIER(lv_obj_has_state(ctx->bouton_precedent, LV_STATE_DISABLED));
     VERIFIER(!lv_obj_has_state(ctx->bouton_suivant, LV_STATE_DISABLED));
 
-    /* --- Suivant : page 2, 4 fichiers restants (17..20) dans les 4 premiers
-     * emplacements, le reste masque. */
+    /* --- Suivant x2 : pages 2 et 3, 5 fichiers pleins a chaque fois (20 =
+     * exactement 4*5, aucun lot partiel avant la derniere page). */
     lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/2");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "FILE_17.gcode");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[3]), "FILE_20.gcode");
-    VERIFIER(lv_obj_has_flag(ctx->boutons[4], LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/4");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "FILE_06.gcode");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "FILE_10.gcode");
+
+    lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 3/4");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "FILE_11.gcode");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "FILE_15.gcode");
+
+    /* --- Suivant : page 4 (derniere), pleine elle aussi (FILE_16..20). */
+    lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 4/4");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "FILE_16.gcode");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "FILE_20.gcode");
     VERIFIER(!lv_obj_has_state(ctx->bouton_precedent, LV_STATE_DISABLED));
     VERIFIER(lv_obj_has_state(ctx->bouton_suivant, LV_STATE_DISABLED)); /* derniere page */
 
@@ -240,11 +252,13 @@ static void groupe_pagination(void)
      * defensive de bouton_suivant_cb -- lv_obj_send_event() ne passe jamais
      * par LV_STATE_DISABLED) ne change rien. */
     lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/2");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 4/4");
 
-    /* --- Precedent : retour page 1. */
+    /* --- Precedent x3 : retour page 1. */
     lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/2");
+    lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/4");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "FILE_01.gcode");
 
     lv_obj_delete(parent);

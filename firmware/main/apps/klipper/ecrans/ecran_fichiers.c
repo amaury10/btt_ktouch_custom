@@ -3,9 +3,11 @@
  * Mise en page (742x436, dans le conteneur de navigation à droite du rail
  * persistant, sous la barre d'état construite par habillage.c) : une ligne
  * d'avertissement de troncature tout en haut (masquée sauf
- * `fichiers_tronques`), une grille 4x4 de boutons (16 fichiers par page), une
- * ligne de pagination en bas ("< Page X/Y >"). Ossature reprise quasi telle
- * quelle de ecran_macros.c (voir son commentaire de tête) -- toutes les
+ * `fichiers_tronques`), une COLONNE UNIQUE de boutons pleine largeur (5
+ * fichiers par page, refonte jalon 3b -- meme raisonnement et memes
+ * dimensions verticales que ecran_macros.c, voir son commentaire de tête
+ * pour le calcul complet), une ligne de pagination en bas ("< Page X/Y >").
+ * Ossature reprise quasi telle quelle de ecran_macros.c -- toutes les
  * constantes de position sont dérivées les unes des autres (voir les
  * _Static_assert plus bas), même discipline. */
 #include "ecran_fichiers.h"
@@ -32,20 +34,16 @@
 #define AVERTISSEMENT_HAUTEUR 22
 
 #define GRILLE_Y            36
-#define BOUTON_ECART_X       8
-#define BOUTON_ECART_Y       8
-/* Largeur de bouton dérivée de LARGEUR_CONTENU (742, pas les 800px de
- * ecran_macros.c) -- division entière, le _Static_assert plus bas vérifie
- * que le reste (arrondi vers le bas) laisse toujours un budget <=
- * LARGEUR_CONTENU, jamais une égalité stricte requise ici (contrairement à
- * la grille de menu de ecran_accueil_hub.c, qui doit remplir EXACTEMENT sa
- * largeur -- cette grille-ci, comme celle de ecran_macros.c, n'a pas cette
- * contrainte). */
-#define BOUTON_LARGEUR ((LARGEUR_CONTENU - 2 * MARGE - (ECRAN_FICHIERS_PAGE_COLONNES - 1) * BOUTON_ECART_X) / \
-                        ECRAN_FICHIERS_PAGE_COLONNES)
-#define BOUTON_HAUTEUR      64
-#define GRILLE_BAS (GRILLE_Y + ECRAN_FICHIERS_PAGE_LIGNES * BOUTON_HAUTEUR + \
-                    (ECRAN_FICHIERS_PAGE_LIGNES - 1) * BOUTON_ECART_Y)
+#define BOUTON_ECART_Y       6
+/* Colonne unique pleine largeur (refonte jalon 3b) : BOUTON_LARGEUR REMPLIT
+ * exactement l'espace entre les deux marges -- même dérivation que
+ * BOUTON_LARGEUR dans ecran_macros.c, juste avec LARGEUR_CONTENU=742 ici
+ * (742, pas les 800px de ecran_macros.c, voir le commentaire de tête de
+ * ecran_fichiers.h). */
+#define BOUTON_LARGEUR (LARGEUR_CONTENU - 2 * MARGE)
+#define BOUTON_HAUTEUR      52
+#define GRILLE_BAS (GRILLE_Y + ECRAN_FICHIERS_PAGE_TAILLE * BOUTON_HAUTEUR + \
+                    (ECRAN_FICHIERS_PAGE_TAILLE - 1) * BOUTON_ECART_Y)
 
 #define PAGINATION_HAUTEUR 44
 /* Même piège documenté par ecran_macros.c (voir son commentaire complet sur
@@ -74,13 +72,15 @@
  * son commentaire complet). */
 #define BOUTON_DESACTIVE_MELANGE 90
 
-_Static_assert(MARGE + ECRAN_FICHIERS_PAGE_COLONNES * BOUTON_LARGEUR +
-                       (ECRAN_FICHIERS_PAGE_COLONNES - 1) * BOUTON_ECART_X + MARGE <= LARGEUR_CONTENU,
-               "la grille de fichiers deborde de la largeur du contenu");
+/* Colonne unique : BOUTON_LARGEUR REMPLIT deja exactement l'espace entre les
+ * deux marges -- assert tautologique aujourd'hui, garde-fou pour toute
+ * regression future (meme raisonnement que ecran_macros.c). */
+_Static_assert(MARGE + BOUTON_LARGEUR + MARGE <= LARGEUR_CONTENU,
+               "le bouton pleine largeur deborde de la largeur du contenu");
 _Static_assert(AVERTISSEMENT_Y + AVERTISSEMENT_HAUTEUR <= GRILLE_Y,
                "la ligne d'avertissement de troncature chevauche la premiere rangee de la grille");
 _Static_assert(GRILLE_BAS <= PAGINATION_Y,
-               "la grille de fichiers chevauche la ligne de pagination");
+               "la colonne de fichiers chevauche la ligne de pagination");
 _Static_assert(PAGINATION_Y + PAGINATION_HAUTEUR <= HAUTEUR_CONTENU,
                "la ligne de pagination deborde de la hauteur du contenu");
 _Static_assert(BARRE_HAUTEUR_ECRAN + PAGINATION_Y + PAGINATION_HAUTEUR <= BANDEAU_Y_ECRAN,
@@ -373,10 +373,10 @@ static void ecran_fichiers_construire(lv_obj_t *parent, void *contexte)
     lv_obj_add_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN);
 
     for (uint8_t emplacement = 0; emplacement < ECRAN_FICHIERS_PAGE_TAILLE; emplacement++) {
-        uint8_t colonne = emplacement % ECRAN_FICHIERS_PAGE_COLONNES;
-        uint8_t ligne = emplacement / ECRAN_FICHIERS_PAGE_COLONNES;
-        lv_coord_t x = MARGE + colonne * (BOUTON_LARGEUR + BOUTON_ECART_X);
-        lv_coord_t y = GRILLE_Y + ligne * (BOUTON_HAUTEUR + BOUTON_ECART_Y);
+        /* Colonne unique (refonte jalon 3b) : x fixe a MARGE, seul y avance
+         * d'une ligne a l'autre -- meme structure que ecran_macros.c. */
+        lv_coord_t x = MARGE;
+        lv_coord_t y = GRILLE_Y + emplacement * (BOUTON_HAUTEUR + BOUTON_ECART_Y);
 
         ctx->boutons[emplacement] =
             bouton_creer(parent, "", x, y, BOUTON_LARGEUR, BOUTON_HAUTEUR, &lv_font_montserrat_14,

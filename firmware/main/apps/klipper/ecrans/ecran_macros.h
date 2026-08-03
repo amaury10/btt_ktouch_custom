@@ -1,16 +1,18 @@
-/* Écran macros (tâche 6, jalon 3a) : la preuve de bout en bout de la
- * tranche 3a — « lister les macros de la machine et en lancer une » (spec
- * §3a point 4). C'est la doléance n°1 remontée sur le K-Touch d'origine
- * (macros injoignables) devenue la première chose visible que ce firmware
- * livre.
+/* Écran macros (tâche 6, jalon 3a ; refonte jalon 3b, tâche « listes 1D » :
+ * grille 2D -> colonne unique de boutons pleine largeur) : la preuve de bout
+ * en bout de la tranche 3a — « lister les macros de la machine et en lancer
+ * une » (spec §3a point 4). C'est la doléance n°1 remontée sur le K-Touch
+ * d'origine (macros injoignables) devenue la première chose visible que ce
+ * firmware livre.
  *
  * Liste `etat.macros[0..nb_macros]`, une entrée par macro NON `_préfixée`
  * (convention Klipper pour une macro « cachée » — filtrée ICI, à l'écran :
  * elle reste dans l'état, `rpc_lire_macros()` (moonraker_rpc.h) le dit
- * explicitement, « c'est un choix d'affichage, pas de protocole »). Simple
- * liste paginée (16 par page, 48 macros max ÷ 16 = 3 pages) — PAS le widget
- * de chargement paresseux prévu par la spec pour 3d (YAGNI : ce widget
- * n'existe pas encore, et 48 entrées tiennent sans lui).
+ * explicitement, « c'est un choix d'affichage, pas de protocole »). Liste
+ * paginée EN UNE COLONNE (un bouton pleine largeur par ligne, voir le calcul
+ * de mise en page en tête de ecran_macros.c) — PAS le widget de chargement
+ * paresseux prévu par la spec pour 3d (YAGNI : ce widget n'existe pas encore,
+ * et 48 entrées tiennent sans lui, juste sur davantage de pages qu'avant).
  *
  * `ecran_macros_ctx_t` est exposé ici plutôt qu'opaque, exactement pour la
  * même raison que `ecran_accueil_ctx_t` (voir ecran_accueil.h) :
@@ -27,12 +29,14 @@
 #include "etat_klipper.h"
 #include "lvgl.h"
 
-/* Une page à la fois : 4 colonnes × 4 lignes, voir le calcul de mise en page
- * en tête de ecran_macros.c. 48 (KLIPPER_MACROS_MAX) ÷ 16 = 3 pages au pire
- * cas (aucune macro `_préfixée`, aucune troncature). */
-#define ECRAN_MACROS_PAGE_COLONNES 4
-#define ECRAN_MACROS_PAGE_LIGNES   4
-#define ECRAN_MACROS_PAGE_TAILLE   (ECRAN_MACROS_PAGE_COLONNES * ECRAN_MACROS_PAGE_LIGNES)
+/* Une page à la fois, UNE COLONNE de boutons pleine largeur (refonte jalon
+ * 3b : plus de grille 4x4, voir le calcul de mise en page en tête de
+ * ecran_macros.c pour comment 5 est derive de la hauteur de contenu
+ * disponible sous la barre de troncature et au-dessus de la pagination/du
+ * bandeau de notification). 48 (KLIPPER_MACROS_MAX) ÷ 5 = 10 pages au pire
+ * cas (aucune macro `_préfixée`, aucune troncature) -- plus de pages qu'avant
+ * (3), mais chaque nom profite de toute la largeur du contenu. */
+#define ECRAN_MACROS_PAGE_TAILLE 5
 
 /* Taille de tampon suffisante pour tout appel de
  * ecran_macros_construire_arguments() ci-dessous, nom le plus long

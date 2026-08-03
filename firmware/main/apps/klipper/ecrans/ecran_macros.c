@@ -2,10 +2,22 @@
  *
  * Mise en page (800x436, sous la barre d'état construite par habillage.c) :
  * une ligne d'avertissement de troncature tout en haut (masquée sauf
- * `macros_tronquees`), une grille 4x4 de boutons (16 macros par page), une
- * ligne de pagination en bas ("< Page X/Y >"). Toutes les constantes de
- * position sont dérivées les unes des autres (voir les _Static_assert plus
- * bas), même discipline que ecran_accueil.c. */
+ * `macros_tronquees`), une COLONNE UNIQUE de boutons pleine largeur (5
+ * macros par page, refonte jalon 3b -- grille 4x4 remplacée par une liste 1D
+ * : chaque nom profite de toute la largeur du contenu, bien moins de
+ * troncature qu'a 184px de large), une ligne de pagination en bas
+ * ("< Page X/Y >"). Toutes les constantes de position sont dérivées les unes
+ * des autres (voir les _Static_assert plus bas), même discipline que
+ * ecran_accueil.c.
+ *
+ * BOUTON_HAUTEUR (52) et ECRAN_MACROS_PAGE_TAILLE (5, voir ecran_macros.h)
+ * sont choisis ENSEMBLE, pas indépendamment : la hauteur de contenu
+ * disponible entre GRILLE_Y et la limite absolue imposée par le bandeau de
+ * notification (voir le commentaire de PAGINATION_Y plus bas) ne laisse la
+ * place que pour 5 boutons de 52px (confortable, largement au-dessus du
+ * minimum tactile de 44px) -- 6 boutons de 52px déborderait (voir le calcul
+ * dans le rapport de tâche), et 6 boutons de 44px (le minimum strict) aurait
+ * sacrifié le confort pour gagner une seule ligne. */
 #include "ecran_macros.h"
 
 #include <stdio.h>
@@ -24,12 +36,16 @@
 #define AVERTISSEMENT_HAUTEUR 22
 
 #define GRILLE_Y            36
-#define BOUTON_LARGEUR     184
-#define BOUTON_HAUTEUR      64
-#define BOUTON_ECART_X       8
-#define BOUTON_ECART_Y       8
-#define GRILLE_BAS (GRILLE_Y + ECRAN_MACROS_PAGE_LIGNES * BOUTON_HAUTEUR + \
-                    (ECRAN_MACROS_PAGE_LIGNES - 1) * BOUTON_ECART_Y)
+/* Colonne unique pleine largeur (refonte jalon 3b) : BOUTON_LARGEUR n'est
+ * plus un littéral indépendant, il REMPLIT exactement la largeur de contenu
+ * disponible entre les deux marges -- exactement la même dérivation que
+ * BOUTON_LARGEUR dans ecran_fichiers.c (colonne unique, pas de division par
+ * un nombre de colonnes puisqu'il n'y en a plus qu'une). */
+#define BOUTON_LARGEUR (LARGEUR_CONTENU - 2 * MARGE)
+#define BOUTON_HAUTEUR      52
+#define BOUTON_ECART_Y       6
+#define GRILLE_BAS (GRILLE_Y + ECRAN_MACROS_PAGE_TAILLE * BOUTON_HAUTEUR + \
+                    (ECRAN_MACROS_PAGE_TAILLE - 1) * BOUTON_ECART_Y)
 
 #define PAGINATION_HAUTEUR 44
 /* PAS "HAUTEUR_CONTENU - PAGINATION_HAUTEUR - MARGE" (bug reel, trouve a la
@@ -72,9 +88,12 @@
  * pour cet etat precis. */
 #define BOUTON_DESACTIVE_MELANGE 90
 
-_Static_assert(MARGE + ECRAN_MACROS_PAGE_COLONNES * BOUTON_LARGEUR +
-                       (ECRAN_MACROS_PAGE_COLONNES - 1) * BOUTON_ECART_X + MARGE <= LARGEUR_CONTENU,
-               "la grille de macros deborde de la largeur du contenu");
+/* Colonne unique : BOUTON_LARGEUR REMPLIT deja exactement l'espace entre les
+ * deux marges (voir sa definition ci-dessus) -- cet assert reste en place
+ * (tautologique aujourd'hui) pour attraper toute regression future qui
+ * redonnerait a BOUTON_LARGEUR une valeur independante. */
+_Static_assert(MARGE + BOUTON_LARGEUR + MARGE <= LARGEUR_CONTENU,
+               "le bouton pleine largeur deborde de la largeur du contenu");
 /* Fix round 1 (revue tache 6, L1) : GRILLE_Y (36) etait un litteral NU, pas
  * derive de AVERTISSEMENT_Y + AVERTISSEMENT_HAUTEUR, malgre ce que promet le
  * commentaire de tete du fichier ("toutes les constantes de position sont
@@ -86,7 +105,7 @@ _Static_assert(MARGE + ECRAN_MACROS_PAGE_COLONNES * BOUTON_LARGEUR +
 _Static_assert(AVERTISSEMENT_Y + AVERTISSEMENT_HAUTEUR <= GRILLE_Y,
                "la ligne d'avertissement de troncature chevauche la premiere rangee de la grille");
 _Static_assert(GRILLE_BAS <= PAGINATION_Y,
-               "la grille de macros chevauche la ligne de pagination");
+               "la colonne de macros chevauche la ligne de pagination");
 _Static_assert(PAGINATION_Y + PAGINATION_HAUTEUR <= HAUTEUR_CONTENU,
                "la ligne de pagination deborde de la hauteur du contenu");
 /* Le garde-fou qui manquait (bug reel constate a la capture, voir le
@@ -397,10 +416,11 @@ static void ecran_macros_construire(lv_obj_t *parent, void *contexte)
     lv_obj_add_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN);
 
     for (uint8_t emplacement = 0; emplacement < ECRAN_MACROS_PAGE_TAILLE; emplacement++) {
-        uint8_t colonne = emplacement % ECRAN_MACROS_PAGE_COLONNES;
-        uint8_t ligne = emplacement / ECRAN_MACROS_PAGE_COLONNES;
-        lv_coord_t x = MARGE + colonne * (BOUTON_LARGEUR + BOUTON_ECART_X);
-        lv_coord_t y = GRILLE_Y + ligne * (BOUTON_HAUTEUR + BOUTON_ECART_Y);
+        /* Colonne unique (refonte jalon 3b) : x fixe a MARGE, seul y avance
+         * d'une ligne a l'autre -- plus de division/modulo par un nombre de
+         * colonnes, il n'y en a plus qu'une. */
+        lv_coord_t x = MARGE;
+        lv_coord_t y = GRILLE_Y + emplacement * (BOUTON_HAUTEUR + BOUTON_ECART_Y);
 
         ctx->boutons[emplacement] =
             bouton_creer(parent, "", x, y, BOUTON_LARGEUR, BOUTON_HAUTEUR, &lv_font_montserrat_14,

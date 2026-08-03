@@ -29,6 +29,12 @@
  * 800px hérités de ecran_macros.c (écrit avant la conversion au rail
  * persistant, jamais reconverti depuis, hors de portée de cette tâche).
  *
+ * Refonte jalon 3b (tâche « listes 1D ») : grille 2D -> colonne unique de
+ * boutons pleine largeur, même geometrie verticale (page de 5, voir le
+ * calcul en tête de ecran_fichiers.c) que ecran_macros.c apres sa propre
+ * refonte -- les deux ecrans restent geometriquement coherents malgre la
+ * largeur de contenu differente (742 ici, 800 la-bas).
+ *
  * `ecran_fichiers_ctx_t` est exposé ici plutôt qu'opaque, exactement pour la
  * même raison que `ecran_macros_ctx_t` (voir son .h) : host-test/tests/
  * test_ecran_fichiers.c a besoin de relire les libellés via
@@ -44,11 +50,12 @@
 #include "etat_klipper.h"
 #include "lvgl.h"
 
-/* Une page à la fois : 4 colonnes × 4 lignes, même géométrie de grille que
- * ecran_macros.c. 32 (KLIPPER_FICHIERS_MAX) ÷ 16 = 2 pages au pire cas. */
-#define ECRAN_FICHIERS_PAGE_COLONNES 4
-#define ECRAN_FICHIERS_PAGE_LIGNES   4
-#define ECRAN_FICHIERS_PAGE_TAILLE   (ECRAN_FICHIERS_PAGE_COLONNES * ECRAN_FICHIERS_PAGE_LIGNES)
+/* Une page à la fois, UNE COLONNE de boutons pleine largeur (refonte jalon
+ * 3b), meme taille de page que ecran_macros.c (voir son .h pour le calcul
+ * complet -- 5 boutons de 52px est ce qui tient entre la ligne
+ * d'avertissement et la limite absolue imposee par le bandeau de
+ * notification). 32 (KLIPPER_FICHIERS_MAX) ÷ 5 = 7 pages au pire cas. */
+#define ECRAN_FICHIERS_PAGE_TAILLE 5
 
 typedef struct {
     struct ecran_fichiers_ctx_s *ctx; /* jamais NULL une fois construire() passé */

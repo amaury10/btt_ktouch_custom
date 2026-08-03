@@ -5,7 +5,8 @@
  *   2. Filtrage des macros `_préfixées` + liste vide ("No macros") + ligne de
  *      troncature -- construction directe du contexte (même technique que
  *      test_ecran_accueil.c), sans navigation ni boucle simulée.
- *   3. Pagination (20 macros, 2 pages).
+ *   3. Pagination (20 macros, 4 pages -- ECRAN_MACROS_PAGE_TAILLE=5 depuis la
+ *      refonte jalon 3b, colonne unique de boutons pleine largeur).
  *   4. Grisage systématique sur donnees_perimees -- round-trip complet,
  *      couleurs RÉSOLUES (pas seulement LV_STATE_DISABLED, leçon de la revue
  *      finale du jalon 2b -- voir pomper_transitions_style() ci-dessous).
@@ -137,24 +138,38 @@ static void groupe_filtrage_et_etats(void)
 
     VERIFIER(lv_obj_has_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN)); /* plus "vide" */
     VERIFIER(ctx->nb_filtrees == 7); /* 8 macros, une cachee */
+    /* Refonte jalon 3b (colonne unique, ECRAN_MACROS_PAGE_TAILLE=5) : 7
+     * macros filtrees ne tiennent plus sur une seule page (contrairement a
+     * l'ancienne grille 4x4, 16 par page) -- page 1 montre les 5 premieres. */
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "HOME_ALL");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[1]), "PURGE_PARAM");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[2]), "MACRO_ECHEC");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[3]), "CHANGE_TOOL");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "LOAD_FILAMENT");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[5]), "UNLOAD_FILAMENT");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[6]), "CALIBRATE_OFFSETS");
-    /* Emplacement 7 (le 8eme de la page) est inutilise -- masque, pas un
-     * ancien libelle qui trainerait. */
-    VERIFIER(lv_obj_has_flag(ctx->boutons[7], LV_OBJ_FLAG_HIDDEN));
     /* Aucun label visible ne porte jamais "_CACHEE", explicitement -- pas
      * seulement "7 macros comptees", la preuve directe que le brief exige. */
     for (uint8_t i = 0; i < ECRAN_MACROS_PAGE_TAILLE; i++) {
         VERIFIER(strcmp(lv_label_get_text(ctx->labels[i]), "_CACHEE") != 0);
     }
-    /* Une seule page (7 <= 16) : pagination masquee. */
-    VERIFIER(lv_obj_has_flag(ctx->bouton_precedent, LV_OBJ_FLAG_HIDDEN));
-    VERIFIER(lv_obj_has_flag(ctx->bouton_suivant, LV_OBJ_FLAG_HIDDEN));
+    /* 7 > 5 : pagination maintenant ACTIVE (2 pages). */
+    VERIFIER(!lv_obj_has_flag(ctx->bouton_precedent, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER(!lv_obj_has_flag(ctx->bouton_suivant, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/2");
+    /* --- page 2 : les 2 macros restantes, "_CACHEE" toujours absente. */
+    lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/2");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "UNLOAD_FILAMENT");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[1]), "CALIBRATE_OFFSETS");
+    /* Emplacement 2 (le 3eme de cette page) est inutilise -- masque, pas un
+     * ancien libelle qui trainerait. */
+    VERIFIER(lv_obj_has_flag(ctx->boutons[2], LV_OBJ_FLAG_HIDDEN));
+    for (uint8_t i = 0; i < ECRAN_MACROS_PAGE_TAILLE; i++) {
+        VERIFIER(strcmp(lv_label_get_text(ctx->labels[i]), "_CACHEE") != 0);
+    }
+    /* Retour page 1 : la suite du groupe (vide/troncature) ne depend pas de
+     * la page, mais repart d'un etat propre par hygiene. */
+    lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/2");
     /* Pas de troncature dans ce scenario : la ligne reste masquee. */
     VERIFIER(lv_obj_has_flag(ctx->avertissement, LV_OBJ_FLAG_HIDDEN));
 
@@ -243,7 +258,7 @@ static void groupe_filtrage_et_etats(void)
 }
 
 /* ------------------------------------------------------------------------
- * Groupe 3 : pagination (20 macros -> 2 pages).
+ * Groupe 3 : pagination (20 macros -> 4 pages, colonne unique de 5).
  * ------------------------------------------------------------------------ */
 
 static void groupe_pagination(void)
@@ -269,20 +284,30 @@ static void groupe_pagination(void)
     VERIFIER(ctx->nb_filtrees == 20);
     VERIFIER(!lv_obj_has_flag(ctx->bouton_precedent, LV_OBJ_FLAG_HIDDEN));
     VERIFIER(!lv_obj_has_flag(ctx->bouton_suivant, LV_OBJ_FLAG_HIDDEN));
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/2");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/4");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "MACRO_01");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[15]), "MACRO_16");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "MACRO_05");
     /* Precedent desactive (premiere page), Suivant actif. */
     VERIFIER(lv_obj_has_state(ctx->bouton_precedent, LV_STATE_DISABLED));
     VERIFIER(!lv_obj_has_state(ctx->bouton_suivant, LV_STATE_DISABLED));
 
-    /* --- Suivant : page 2, 4 macros restantes (17..20) dans les 4 premiers
-     * emplacements, le reste masque. */
+    /* --- Suivant x2 : pages 2 et 3, 5 macros pleines a chaque fois (20 =
+     * exactement 4*5, aucun lot partiel avant la derniere page). */
     lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/2");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "MACRO_17");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[3]), "MACRO_20");
-    VERIFIER(lv_obj_has_flag(ctx->boutons[4], LV_OBJ_FLAG_HIDDEN));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/4");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "MACRO_06");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "MACRO_10");
+
+    lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 3/4");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "MACRO_11");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "MACRO_15");
+
+    /* --- Suivant : page 4 (derniere), pleine elle aussi (MACRO_16..20). */
+    lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 4/4");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "MACRO_16");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->labels[4]), "MACRO_20");
     VERIFIER(!lv_obj_has_state(ctx->bouton_precedent, LV_STATE_DISABLED));
     VERIFIER(lv_obj_has_state(ctx->bouton_suivant, LV_STATE_DISABLED)); /* derniere page */
 
@@ -290,11 +315,13 @@ static void groupe_pagination(void)
      * defensive de bouton_suivant_cb -- lv_obj_send_event() ne passe jamais
      * par LV_STATE_DISABLED) ne change rien. */
     lv_obj_send_event(ctx->bouton_suivant, LV_EVENT_CLICKED, NULL);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 2/2");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 4/4");
 
-    /* --- Precedent : retour page 1. */
+    /* --- Precedent x3 : retour page 1. */
     lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/2");
+    lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(ctx->bouton_precedent, LV_EVENT_CLICKED, NULL);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->page_label), "Page 1/4");
     VERIFIER_TEXTE(lv_label_get_text(ctx->labels[0]), "MACRO_01");
 
     lv_obj_delete(parent);
