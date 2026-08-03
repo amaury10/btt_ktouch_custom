@@ -481,7 +481,7 @@ static esp_err_t gestion_backup_btt_page(httpd_req_t *req)
        de securite que /revert : un prechargement, un scanner ou un
        aspirateur de liens ne doit jamais avoir d'effet de bord flash. */
     ota_backup_etat_t etat = ota_backup_etat();
-    char page[768];
+    char page[1200];
     int longueur = snprintf(page, sizeof(page),
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
