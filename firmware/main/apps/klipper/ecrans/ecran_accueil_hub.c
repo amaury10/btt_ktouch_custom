@@ -20,18 +20,25 @@
  * recopiees) et verifiees les unes par rapport aux autres, meme idiome que
  * ecran_deplacer.c.
  *
- * Lignes de chauffants (taches 4 et 5) : voir le commentaire de tete du .h
- * pour pourquoi nom/valeur sont deux `lv_label_t` distincts plutot qu'un
- * texte concatene -- LV_OBJ_FLAG_CLICKABLE est pose ICI sur
- * `chauffant_valeur[i]` ET `chauffant_nom[i]`, sans retoucher cette mise en
- * page. Taper la valeur ouvre le clavier numerique (chauffant_valeur_cb()
- * plus bas) pour editer la consigne de CE chauffant -- meme parsing/bornes/
- * gcode que cellule_bouton_cb()/cellule_clavier_rappel() de
- * ecran_temperatures.c (copie plutot que partagee, meme choix que le reste
- * de ce depot vis-a-vis de construire_arguments_gcode()/envoyer_gcode() plus
- * bas). Taper le nom (chauffant_nom_cb() plus bas) bascule l'affichage de la
- * courbe de CE chauffant sur le graphe et grise/degrise le label -- raccourci
- * INDEPENDANT de celui de la valeur, meme ligne mais deux gestes distincts.
+ * Lignes de chauffants (taches 4 et 5, mise en boutons scrollables dans une
+ * tache de suivi) : voir le commentaire de tete du .h pour pourquoi nom/
+ * valeur sont deux `lv_button_t` distincts (chacun un `lv_label_t` enfant
+ * unique et centre) plutot qu'un texte concatene -- `lv_button_create()` pose
+ * LV_OBJ_FLAG_CLICKABLE par defaut sur `chauffant_valeur[i]` ET
+ * `chauffant_nom[i]`, sans code de flag explicite. Taper la valeur ouvre le
+ * clavier numerique (chauffant_valeur_cb() plus bas) pour editer la consigne
+ * de CE chauffant -- meme parsing/bornes/gcode que cellule_bouton_cb()/
+ * cellule_clavier_rappel() de ecran_temperatures.c (copie plutot que
+ * partagee, meme choix que le reste de ce depot vis-a-vis de
+ * construire_arguments_gcode()/envoyer_gcode() plus bas). Taper le nom
+ * (chauffant_nom_cb() plus bas) bascule l'affichage de la courbe de CE
+ * chauffant sur le graphe et recolore son label (couleur de SA courbe si
+ * frais et visible, gris sinon) -- raccourci INDEPENDANT de celui de la
+ * valeur, meme ligne mais deux gestes distincts. Le pool de lignes
+ * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES == KLIPPER_HISTO_SERIES) couvre TOUS les
+ * chauffants possibles ; `zone_chauffants` (conteneur scrollable a hauteur
+ * fixe) montre les premieres lignes sans defiler, le reste accessible par
+ * glissement vertical -- voir CHAUFFANTS_ZONE_HAUTEUR plus bas.
  *
  * Libelles de menu SANS accent ("Configuration", pas de caractere accentue)
  * -- aucun texte affiche a l'ecran dans ce depot n'utilise de caractere
@@ -101,18 +108,35 @@
 #define CONTENU_Y 6 /* Y de depart commun aux deux colonnes */
 
 /* --- Colonne gauche : lignes de chauffants -------------------------------
- * Nom ("T0"/"Bed", largeur fixe courte) + valeur ("205.0/210.0", le reste de
- * la colonne) sur la MEME ligne, deux lv_label_t distincts et adjacents (voir
- * le commentaire de tete du .h). --------------------------------------- */
-#define CHAUFFANT_LIGNE_HAUTEUR 20
-#define CHAUFFANT_LIGNE_ECART    2
-#define CHAUFFANT_NOM_LARGEUR   50
-#define CHAUFFANT_VALEUR_X      (CHAUFFANT_NOM_LARGEUR + 10)
+ * Nom ("T0"/"Bed", bouton etroit) + valeur ("205.0/210.0", bouton qui prend
+ * le reste de la colonne) sur la MEME ligne, deux lv_button_t distincts et
+ * adjacents (voir le commentaire de tete du .h) -- chacun >= 44px de haut
+ * (cible tactile, _Static_assert plus bas), porte par `zone_chauffants`
+ * (conteneur SCROLLABLE a hauteur FIXE, CHAUFFANTS_ZONE_HAUTEUR, juste assez
+ * pour CHAUFFANT_LIGNES_VISIBLES lignes) -- le pool complet
+ * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES == KLIPPER_HISTO_SERIES == 9) existe
+ * TOUJOURS, seules les lignes AU-DELA de CHAUFFANT_LIGNES_VISIBLES exigent un
+ * defilement pour devenir visibles -- jamais l'inverse (le chart, lui, ne doit
+ * JAMAIS retrecir pour leur faire de la place, voir CHART_HAUTEUR plus bas et
+ * son _Static_assert >= 180). --------------------------------------------- */
+#define CHAUFFANT_LIGNE_HAUTEUR   44 /* >= 44px, _Static_assert plus bas */
+#define CHAUFFANT_LIGNE_ECART      8
+#define CHAUFFANT_NOM_LARGEUR     70
+#define CHAUFFANT_VALEUR_X      (CHAUFFANT_NOM_LARGEUR + 8)
 #define CHAUFFANT_VALEUR_LARGEUR (GAUCHE_LARGEUR - CHAUFFANT_VALEUR_X)
 
+/* Nombre de lignes-boutons visibles SANS defiler dans `zone_chauffants` --
+ * DELIBEREMENT 2 (et non 3, malgre "~2-3 button rows" de la spec) : c'est ce
+ * qui laisse CHART_HAUTEUR >= 180px (_Static_assert plus bas) au budget
+ * vertical disponible (ZONE_CONTENU_MAX) -- le chart garde la priorite sur le
+ * nombre de lignes visibles sans defiler, voir le commentaire de tete de ce
+ * bloc. Au-dela de CHAUFFANT_LIGNES_VISIBLES chauffants presents, le
+ * conteneur defile (LV_SCROLLBAR_MODE_AUTO, voir construire() plus bas). */
+#define CHAUFFANT_LIGNES_VISIBLES 2
+
 #define CHAUFFANTS_ZONE_Y      CONTENU_Y
-#define CHAUFFANTS_ZONE_HAUTEUR (ECRAN_ACCUEIL_HUB_HEATER_LIGNES * CHAUFFANT_LIGNE_HAUTEUR + \
-                                  (ECRAN_ACCUEIL_HUB_HEATER_LIGNES - 1) * CHAUFFANT_LIGNE_ECART)
+#define CHAUFFANTS_ZONE_HAUTEUR (CHAUFFANT_LIGNES_VISIBLES * CHAUFFANT_LIGNE_HAUTEUR + \
+                                  (CHAUFFANT_LIGNES_VISIBLES - 1) * CHAUFFANT_LIGNE_ECART)
 
 /* --- Colonne gauche : resume (position/outil, vitesse-flux, progression) -- */
 #define ZONE_ECART   8 /* ecart vertical entre les "blocs" de la colonne gauche */
@@ -145,7 +169,18 @@ _Static_assert(TUILE_HAUTEUR >= 44, "les tuiles de menu doivent rester >= 44px d
 _Static_assert(ECRAN_ACCUEIL_HUB_MENU_NB * TUILE_HAUTEUR + (ECRAN_ACCUEIL_HUB_MENU_NB - 1) * TUILE_ECART ==
                     DROITE_ZONE_HAUTEUR,
                 "les cinq tuiles ne remplissent plus exactement la hauteur disponible de la colonne droite");
-_Static_assert(CHART_HAUTEUR > 0, "le graphe ne laisse plus de hauteur disponible dans la colonne gauche");
+_Static_assert(CHAUFFANT_LIGNE_HAUTEUR >= 44,
+                "les boutons NOM/VALEUR des lignes de chauffants doivent rester >= 44px de cible tactile");
+_Static_assert(CHAUFFANT_VALEUR_X + CHAUFFANT_VALEUR_LARGEUR == GAUCHE_LARGEUR,
+                "les boutons NOM+VALEUR d'une ligne de chauffant ne remplissent plus exactement la colonne gauche");
+_Static_assert(CHAUFFANT_VALEUR_LARGEUR >= 100,
+                "le bouton VALEUR d'une ligne de chauffant est trop etroit pour afficher \"actuelle/consigne\"");
+/* CHART_HAUTEUR >= 180 (task-3-brief.md/spec de ce refinement : "usable
+ * height, >= ~180px") -- zone_chauffants (hauteur FIXE, voir plus haut) ne
+ * doit jamais grossir avec le nombre de chauffants presents pour lui faire de
+ * la place : au-dela de CHAUFFANT_LIGNES_VISIBLES chauffants, on defile, on
+ * ne retrecit jamais le chart. */
+_Static_assert(CHART_HAUTEUR >= 180, "le graphe descend sous la hauteur utilisable minimale (180px) dans la colonne gauche");
 /* Meme garde-fou que la grille de menu de ecran_menu_reglages.c (voir son
  * commentaire complet) : le bas de CHAQUE colonne, en coordonnees ABSOLUES
  * d'ecran, doit rester au-dessus du bandeau de notification -- sans quoi une
@@ -350,12 +385,26 @@ static bool chauffant_info_nom_chauffeur(const ecran_accueil_hub_chauffant_info_
  * factorise entre chart_ajouter_serie()/construire()/mettre_a_jour() (deja
  * indexes par `i` de serie directement) et chauffant_nom_cb() plus bas (qui,
  * lui, ne connait `info` que via `chauffant_infos[]`, indexe par NUMERO DE
- * LIGNE, pas par numero de serie -- les deux coincident pour un extrudeur
- * SEULEMENT si aucune ligne n'a ete sautee, jamais garanti puisque
- * ECRAN_ACCUEIL_HUB_HEATER_LIGNES < KLIPPER_HISTO_SERIES). */
+ * LIGNE, pas par numero de serie -- les deux NE coincident PAS forcement pour
+ * un extrudeur : mettre_a_jour() COMPACTE les lignes presentes (voir son
+ * commentaire plus bas), donc la ligne `total` d'un extrudeur `i` absent
+ * avant lui vaut total < i -- meme si ECRAN_ACCUEIL_HUB_HEATER_LIGNES ==
+ * KLIPPER_HISTO_SERIES, le pool entier ne garantit PAS que ligne == serie). */
 static uint8_t chauffant_info_serie_indice(const ecran_accueil_hub_chauffant_info_t *info)
 {
     return info->est_plateau ? (uint8_t)KLIPPER_EXTRUDEURS_MAX : info->indice_extrudeur;
+}
+
+/* Retrouve le `lv_label_t` enfant d'UN bouton de ligne de chauffant (NOM ou
+ * VALEUR, voir chauffant_bouton_creer() plus bas) -- meme convention que
+ * `menu_boutons[i]` (le texte n'est jamais stocke a part dans le contexte,
+ * toujours le premier et unique enfant du bouton). Factorise entre
+ * mettre_a_jour() (texte + couleur) et chauffant_nom_cb() (couleur seule, au
+ * clic) : les deux doivent recolorer EXACTEMENT le meme label, jamais le
+ * bouton lui-meme (qui n'a pas de style de texte propre). */
+static lv_obj_t *chauffant_bouton_label(lv_obj_t *bouton)
+{
+    return lv_obj_get_child(bouton, 0);
 }
 
 /* Rappel du clavier numerique ouvert par chauffant_valeur_cb() ci-dessous --
@@ -424,18 +473,20 @@ static void chauffant_valeur_cb(lv_event_t *e)
  * pas de gcode), un geste purement local a l'ecran.
  * ------------------------------------------------------------------------ */
 
-/* Tap sur le label NOM d'une ligne de chauffant. `info` est passe
+/* Tap sur le bouton NOM d'une ligne de chauffant. `info` est passe
  * DIRECTEMENT comme `contexte` (meme tableau `chauffant_infos[]` que
  * chauffant_valeur_cb() ci-dessus, un SECOND lv_obj_add_event_cb() sur le
  * MEME element du tableau -- voir la boucle de construire() plus bas) --
- * `lv_event_get_target(e)` (et non `info`) donne le label a recolorer, la
- * cible EXACTE du clic.
+ * `lv_event_get_target(e)` (et non `info`) donne le BOUTON clique, dont
+ * chauffant_bouton_label() retrouve le label enfant a recolorer.
  *
  * Regle de reconciliation avec le grisage C3 (donnees_perimees, voir la
  * boucle de mettre_a_jour() plus bas) : la couleur du label NOM doit
  * refleter LES DEUX etats a la fois --
- *   grise    si (donnees_perimees OU courbe masquee)
- *   normale  seulement si (fraiches ET courbe visible)
+ *   grise                    si (donnees_perimees OU courbe masquee)
+ *   couleur de SA courbe     seulement si (fraiches ET courbe visible)
+ * (COULEURS_SERIE[s], le meme tableau que celui qui colore la courbe sur le
+ * chart -- le nom promet visuellement "c'est CETTE courbe que je bascule")
  * -- jamais l'un qui efface la memoire de l'autre. Cette fonction applique
  * la regle IMMEDIATEMENT (sans attendre le prochain mettre_a_jour()) en
  * relisant `ctx->donnees_perimees`, la valeur du DERNIER appel a
@@ -463,8 +514,44 @@ static void chauffant_nom_cb(lv_event_t *e)
         lv_chart_hide_series(ctx->chart, ctx->serie[s], !ctx->serie_visible[s]);
     }
 
-    uint32_t couleur = (ctx->donnees_perimees || !ctx->serie_visible[s]) ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
-    lv_obj_set_style_text_color(cible, lv_color_hex(couleur), 0);
+    uint32_t couleur = (ctx->donnees_perimees || !ctx->serie_visible[s]) ? COULEUR_GRISE : COULEURS_SERIE[s];
+    lv_obj_set_style_text_color(chauffant_bouton_label(cible), lv_color_hex(couleur), 0);
+}
+
+/* Cree UN bouton de ligne de chauffant (NOM ou VALEUR) -- meme idiome que les
+ * tuiles de menu de la colonne droite (voir la boucle de creation de
+ * `zone_menu` plus bas) : `lv_button_create()` (deja LV_OBJ_FLAG_CLICKABLE
+ * par defaut) + `lv_obj_remove_style_all()` (theme par defaut + transition
+ * animee otes, meme raison que ecran_menu_reglages.c) + fond COULEUR_BOUTON/
+ * coins arrondis poses a la main + un UNIQUE `lv_label_t` enfant, CENTRE
+ * (`lv_obj_center()`) plutot que stocke a part -- retrouve via
+ * chauffant_bouton_label() ci-dessus. `x`/`largeur` distinguent le bouton NOM
+ * (etroit, a gauche de la ligne) du bouton VALEUR (le reste de la colonne, a
+ * droite) ; les deux partagent CHAUFFANT_LIGNE_HAUTEUR (>= 44px, cible
+ * tactile, _Static_assert plus haut). La position Y REELLE est posee par
+ * mettre_a_jour() (chauffants presents repositionnes de facon contigue a
+ * chaque appel, voir son commentaire) -- 0 ici n'est qu'un placeholder tant
+ * que la ligne reste masquee. */
+static lv_obj_t *chauffant_bouton_creer(lv_obj_t *parent, lv_coord_t x, lv_coord_t largeur)
+{
+    lv_obj_t *bouton = lv_button_create(parent);
+    lv_obj_remove_style_all(bouton);
+    lv_obj_set_size(bouton, largeur, CHAUFFANT_LIGNE_HAUTEUR);
+    lv_obj_set_pos(bouton, x, 0);
+    lv_obj_set_style_bg_opa(bouton, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(bouton, lv_color_hex(COULEUR_BOUTON), 0);
+    lv_obj_set_style_border_width(bouton, 0, 0);
+    lv_obj_set_style_shadow_width(bouton, 0, 0);
+    lv_obj_set_style_radius(bouton, 8, 0);
+    lv_obj_clear_flag(bouton, LV_OBJ_FLAG_SCROLLABLE); /* un seul label, tient toujours dans le bouton */
+
+    lv_obj_t *label = lv_label_create(bouton);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
+    lv_label_set_text(label, "");
+    lv_obj_center(label);
+
+    return bouton;
 }
 
 static lv_obj_t *ligne_creer(lv_obj_t *parent, lv_coord_t y)
@@ -548,33 +635,49 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
     }
     ctx->donnees_perimees = false; /* premiere donnee jamais recue = pas encore perimee, reecrit au premier mettre_a_jour() */
 
-    /* --- colonne gauche : lignes de chauffants -- pool a taille fixe
-     * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES), masque/rempli par mettre_a_jour()
-     * selon le nombre de chauffants reellement presents. `chauffant_valeur[i]`
-     * ET `chauffant_nom[i]` sont des `lv_label_t` NUS (jamais un bouton) :
-     * LV_OBJ_FLAG_CLICKABLE doit etre pose EXPLICITEMENT sur chacun pour
-     * qu'il recoive des evenements de clic (voir le commentaire de tete du
-     * fichier, taches 4 et 5) -- deux rappels DISTINCTS sur le MEME element
-     * `chauffant_infos[i]`, jamais confondus. ------------------------------ */
-    for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
-        lv_coord_t y = (lv_coord_t)(CHAUFFANTS_ZONE_Y + i * (CHAUFFANT_LIGNE_HAUTEUR + CHAUFFANT_LIGNE_ECART));
+    /* --- colonne gauche : lignes de chauffants -- `zone_chauffants` est un
+     * conteneur SCROLLABLE a hauteur FIXE (CHAUFFANTS_ZONE_HAUTEUR, juste
+     * assez pour CHAUFFANT_LIGNES_VISIBLES lignes-boutons) qui porte le pool
+     * ENTIER (ECRAN_ACCUEIL_HUB_HEATER_LIGNES == KLIPPER_HISTO_SERIES == 9),
+     * masque/rempli/repositionne par mettre_a_jour() selon le nombre de
+     * chauffants reellement presents -- voir le commentaire de tete du .h.
+     * `lv_obj_remove_style_all()` + restyle manuel de LV_PART_SCROLLBAR : la
+     * barre de defilement doit rester VISIBLE (spec : "with a visible
+     * scrollbar") malgre le theme par defaut retire, meme raison que le
+     * fond/bordure de `bouton` dans chauffant_bouton_creer() plus haut. ---- */
+    ctx->zone_chauffants = lv_obj_create(parent);
+    lv_obj_remove_style_all(ctx->zone_chauffants);
+    lv_obj_set_pos(ctx->zone_chauffants, GAUCHE_X, CHAUFFANTS_ZONE_Y);
+    lv_obj_set_size(ctx->zone_chauffants, GAUCHE_LARGEUR, CHAUFFANTS_ZONE_HAUTEUR);
+    lv_obj_set_style_bg_opa(ctx->zone_chauffants, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ctx->zone_chauffants, 0, 0);
+    lv_obj_set_style_pad_all(ctx->zone_chauffants, 0, 0);
+    lv_obj_add_flag(ctx->zone_chauffants, LV_OBJ_FLAG_SCROLLABLE); /* defensif : deja pose par lv_obj_create() */
+    lv_obj_set_scroll_dir(ctx->zone_chauffants, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(ctx->zone_chauffants, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_bg_opa(ctx->zone_chauffants, LV_OPA_60, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(ctx->zone_chauffants, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(ctx->zone_chauffants, 2, LV_PART_SCROLLBAR);
+    lv_obj_set_style_width(ctx->zone_chauffants, 4, LV_PART_SCROLLBAR);
 
-        lv_obj_t *nom = lv_label_create(parent);
-        lv_obj_set_style_text_font(nom, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(nom, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
-        lv_label_set_text(nom, "");
-        lv_obj_set_pos(nom, GAUCHE_X, y);
-        lv_obj_set_width(nom, CHAUFFANT_NOM_LARGEUR);
+    /* `chauffant_valeur[i]` ET `chauffant_nom[i]` sont des BOUTONS
+     * (chauffant_bouton_creer(), deja LV_OBJ_FLAG_CLICKABLE) -- deux rappels
+     * DISTINCTS sur le MEME element `chauffant_infos[i]`, jamais confondus
+     * (voir le commentaire de tete du fichier, taches 4 et 5). Masquees ICI
+     * par defaut : avant le premier mettre_a_jour(), aucun chauffant n'est
+     * connu present, montrer le pool entier (9 lignes vides) serait un
+     * defilement transitoire sans interet -- mettre_a_jour() les demasque et
+     * les repositionne de facon contigue (0..total-1), voir son commentaire
+     * plus bas. ------------------------------------------------------------ */
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+        lv_obj_t *nom = chauffant_bouton_creer(ctx->zone_chauffants, 0, CHAUFFANT_NOM_LARGEUR);
         ctx->chauffant_nom[i] = nom;
 
-        lv_obj_t *valeur = lv_label_create(parent);
-        lv_obj_set_style_text_font(valeur, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(valeur, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
-        lv_label_set_text(valeur, "");
-        lv_obj_set_pos(valeur, GAUCHE_X + CHAUFFANT_VALEUR_X, y);
-        lv_obj_set_width(valeur, CHAUFFANT_VALEUR_LARGEUR);
-        lv_obj_add_flag(valeur, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t *valeur = chauffant_bouton_creer(ctx->zone_chauffants, CHAUFFANT_VALEUR_X, CHAUFFANT_VALEUR_LARGEUR);
         ctx->chauffant_valeur[i] = valeur;
+
+        lv_obj_add_flag(nom, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(valeur, LV_OBJ_FLAG_HIDDEN);
 
         /* `ctx` pose ICI, une fois pour toutes -- meme idiome que
          * ctx->cellule_infos[i].ctx dans ecran_temperatures.c ("jamais NULL
@@ -582,14 +685,13 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
          * consigne_courante restent a leur valeur zero-initialisee (calloc du
          * contexte, voir ecran.h) tant que mettre_a_jour() n'a pas tourne au
          * moins une fois pour CETTE ligne -- inoffensif, la ligne est masquee
-         * jusque-la (voir la boucle de visibilite dans mettre_a_jour()). */
+         * jusque-la. */
         ctx->chauffant_infos[i].ctx = ctx;
         lv_obj_add_event_cb(valeur, chauffant_valeur_cb, LV_EVENT_CLICKED, &ctx->chauffant_infos[i]);
 
-        /* Tache 5 : meme `chauffant_infos[i]`, un SECOND rappel sur le label
-         * NOM -- voir chauffant_nom_cb() plus haut pour ce qu'il en lit
-         * (est_plateau/indice_extrudeur, jamais consigne_courante). */
-        lv_obj_add_flag(nom, LV_OBJ_FLAG_CLICKABLE);
+        /* Tache 5 : meme `chauffant_infos[i]`, un SECOND rappel sur le
+         * bouton NOM -- voir chauffant_nom_cb() plus haut pour ce qu'il en
+         * lit (est_plateau/indice_extrudeur, jamais consigne_courante). */
         lv_obj_add_event_cb(nom, chauffant_nom_cb, LV_EVENT_CLICKED, &ctx->chauffant_infos[i]);
     }
 
@@ -694,9 +796,17 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
     }
 
     /* --- lignes de chauffants : extrudeurs presents puis plateau, dans cet
-     * ordre, bornes a ECRAN_ACCUEIL_HUB_HEATER_LIGNES -- systematique a
-     * chaque appel (les lignes au-dela du nombre present sont masquees,
-     * jamais un etat fige depuis le premier passage). --------------------- */
+     * ordre, bornes a ECRAN_ACCUEIL_HUB_HEATER_LIGNES (le pool ENTIER, pas
+     * une visibilite bornee -- voir le commentaire de tete du .h) --
+     * systematique a chaque appel (les lignes au-dela du nombre present sont
+     * masquees, jamais un etat fige depuis le premier passage). Chaque ligne
+     * PRESENTE (indice `total`) est en plus REPOSITIONNEE ici (lv_obj_set_y())
+     * a total*(CHAUFFANT_LIGNE_HAUTEUR+CHAUFFANT_LIGNE_ECART) -- c'est ce qui
+     * garde les lignes presentes CONTIGUES (0..total-1) meme quand un
+     * chauffant intermediaire disparait d'un appel a l'autre, et donc AUCUN
+     * trou de defilement dans `zone_chauffants` (les lignes masquees,
+     * au-dela, n'ont pas besoin d'etre repositionnees -- LVGL les ignore deja
+     * pour l'etendue scrollable, voir le commentaire de tete du .h). --------- */
     uint8_t total = 0;
     char    valeur[16];
     char    consigne[16];
@@ -711,8 +821,11 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         ui_format_temperature(valeur, sizeof(valeur), e->extrudeurs[i].actuelle);
         ui_format_temperature(consigne, sizeof(consigne), e->extrudeurs[i].consigne);
         snprintf(texte_valeur, sizeof(texte_valeur), "%s/%s", valeur, consigne);
-        lv_label_set_text(ctx->chauffant_nom[total], nom);
-        lv_label_set_text(ctx->chauffant_valeur[total], texte_valeur);
+        lv_label_set_text(chauffant_bouton_label(ctx->chauffant_nom[total]), nom);
+        lv_label_set_text(chauffant_bouton_label(ctx->chauffant_valeur[total]), texte_valeur);
+        lv_coord_t y = (lv_coord_t)(total * (CHAUFFANT_LIGNE_HAUTEUR + CHAUFFANT_LIGNE_ECART));
+        lv_obj_set_y(ctx->chauffant_nom[total], y);
+        lv_obj_set_y(ctx->chauffant_valeur[total], y);
         /* Identite du chauffeur + consigne courante, relues par
          * chauffant_valeur_cb()/le clavier au moment du tap -- voir le
          * commentaire de ecran_accueil_hub_chauffant_info_t (le .h). */
@@ -725,8 +838,11 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
         ui_format_temperature(valeur, sizeof(valeur), e->plateau.actuelle);
         ui_format_temperature(consigne, sizeof(consigne), e->plateau.consigne);
         snprintf(texte_valeur, sizeof(texte_valeur), "%s/%s", valeur, consigne);
-        lv_label_set_text(ctx->chauffant_nom[total], "Bed");
-        lv_label_set_text(ctx->chauffant_valeur[total], texte_valeur);
+        lv_label_set_text(chauffant_bouton_label(ctx->chauffant_nom[total]), "Bed");
+        lv_label_set_text(chauffant_bouton_label(ctx->chauffant_valeur[total]), texte_valeur);
+        lv_coord_t y = (lv_coord_t)(total * (CHAUFFANT_LIGNE_HAUTEUR + CHAUFFANT_LIGNE_ECART));
+        lv_obj_set_y(ctx->chauffant_nom[total], y);
+        lv_obj_set_y(ctx->chauffant_valeur[total], y);
         ctx->chauffant_infos[total].est_plateau = true;
         ctx->chauffant_infos[total].indice_extrudeur = 0; /* non utilise, est_plateau=true */
         ctx->chauffant_infos[total].consigne_courante = consigne_u16(e->plateau.consigne);
@@ -804,30 +920,33 @@ static void ecran_accueil_hub_mettre_a_jour(const void *etat, bool donnees_perim
      * l'ancien hub : "naviguer... reste sans danger meme avec un etat
      * perime"). --------------------------------------------------------
      *
-     * Label NOM (tache 5, task-5-brief.md) : SEUL cas ou ce grisage C3 ne
-     * suffit pas seul -- chauffant_nom_cb() (plus haut) grise/degrise CE
-     * MEME label independamment, au clic, selon `serie_visible[]`. Les deux
-     * mecanismes ne doivent JAMAIS s'ecraser l'un l'autre : la regle
-     * (identique cote chauffant_nom_cb()) est
-     *   grise    si (donnees_perimees OU courbe masquee)
-     *   normale  seulement si (fraiches ET courbe visible)
-     * -- appliquee ICI a CHAQUE rafraichissement en relisant
-     * `ctx->serie_visible[]` (que seul un clic fait evoluer, jamais cette
-     * fonction), donc un mettre_a_jour() "frais" ne degrise jamais un nom
-     * dont l'utilisateur a masque la courbe, et un toggle ulterieur reste
-     * grise tant que les donnees restent perimees. `chauffant_valeur[i]`,
-     * lui, N'EST PAS concerne (spec tache 5 : "Do NOT change the VALUE-tap
-     * behaviour") -- il garde la couleur COMMUNE `couleur` ci-dessous, comme
-     * avant cette tache. `ctx->donnees_perimees` est memorise ICI (dernier
-     * argument recu) pour que chauffant_nom_cb() applique la MEME regle
-     * immediatement au clic, sans attendre le prochain appel. -------------- */
+     * Label NOM (tache 5, task-5-brief.md ; couleur de courbe ajoutee dans une
+     * tache de suivi) : SEUL cas ou ce grisage C3 ne suffit pas seul --
+     * chauffant_nom_cb() (plus haut) grise/recolore CE MEME label
+     * independamment, au clic, selon `serie_visible[]`. Les deux mecanismes
+     * ne doivent JAMAIS s'ecraser l'un l'autre : la regle (identique cote
+     * chauffant_nom_cb()) est
+     *   grise                si (donnees_perimees OU courbe masquee)
+     *   couleur de SA courbe seulement si (fraiches ET courbe visible)
+     * (COULEURS_SERIE[s] -- meme mapping que chauffant_info_serie_indice(),
+     * meme tableau que celui qui colore la courbe sur le chart) -- appliquee
+     * ICI a CHAQUE rafraichissement en relisant `ctx->serie_visible[]` (que
+     * seul un clic fait evoluer, jamais cette fonction), donc un
+     * mettre_a_jour() "frais" ne recolore jamais un nom dont l'utilisateur a
+     * masque la courbe, et un toggle ulterieur reste grise tant que les
+     * donnees restent perimees. `chauffant_valeur[i]`, lui, N'EST PAS
+     * concerne (spec tache 5 : "Do NOT change the VALUE-tap behaviour") -- il
+     * garde la couleur COMMUNE `couleur` ci-dessous, comme avant cette tache.
+     * `ctx->donnees_perimees` est memorise ICI (dernier argument recu) pour
+     * que chauffant_nom_cb() applique la MEME regle immediatement au clic,
+     * sans attendre le prochain appel. -------------------------------------- */
     ctx->donnees_perimees = donnees_perimees;
     uint32_t couleur = donnees_perimees ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
     for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
         uint8_t s = chauffant_info_serie_indice(&ctx->chauffant_infos[i]);
-        uint32_t couleur_nom = (donnees_perimees || !ctx->serie_visible[s]) ? COULEUR_GRISE : COULEUR_TEXTE_SECONDAIRE;
-        lv_obj_set_style_text_color(ctx->chauffant_nom[i], lv_color_hex(couleur_nom), 0);
-        lv_obj_set_style_text_color(ctx->chauffant_valeur[i], lv_color_hex(couleur), 0);
+        uint32_t couleur_nom = (donnees_perimees || !ctx->serie_visible[s]) ? COULEUR_GRISE : COULEURS_SERIE[s];
+        lv_obj_set_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[i]), lv_color_hex(couleur_nom), 0);
+        lv_obj_set_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[i]), lv_color_hex(couleur), 0);
     }
     lv_obj_set_style_text_color(ctx->position, lv_color_hex(couleur), 0);
     lv_obj_set_style_text_color(ctx->vitesse_flux, lv_color_hex(couleur), 0);

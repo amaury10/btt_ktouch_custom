@@ -1,7 +1,9 @@
-/* Ecran Accueil-hub (sous-projet "graphes de temperature", tache 3) :
- * reecriture main_panel EN DEUX COLONNES -- a gauche, les lignes de chauffants
- * (nom + valeur) suivies d'un resume compact (position + outil actif,
- * vitesse/flux, mini-progression) puis d'un `lv_chart` d'historique de
+/* Ecran Accueil-hub (sous-projet "graphes de temperature", tache 3 ; lignes de
+ * chauffants affinees en boutons scrollables, tache de suivi) : reecriture
+ * main_panel EN DEUX COLONNES -- a gauche, les lignes de chauffants (nom +
+ * valeur, chacune un BOUTON >= 44px de haut, voir plus bas) dans un conteneur
+ * SCROLLABLE a hauteur fixe, suivies d'un resume compact (position + outil
+ * actif, vitesse/flux, mini-progression) puis d'un `lv_chart` d'historique de
  * temperature ; a droite, la grille de CINQ tuiles de menu (Homing,
  * Temperature, Actions, Configuration, Print). REMPLACE le contenu precedent
  * de ce fichier (resume une colonne + grille 5 cases sous le resume, tache 4
@@ -13,21 +15,48 @@
  * bouge, seul le CONTENU change.
  *
  * Lignes de chauffants (taches 4 et 5 du sous-projet "graphes de
- * temperature", task-4-brief.md/task-5-brief.md) : nom ("T0"/"Bed") et valeur
- * ("actuelle/consigne") sont deux `lv_label_t` DISTINCTS et adjacents, jamais
- * un texte concatene comme l'ancienne ligne de temperatures -- c'est
- * precisement ce qui a permis a la tache 4 de poser LV_OBJ_FLAG_CLICKABLE sur
- * le label VALEUR (chauffant_valeur[i]) SANS retoucher la mise en page, puis
- * a la tache 5 de faire de meme sur le label NOM (chauffant_nom[i]) pour un
- * raccourci DIFFERENT. Taper la VALEUR ouvre le clavier numerique pour
- * editer la consigne de CE chauffant precis -- meme parsing/bornes que
- * ecran_temperatures.c (reference, voir le .c). Taper le NOM bascule
- * l'affichage de la courbe de CE chauffant sur le graphe (`serie_visible[]`
- * ci-dessous) et grise le label NOM quand la courbe est masquee -- voir
+ * temperature", task-4-brief.md/task-5-brief.md, mise en boutons scrollables
+ * dans une tache de suivi) : nom ("T0"/"Bed") et valeur ("actuelle/consigne")
+ * sont deux `lv_button_t` DISTINCTS et adjacents (nom a gauche, valeur a
+ * droite, meme ligne) -- chacun porte un UNIQUE `lv_label_t` enfant, centre
+ * (meme convention que les tuiles de menu `menu_boutons[i]` plus bas : le
+ * texte n'est jamais stocke a part dans le contexte, retrouve via
+ * `lv_obj_get_child(bouton, 0)`, voir chauffant_bouton_label() dans le .c).
+ * `lv_button_create()` pose LV_OBJ_FLAG_CLICKABLE par defaut -- c'est ce qui a
+ * permis a la tache 4 de faire du bouton VALEUR (chauffant_valeur[i]) une
+ * cible de clic SANS code de flag explicite, puis a la tache 5 de faire de
+ * meme sur le bouton NOM (chauffant_nom[i]) pour un raccourci DIFFERENT.
+ * Taper la VALEUR ouvre le clavier numerique pour editer la consigne de CE
+ * chauffant precis -- meme parsing/bornes que ecran_temperatures.c (reference,
+ * voir le .c). Taper le NOM bascule l'affichage de la courbe de CE chauffant
+ * sur le graphe (`serie_visible[]` ci-dessous) et recolore son label -- voir
  * chauffant_nom_cb() dans le .c pour le detail, y compris la reconciliation
  * avec le grisage C3 (donnees perimees). Regler une temperature reste aussi
  * possible via la tuile "Temperature", qui ouvre ECRAN_TEMPERATURES (cible
  * deja cliquable).
+ *
+ * Couleur du NOM (tache de suivi de refinement) : le label NOM prend la
+ * couleur de SA courbe (COULEURS_SERIE[s] dans le .c, meme mapping que
+ * chauffant_info_serie_indice()) quand les donnees sont fraiches ET la courbe
+ * visible, gris (COULEUR_GRISE) sinon (donnees perimees OU courbe masquee) --
+ * meme regle appliquee IDENTIQUEMENT dans mettre_a_jour() (a chaque
+ * rafraichissement) et chauffant_nom_cb() (immediatement au clic, voir le .c).
+ * Le label VALEUR, lui, garde sa couleur commune (primaire/grise selon
+ * `donnees_perimees` uniquement) -- inchange par cette regle.
+ *
+ * Pool scrollable (tache de suivi) : `chauffant_nom[]`/`chauffant_valeur[]`
+ * sont dimensionnes pour TOUS les chauffants possibles
+ * (ECRAN_ACCUEIL_HUB_HEATER_LIGNES == KLIPPER_HISTO_SERIES == 9 : 8 extrudeurs
+ * + plateau), portes par `zone_chauffants`, un conteneur LV_OBJ_FLAG_SCROLLABLE
+ * a HAUTEUR FIXE (assez pour ~2 lignes-boutons, voir CHAUFFANTS_ZONE_HAUTEUR
+ * dans le .c) -- les chauffants PRESENTS occupent les lignes 0..total-1 de
+ * facon CONTIGUE (repositionnees a chaque mettre_a_jour(), voir son
+ * commentaire dans le .c), les lignes au-dela sont masquees
+ * (LV_OBJ_FLAG_HIDDEN) et ne laissent AUCUN trou de defilement -- LVGL
+ * n'inclut jamais un enfant LV_OBJ_FLAG_HIDDEN dans l'etendue scrollable
+ * (voir lv_obj_get_scroll_bottom(), managed_components/lvgl__lvgl/src/core/
+ * lv_obj_scroll.c), donc masquer suffit, aucun repositionnement des lignes
+ * masquees n'est necessaire pour eviter un trou.
  *
  * Le graphe (`chart`) lit exclusivement klipper_temp_historique.h (tache 1 du
  * meme sous-projet) : jamais de copie du tampon circulaire entier, voir
@@ -37,8 +66,9 @@
  * les autres ecrans KlipperScreen de ce dossier : host-test/tests/
  * test_ecran_accueil_hub.c relit les libelles/couleurs/pointeurs de serie via
  * lv_label_get_text()/lv_obj_get_style_text_color()/lv_chart_get_y_array()
- * pour prouver ce que construire()/mettre_a_jour() ecrivent sans jamais
- * regarder un pixel. */
+ * (sur le label ENFANT pour les lignes de chauffants, voir plus haut) pour
+ * prouver ce que construire()/mettre_a_jour() ecrivent sans jamais regarder un
+ * pixel. */
 #pragma once
 
 #include <stdbool.h>
@@ -49,15 +79,18 @@
 #include "klipper_temp_historique.h" /* KLIPPER_HISTO_SERIES */
 #include "lvgl.h"
 
-/* Nombre de lignes de chauffants visibles a gauche -- bornage delibere (le
- * detail complet, jusqu'a KLIPPER_EXTRUDEURS_MAX+1 = 9 chauffants, reste
- * derriere la tuile "Temperature" qui ouvre ECRAN_TEMPERATURES). 3 couvre
- * exactement les machines de validation reelles de ce depot (CR-10 S5 :
- * 1 extrudeur + plateau = 2 ; Snapmaker U1 : jusqu'a 4 extrudeurs, dont les
- * 2-3 premiers restent visibles ici) sans faire deborder la colonne gauche du
- * budget vertical disponible au-dessus du bandeau de notification (voir
- * ZONE_CONTENU_MAX dans ecran_accueil_hub.c). */
-#define ECRAN_ACCUEIL_HUB_HEATER_LIGNES 3
+/* Taille du POOL de lignes de chauffants (tache de suivi de refinement) --
+ * PLUS un bornage a "3 lignes visibles" (ancien comportement, historique
+ * git) : chaque chauffant possible a sa ligne-bouton PROPRE dans le pool,
+ * KLIPPER_HISTO_SERIES == KLIPPER_EXTRUDEURS_MAX+1 == 9 (8 extrudeurs +
+ * plateau, reutilise plutot que recopie -- meme mapping FIXE que
+ * klipper_temp_historique.h). Le pool entier existe TOUJOURS ; c'est
+ * `zone_chauffants` (conteneur scrollable a hauteur fixe, voir plus bas) qui
+ * borne combien de lignes sont visibles SANS defiler -- au-dela, l'utilisateur
+ * fait defiler au lieu de perdre l'acces aux chauffants restants (l'ancien
+ * bornage a 3 les rendait invisibles, accessibles seulement via la tuile
+ * "Temperature"). */
+#define ECRAN_ACCUEIL_HUB_HEATER_LIGNES KLIPPER_HISTO_SERIES
 
 /* Grille de 5 tuiles de menu, ORDRE FIXE -- table verbatim de
  * task-4-brief.md (refonte IHM KlipperScreen) : Homing -> ECRAN_HOMING,
@@ -97,17 +130,24 @@ typedef struct {
 
 typedef struct ecran_accueil_hub_ctx_s {
     /* --- colonne gauche : lignes de chauffants -- `chauffant_nom[i]`/
-     * `chauffant_valeur[i]` sont TOUJOURS la paire de la ligne `i`, masquee
-     * (LV_OBJ_FLAG_HIDDEN) si moins de ECRAN_ACCUEIL_HUB_HEATER_LIGNES
-     * chauffants sont presents. `chauffant_valeur[i]` (tache 4) ET
-     * `chauffant_nom[i]` (tache 5) sont TOUS DEUX CLIQUABLES, voir le
-     * commentaire de tete ci-dessus -- `chauffant_infos[i]` est le tableau
-     * parallele (meme indice `i`) que les DEUX rappels de clic relisent
-     * (chauffant_valeur_cb() pour la consigne, chauffant_nom_cb() pour
-     * l'indice de serie du graphe, voir chauffant_info_serie_indice() dans
-     * le .c). ---------------------------------------------------------- */
-    lv_obj_t *chauffant_nom[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];    /* "T0"/"T1"/"Bed" */
-    lv_obj_t *chauffant_valeur[ECRAN_ACCUEIL_HUB_HEATER_LIGNES]; /* "205.0/210.0" */
+     * `chauffant_valeur[i]` sont TOUJOURS la paire de BOUTONS de la ligne `i`
+     * (chacun un `lv_button_t` avec un unique `lv_label_t` enfant centre, voir
+     * le commentaire de tete du .h), masquee (LV_OBJ_FLAG_HIDDEN) au-dela du
+     * nombre de chauffants reellement PRESENTS -- les lignes presentes sont
+     * repositionnees de facon CONTIGUE (0..total-1) a chaque
+     * mettre_a_jour(), voir son commentaire dans le .c. `zone_chauffants` est
+     * le conteneur SCROLLABLE a hauteur fixe qui les porte (LV_DIR_VER,
+     * LV_SCROLLBAR_MODE_AUTO) -- le CHART/le resume/la grille de menu
+     * n'en font pas partie. `chauffant_valeur[i]` (tache 4) ET
+     * `chauffant_nom[i]` (tache 5) sont TOUS DEUX CLIQUABLES (lv_button_create()
+     * pose LV_OBJ_FLAG_CLICKABLE par defaut) -- `chauffant_infos[i]` est le
+     * tableau parallele (meme indice `i`) que les DEUX rappels de clic
+     * relisent (chauffant_valeur_cb() pour la consigne, chauffant_nom_cb()
+     * pour l'indice de serie du graphe, voir chauffant_info_serie_indice()
+     * dans le .c). ---------------------------------------------------------- */
+    lv_obj_t *zone_chauffants; /* conteneur scrollable, parent de tout le pool ci-dessous */
+    lv_obj_t *chauffant_nom[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];    /* bouton "T0"/"T1"/"Bed" */
+    lv_obj_t *chauffant_valeur[ECRAN_ACCUEIL_HUB_HEATER_LIGNES]; /* bouton "205.0/210.0" */
     ecran_accueil_hub_chauffant_info_t chauffant_infos[ECRAN_ACCUEIL_HUB_HEATER_LIGNES];
 
     /* --- colonne gauche : resume compact, trois lignes empilees sous les
@@ -144,9 +184,10 @@ typedef struct ecran_accueil_hub_ctx_s {
      * `donnees_perimees` recu par mettre_a_jour() -- necessaire pour que
      * chauffant_nom_cb() (le .c) puisse reconcilier le grisage C3 (donnees
      * perimees) avec ce toggle SANS attendre le prochain mettre_a_jour() :
-     * la couleur du label NOM doit rester grise si perime OU masque, normale
-     * seulement si frais ET visible -- voir le commentaire complet dans le
-     * .c (chauffant_nom_cb() et la boucle de grisage de mettre_a_jour()). */
+     * la couleur du label NOM doit rester grise si perime OU masque, celle de
+     * SA courbe (COULEURS_SERIE[s]) seulement si frais ET visible -- voir le
+     * commentaire complet dans le .c (chauffant_nom_cb() et la boucle de
+     * grisage de mettre_a_jour()). */
     bool serie_visible[KLIPPER_HISTO_SERIES];
     bool donnees_perimees;
 

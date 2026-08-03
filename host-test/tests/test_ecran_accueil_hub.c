@@ -72,6 +72,19 @@ static lv_obj_t *enfant_de_classe(lv_obj_t *parent, const lv_obj_class_t *classe
     return NULL;
 }
 
+/* Retrouve le `lv_label_t` enfant d'UN bouton de ligne de chauffant (NOM ou
+ * VALEUR) -- copie locale de chauffant_bouton_label() (ecran_accueil_hub.c,
+ * prive a ce fichier) : depuis la tache de suivi "chauffants en boutons",
+ * `ctx->chauffant_nom[i]`/`ctx->chauffant_valeur[i]` sont des BOUTONS, le
+ * texte/la couleur relus par ce test vivent sur leur UNIQUE label enfant,
+ * jamais sur le bouton lui-meme -- meme convention que
+ * `lv_obj_get_child(ctx->menu_boutons[...], 0)` deja utilise plus bas pour
+ * les tuiles de menu. */
+static lv_obj_t *chauffant_bouton_label(lv_obj_t *bouton)
+{
+    return lv_obj_get_child(bouton, 0);
+}
+
 void suite_ecran_accueil_hub(void)
 {
     printf("suite : ecran accueil hub (main_panel, deux colonnes + graphe)\n");
@@ -132,9 +145,24 @@ void suite_ecran_accueil_hub(void)
     ECRAN_ACCUEIL_HUB.construire(parent, ctx);
 
     /* --- tous les widgets sont crees ------------------------------------ */
+    VERIFIER(ctx->zone_chauffants != NULL);
+    /* Conteneur SCROLLABLE (spec de ce refinement : "with a visible
+     * scrollbar") -- verifie ici le flag SEUL, jamais un pixel (voir le
+     * commentaire de tete du fichier) ; le defilement vertical proprement dit
+     * (LV_DIR_VER) et le mode de barre (LV_SCROLLBAR_MODE_AUTO) sont du
+     * ressort de construire()/ecran_accueil_hub.c, non re-verifies ici. ---- */
+    VERIFIER(lv_obj_has_flag(ctx->zone_chauffants, LV_OBJ_FLAG_SCROLLABLE));
     for (int i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
         VERIFIER(ctx->chauffant_nom[i] != NULL);
         VERIFIER(ctx->chauffant_valeur[i] != NULL);
+        /* Chaque bouton NOM/VALEUR est cliquable (lv_button_create() le pose
+         * par defaut) et porte un UNIQUE label enfant (chauffant_bouton_label(),
+         * jamais NULL) -- verifie pour TOUT le pool, pas seulement les lignes
+         * presentes dans l'etat de test ci-dessous. */
+        VERIFIER(lv_obj_has_flag(ctx->chauffant_nom[i], LV_OBJ_FLAG_CLICKABLE));
+        VERIFIER(lv_obj_has_flag(ctx->chauffant_valeur[i], LV_OBJ_FLAG_CLICKABLE));
+        VERIFIER(chauffant_bouton_label(ctx->chauffant_nom[i]) != NULL);
+        VERIFIER(chauffant_bouton_label(ctx->chauffant_valeur[i]) != NULL);
     }
     VERIFIER(ctx->position != NULL);
     VERIFIER(ctx->vitesse_flux != NULL);
@@ -163,15 +191,25 @@ void suite_ecran_accueil_hub(void)
 
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
 
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_nom[0]), "T0");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_valeur[0]), "205.0/210.0");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_nom[1]), "T1");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_valeur[1]), "45.0/0.0");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_nom[2]), "Bed");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_valeur[2]), "59.5/60.0");
-    for (int i = 0; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_nom[0])), "T0");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_valeur[0])), "205.0/210.0");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_nom[1])), "T1");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_valeur[1])), "45.0/0.0");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_nom[2])), "Bed");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_valeur[2])), "59.5/60.0");
+    /* 3 chauffants presents dans `etat` (T0, T1, Bed) -- lignes 0..2
+     * demasquees et CONTIGUES (voir la repositionnement contigu de
+     * mettre_a_jour(), commentaire dans le .c), lignes 3..HEATER_LIGNES-1
+     * (jusqu'a 9) restees masquees -- c'est PRECISEMENT ce qui garantit
+     * l'absence de trou de defilement dans zone_chauffants (voir le
+     * commentaire de tete du .h). */
+    for (int i = 0; i < 3; i++) {
         VERIFIER(!lv_obj_has_flag(ctx->chauffant_nom[i], LV_OBJ_FLAG_HIDDEN));
         VERIFIER(!lv_obj_has_flag(ctx->chauffant_valeur[i], LV_OBJ_FLAG_HIDDEN));
+    }
+    for (int i = 3; i < ECRAN_ACCUEIL_HUB_HEATER_LIGNES; i++) {
+        VERIFIER(lv_obj_has_flag(ctx->chauffant_nom[i], LV_OBJ_FLAG_HIDDEN));
+        VERIFIER(lv_obj_has_flag(ctx->chauffant_valeur[i], LV_OBJ_FLAG_HIDDEN));
     }
     VERIFIER_TEXTE(lv_label_get_text(ctx->position), "X:10.0 Y:20.0 Z:5.0  T0");
     VERIFIER_TEXTE(lv_label_get_text(ctx->vitesse_flux), "Speed: 100%  Flow: 95%");
@@ -257,51 +295,68 @@ void suite_ecran_accueil_hub(void)
     VERIFIER(dernier_enfant_calque_superieur() == NULL);
 
     /* ---------------------------------------------------------------------
-     * Tache 5 (task-5-brief.md) : taper le label NOM d'une ligne de
-     * chauffant bascule l'affichage de sa courbe sur le graphe et grise/
-     * degrise le label -- verifie via l'etat ctx->serie_visible[] maintenu
-     * PLUS la couleur resolue du label (option explicitement offerte par le
+     * Tache 5 (task-5-brief.md) : taper le bouton NOM d'une ligne de
+     * chauffant bascule l'affichage de sa courbe sur le graphe et recolore
+     * son label -- verifie via l'etat ctx->serie_visible[] maintenu PLUS la
+     * couleur resolue du label enfant (option explicitement offerte par le
      * brief : l'API publique LVGL n'expose pas le champ prive `hidden` de
      * lv_chart_series_t, lv_chart_hide_series() ne rend rien). serie_visible[0]
      * correspond a T0 (mapping FIXE de klipper_temp_historique.h, ligne 0 de
-     * cet etat de test). ------------------------------------------------- */
+     * cet etat de test). `couleur_serie_t0` (0xEF4444) est une copie LOCALE
+     * de COULEURS_SERIE[0] (ecran_accueil_hub.c, prive/static -- jamais
+     * exportee) -- meme convention que 0x6B7280 (COULEUR_GRISE) deja
+     * duplique en dur dans ce fichier juste en dessous : ce test verifie une
+     * COULEUR CONCRETE, pas seulement "differente du gris" (spec de ce
+     * refinement : "the NAME text color equals COULEURS_SERIE[s] when
+     * fresh+visible"). ------------------------------------------------- */
+    const uint32_t couleur_serie_t0 = 0xEF4444;
     VERIFIER(ctx->serie_visible[0] == true);
-    lv_color_t couleur_nom_avant = lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0);
+    lv_color_t couleur_nom_avant = lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0);
     VERIFIER(!lv_color_eq(couleur_nom_avant, lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(couleur_nom_avant, lv_color_hex(couleur_serie_t0)));
 
     /* --- (a) premier clic : masque la courbe, grise le nom, IMMEDIATEMENT
      * (sans mettre_a_jour() intermediaire). --------------------------------- */
     lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL);
     VERIFIER(ctx->serie_visible[0] == false);
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(0x6B7280)));
 
-    /* --- (b) reclic : reaffiche la courbe, degrise le nom -- round-trip. -- */
+    /* --- (b) reclic : reaffiche la courbe, redonne au nom la couleur de SA
+     * courbe -- round-trip. -------------------------------------------------- */
     lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL);
     VERIFIER(ctx->serie_visible[0] == true);
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(couleur_serie_t0)));
 
     /* --- (c) reconciliation avec le grisage C3 : masquer la courbe puis
-     * appeler mettre_a_jour() avec des donnees FRAICHES ne doit PAS degriser
-     * le nom -- le toggle utilisateur reste prioritaire sur des donnees
-     * fraiches (voir le commentaire de mettre_a_jour()/chauffant_nom_cb()
-     * dans le .c pour la regle complete). La VALEUR, elle, N'EST PAS grisee
-     * (spec tache 5 : seul le NOM reagit au toggle de courbe). -------------- */
+     * appeler mettre_a_jour() avec des donnees FRAICHES ne doit PAS
+     * recolorer le nom -- le toggle utilisateur reste prioritaire sur des
+     * donnees fraiches (voir le commentaire de mettre_a_jour()/
+     * chauffant_nom_cb() dans le .c pour la regle complete). La VALEUR,
+     * elle, N'EST PAS grisee (spec tache 5 : seul le NOM reagit au toggle de
+     * courbe). --------------------------------------------------------- */
     lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL); /* masque de nouveau */
     VERIFIER(ctx->serie_visible[0] == false);
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
     VERIFIER(ctx->serie_visible[0] == false);
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_valeur[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(0x6B7280)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[0]), 0),
+                           lv_color_hex(0x6B7280)));
 
     /* --- (d) l'autre sens de la reconciliation : donnees perimees grise le
-     * nom MEME quand la courbe est visible, et redevient normal des que les
-     * donnees redeviennent fraiches ET que la courbe est restee visible. --- */
+     * nom MEME quand la courbe est visible, et redevient la couleur de SA
+     * courbe des que les donnees redeviennent fraiches ET que la courbe est
+     * restee visible. ----------------------------------------------------- */
     lv_obj_send_event(ctx->chauffant_nom[0], LV_EVENT_CLICKED, NULL); /* re-affiche la courbe */
     VERIFIER(ctx->serie_visible[0] == true);
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, true, ctx);
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(0x6B7280)));
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(couleur_serie_t0)));
 
     /* --- 1 seul extrudeur present : la ligne T1 disparait (masquee, jamais
      * juste videe), Bed glisse en ligne 1. -------------------------------- */
@@ -309,8 +364,8 @@ void suite_ecran_accueil_hub(void)
     etat_mono.nb_extrudeurs = 1;
     etat_mono.extrudeurs[1].presente = false;
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat_mono, false, ctx);
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_nom[0]), "T0");
-    VERIFIER_TEXTE(lv_label_get_text(ctx->chauffant_nom[1]), "Bed");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_nom[0])), "T0");
+    VERIFIER_TEXTE(lv_label_get_text(chauffant_bouton_label(ctx->chauffant_nom[1])), "Bed");
     VERIFIER(!lv_obj_has_flag(ctx->chauffant_nom[1], LV_OBJ_FLAG_HIDDEN));
     VERIFIER(lv_obj_has_flag(ctx->chauffant_nom[2], LV_OBJ_FLAG_HIDDEN));
     VERIFIER(lv_obj_has_flag(ctx->chauffant_valeur[2], LV_OBJ_FLAG_HIDDEN));
@@ -334,16 +389,20 @@ void suite_ecran_accueil_hub(void)
     lv_color_t couleur_tuile_avant = lv_obj_get_style_text_color(label_tuile_homing, 0);
 
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, true, ctx);
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
-    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_valeur[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[0]), 0),
+                          lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->position, 0), lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->vitesse_flux, 0), lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(ctx->progression, 0), lv_color_hex(0x6B7280)));
     VERIFIER(lv_color_eq(lv_obj_get_style_text_color(label_tuile_homing, 0), couleur_tuile_avant));
 
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_nom[0], 0), lv_color_hex(0x6B7280)));
-    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->chauffant_valeur[0], 0), lv_color_hex(0x6B7280)));
+    VERIFIER(lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_nom[0]), 0),
+                          lv_color_hex(couleur_serie_t0)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(chauffant_bouton_label(ctx->chauffant_valeur[0]), 0),
+                           lv_color_hex(0x6B7280)));
     VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->position, 0), lv_color_hex(0x6B7280)));
     VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->vitesse_flux, 0), lv_color_hex(0x6B7280)));
     VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->progression, 0), lv_color_hex(0x6B7280)));
@@ -439,9 +498,19 @@ void suite_ecran_accueil_hub(void)
     lv_obj_t *ecran = lv_screen_active();
     lv_obj_t *conteneur = lv_obj_get_child(ecran, lv_obj_get_child_count(ecran) - 1);
     VERIFIER(conteneur != NULL);
-    /* (ECRAN_ACCUEIL_HUB_HEATER_LIGNES * 2) paires nom+valeur + 3 lignes de
-     * resume + 1 chart + 1 zone_menu. */
-    VERIFIER(lv_obj_get_child_count(conteneur) == (uint32_t)(ECRAN_ACCUEIL_HUB_HEATER_LIGNES * 2 + 3 + 1 + 1));
+    /* 1 zone_chauffants (le pool entier de lignes-boutons vit DEDANS, voir
+     * plus bas) + 3 lignes de resume (position/vitesse_flux/progression) +
+     * 1 chart + 1 zone_menu = 6 -- depuis la tache de suivi "chauffants en
+     * boutons scrollables", les lignes de chauffants ne sont PLUS des
+     * enfants directs de `conteneur` (elles l'etaient quand nom/valeur
+     * etaient des lv_label_t nus). */
+    VERIFIER(lv_obj_get_child_count(conteneur) == 6u);
+    lv_obj_t *zone_chauffants = lv_obj_get_child(conteneur, 0);
+    VERIFIER(zone_chauffants != NULL);
+    /* (ECRAN_ACCUEIL_HUB_HEATER_LIGNES * 2) boutons nom+valeur, pool entier
+     * (present ou non -- masque, jamais retire, voir le commentaire de tete
+     * du .h). */
+    VERIFIER(lv_obj_get_child_count(zone_chauffants) == (uint32_t)(ECRAN_ACCUEIL_HUB_HEATER_LIGNES * 2));
     lv_obj_t *zone_menu = lv_obj_get_child(conteneur, lv_obj_get_child_count(conteneur) - 1);
     VERIFIER(zone_menu != NULL);
     VERIFIER(lv_obj_get_child_count(zone_menu) == ECRAN_ACCUEIL_HUB_MENU_NB);
