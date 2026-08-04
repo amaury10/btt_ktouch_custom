@@ -913,6 +913,160 @@ bool rpc_lire_fichiers(klipper_fichiers_t *dest, const char *json, size_t longue
 }
 
 /* ------------------------------------------------------------------------
+ * Miniatures gcode (feature "Miniatures gcode", tache A)
+ * ---------------------------------------------------------------------- */
+
+/* Extrait un candidat (largeur, hauteur, relative_path) d'un element du
+ * tableau "thumbnails" -- poison PAR ELEMENT (meme esprit que
+ * traiter_candidat_fichier() plus haut) : rend false si `item` n'est pas un
+ * objet, si "width"/"height" ne sont pas des nombres finis STRICTEMENT
+ * positifs, ou si "relative_path" n'est pas une chaine non vide. `*largeur`/
+ * `*hauteur`/`*relatif` ne sont ecrits QUE si la fonction rend true.
+ * `*relatif` pointe DANS l'arbre cJSON de l'appelant (racine) -- valide
+ * uniquement tant que celui-ci n'est pas detruit, exactement comme
+ * `item->valuestring` ailleurs dans ce fichier. */
+static bool lire_candidat_miniature(const cJSON *item, int32_t *largeur,
+                                    int32_t *hauteur, const char **relatif)
+{
+    if (!cJSON_IsObject(item)) {
+        return false;
+    }
+
+    double w, h;
+    if (!valeur_double_finie(cJSON_GetObjectItemCaseSensitive(item, "width"), &w) || w <= 0.0) {
+        return false;
+    }
+    if (!valeur_double_finie(cJSON_GetObjectItemCaseSensitive(item, "height"), &h) || h <= 0.0) {
+        return false;
+    }
+    const cJSON *rp = cJSON_GetObjectItemCaseSensitive(item, "relative_path");
+    if (!cJSON_IsString(rp) || rp->valuestring == NULL || rp->valuestring[0] == '\0') {
+        return false;
+    }
+
+    int32_t w_i, h_i;
+    /* w/h deja verifies finis et > 0 ci-dessus : double_vers_i32_borne() ne
+     * peut donc rendre false ici -- clamp defensif quand meme, meme
+     * discipline que le reste du fichier, plutot que de supposer. */
+    if (!double_vers_i32_borne(w, &w_i) || !double_vers_i32_borne(h, &h_i)) {
+        return false;
+    }
+
+    *largeur = w_i;
+    *hauteur = h_i;
+    *relatif = rp->valuestring;
+    return true;
+}
+
+bool rpc_lire_miniature(char *chemin_dest, size_t chemin_n, int *w_out, int *h_out,
+                        const char *json, size_t n, int largeur_max)
+{
+    if (chemin_dest == NULL || chemin_n == 0 || w_out == NULL || h_out == NULL ||
+        json == NULL || n == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, n);
+    if (racine == NULL || !cJSON_IsObject(racine)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    const cJSON *thumbnails = cJSON_GetObjectItemCaseSensitive(resultat, "thumbnails");
+    if (!cJSON_IsArray(thumbnails)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Deux candidats retenus au fil du parcours : le meilleur <= largeur_max
+     * (largeur la plus GRANDE parmi ceux-la) et, en repli, le plus PETIT
+     * disponible tout court. Egalite de largeur => le PREMIER rencontre
+     * l'emporte (comparaison stricte > / < ci-dessous, jamais >= / <=) --
+     * choix deterministe documente dans moonraker_rpc.h. */
+    bool a_leq = false;
+    int32_t leq_w = 0, leq_h = 0;
+    const char *leq_rel = NULL;
+
+    bool a_min = false;
+    int32_t min_w = 0, min_h = 0;
+    const char *min_rel = NULL;
+
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, thumbnails) {
+        int32_t w, h;
+        const char *rel;
+        if (!lire_candidat_miniature(item, &w, &h, &rel)) {
+            continue;
+        }
+        if (w <= largeur_max && (!a_leq || w > leq_w)) {
+            a_leq = true;
+            leq_w = w;
+            leq_h = h;
+            leq_rel = rel;
+        }
+        if (!a_min || w < min_w) {
+            a_min = true;
+            min_w = w;
+            min_h = h;
+            min_rel = rel;
+        }
+    }
+
+    if (!a_leq && !a_min) {
+        /* Aucun element du tableau n'etait un candidat exploitable (tableau
+         * vide, ou uniquement des elements malformes). */
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    int32_t choix_w = a_leq ? leq_w : min_w;
+    int32_t choix_h = a_leq ? leq_h : min_h;
+    const char *choix_rel = a_leq ? leq_rel : min_rel;
+
+    /* Tronque proprement (UTF-8-safe) si `chemin_n` est trop petit --
+     * CONTRAIREMENT a rpc_lire_fichiers()/rpc_lire_macros() (nom trop long =
+     * ignore) : voir le commentaire de rpc_lire_miniature() dans
+     * moonraker_rpc.h pour pourquoi la troncature est sans danger ici (un
+     * simple segment d'URL, jamais confondu avec une AUTRE entree). */
+    copier_texte_utf8_borne(choix_rel, chemin_dest, chemin_n);
+    *w_out = (int)choix_w;
+    *h_out = (int)choix_h;
+
+    cJSON_Delete(racine);
+    return true;
+}
+
+size_t miniature_construire_chemin(char *dest, size_t n, const char *gcode_chemin,
+                                   const char *relative_path)
+{
+    if (gcode_chemin == NULL) {
+        gcode_chemin = "";
+    }
+    if (relative_path == NULL) {
+        relative_path = "";
+    }
+
+    const char *dernier_slash = strrchr(gcode_chemin, '/');
+    int ecrit;
+    if (dernier_slash != NULL) {
+        int len_dossier = (int)(dernier_slash - gcode_chemin);
+        ecrit = snprintf(dest, n, "%.*s/%s", len_dossier, gcode_chemin, relative_path);
+    } else {
+        /* gcode_chemin a la racine "gcodes" (aucun '/') : rien a prefixer,
+         * le dossier du fichier EST la racine -- voir moonraker_rpc.h. */
+        ecrit = snprintf(dest, n, "%s", relative_path);
+    }
+    /* snprintf() rend la longueur qui AURAIT ete ecrite meme au-dela de `n`
+     * (contrat standard) -- c'est exactement le contrat "a la snprintf()"
+     * documente dans moonraker_rpc.h, donc rendu tel quel a l'appelant. Un
+     * echec de formattage (ecrit < 0) ne devrait jamais arriver avec ces
+     * formats simples ; borne quand meme a 0 plutot que de rendre une valeur
+     * negative convertie en size_t enorme. */
+    return (ecrit < 0) ? 0 : (size_t)ecrit;
+}
+
+/* ------------------------------------------------------------------------
  * Prises Moonraker (machine.device_power.*)
  * ---------------------------------------------------------------------- */
 

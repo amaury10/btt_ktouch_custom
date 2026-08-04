@@ -1041,6 +1041,279 @@ static void section_lire_fichiers(void)
     }
 }
 
+/* --- rpc_lire_miniature (feature "Miniatures gcode", tache A) -------------
+ * `json` porte le message COMPLET (avec enveloppe "result"), meme convention
+ * que rpc_lire_fichiers() ci-dessus -- voir moonraker_rpc.h. */
+
+static void section_lire_miniature(void)
+{
+    /* nominal : une seule miniature, largeur dans la limite */
+    {
+        char chemin[64];
+        int w = -1, h = -1;
+        static const char *UNE =
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"thumbnails\":["
+            "{\"width\":300,\"height\":300,\"size\":1234,\"relative_path\":\".thumbs/piece-300x300.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, UNE, strlen(UNE), 400));
+        VERIFIER_TEXTE(chemin, ".thumbs/piece-300x300.png");
+        VERIFIER(w == 300);
+        VERIFIER(h == 300);
+    }
+
+    /* N miniatures : choisit la plus GRANDE <= largeur_max, pas la premiere
+     * ni la derniere du tableau */
+    {
+        char chemin[64];
+        int w = -1, h = -1;
+        static const char *TROIS =
+            "{\"result\":{\"thumbnails\":["
+            "{\"width\":100,\"height\":100,\"relative_path\":\"p100.png\"},"
+            "{\"width\":400,\"height\":400,\"relative_path\":\"p400.png\"},"
+            "{\"width\":200,\"height\":200,\"relative_path\":\"p200.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, TROIS, strlen(TROIS), 250));
+        VERIFIER_TEXTE(chemin, "p200.png");
+        VERIFIER(w == 200);
+        VERIFIER(h == 200);
+    }
+
+    /* repli sur la plus PETITE quand aucune n'est <= largeur_max */
+    {
+        char chemin[64];
+        int w = -1, h = -1;
+        static const char *TROIS =
+            "{\"result\":{\"thumbnails\":["
+            "{\"width\":300,\"height\":300,\"relative_path\":\"p300.png\"},"
+            "{\"width\":500,\"height\":500,\"relative_path\":\"p500.png\"},"
+            "{\"width\":400,\"height\":400,\"relative_path\":\"p400.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, TROIS, strlen(TROIS), 100));
+        VERIFIER_TEXTE(chemin, "p300.png");
+        VERIFIER(w == 300);
+    }
+
+    /* tailles egales <= max : le PREMIER rencontre l'emporte */
+    {
+        char chemin[64];
+        int w = -1, h = -1;
+        static const char *EGALES =
+            "{\"result\":{\"thumbnails\":["
+            "{\"width\":200,\"height\":200,\"relative_path\":\"a.png\"},"
+            "{\"width\":200,\"height\":200,\"relative_path\":\"b.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, EGALES, strlen(EGALES), 300));
+        VERIFIER_TEXTE(chemin, "a.png");
+    }
+
+    /* tailles egales, toutes au-dela de largeur_max (repli) : le PREMIER
+     * rencontre l'emporte aussi pour le repli */
+    {
+        char chemin[64];
+        int w = -1, h = -1;
+        static const char *EGALES =
+            "{\"result\":{\"thumbnails\":["
+            "{\"width\":200,\"height\":200,\"relative_path\":\"a.png\"},"
+            "{\"width\":200,\"height\":200,\"relative_path\":\"b.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, EGALES, strlen(EGALES), 50));
+        VERIFIER_TEXTE(chemin, "a.png");
+    }
+
+    /* element malforme au milieu du tableau : ignore, le reste continue
+     * d'etre examine (poison par element, meme esprit que
+     * traiter_candidat_fichier()) */
+    {
+        char chemin[64];
+        int w = -1, h = -1;
+        static const char *POISON =
+            "{\"result\":{\"thumbnails\":["
+            "42,"
+            "\"pas un objet\","
+            "{\"height\":100,\"relative_path\":\"sans-largeur.png\"},"
+            "{\"width\":0,\"height\":100,\"relative_path\":\"largeur-nulle.png\"},"
+            "{\"width\":-50,\"height\":100,\"relative_path\":\"largeur-negative.png\"},"
+            "{\"width\":100,\"height\":100,\"relative_path\":\"\"},"
+            "{\"width\":150,\"height\":150,\"relative_path\":\"bonne.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, POISON, strlen(POISON), 400));
+        VERIFIER_TEXTE(chemin, "bonne.png");
+        VERIFIER(w == 150);
+        VERIFIER(h == 150);
+    }
+
+    /* chemin_dest trop petit : tronque proprement, rend quand meme true
+     * (contrairement a rpc_lire_fichiers ou un nom trop long est ignore --
+     * ici un simple segment d'URL, voir moonraker_rpc.h) */
+    {
+        char petit[6];
+        int w = -1, h = -1;
+        static const char *LONG =
+            "{\"result\":{\"thumbnails\":["
+            "{\"width\":300,\"height\":300,\"relative_path\":\".thumbs/nom-bien-plus-long-que-le-tampon.png\"}"
+            "]}}";
+        VERIFIER(rpc_lire_miniature(petit, sizeof(petit), &w, &h, LONG, strlen(LONG), 400));
+        VERIFIER(strlen(petit) <= 5);
+        VERIFIER_TEXTE(petit, ".thum");
+        VERIFIER(w == 300);
+    }
+
+    /* 0 miniature : tableau vide => false, sorties INTACTES */
+    {
+        char chemin[64];
+        strcpy(chemin, "sentinelle");
+        int w = -1, h = -2;
+        static const char *VIDE = "{\"result\":{\"thumbnails\":[]}}";
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, VIDE, strlen(VIDE), 400));
+        VERIFIER_TEXTE(chemin, "sentinelle");
+        VERIFIER(w == -1);
+        VERIFIER(h == -2);
+    }
+
+    /* thumbnails absent => false */
+    {
+        char chemin[64];
+        strcpy(chemin, "sentinelle");
+        int w = -1, h = -2;
+        static const char *SANS_THUMBS = "{\"result\":{\"size\":10}}";
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, SANS_THUMBS, strlen(SANS_THUMBS), 400));
+        VERIFIER_TEXTE(chemin, "sentinelle");
+        VERIFIER(w == -1);
+        VERIFIER(h == -2);
+    }
+
+    /* thumbnails pas un tableau => false */
+    {
+        char chemin[64];
+        strcpy(chemin, "sentinelle");
+        int w = -1, h = -2;
+        static const char *PAS_TABLEAU = "{\"result\":{\"thumbnails\":{\"a\":1}}}";
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, PAS_TABLEAU, strlen(PAS_TABLEAU), 400));
+        VERIFIER_TEXTE(chemin, "sentinelle");
+    }
+
+    /* result absent => false */
+    {
+        char chemin[64];
+        strcpy(chemin, "sentinelle");
+        int w = -1, h = -2;
+        static const char *SANS_RESULT = "{\"id\":1}";
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, SANS_RESULT, strlen(SANS_RESULT), 400));
+        VERIFIER_TEXTE(chemin, "sentinelle");
+    }
+
+    /* tous les elements malformes => false, sorties intactes */
+    {
+        char chemin[64];
+        strcpy(chemin, "sentinelle");
+        int w = -1, h = -2;
+        static const char *TOUT_POISON =
+            "{\"result\":{\"thumbnails\":[42,\"x\",{\"width\":0,\"relative_path\":\"a.png\"}]}}";
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, TOUT_POISON, strlen(TOUT_POISON), 400));
+        VERIFIER_TEXTE(chemin, "sentinelle");
+        VERIFIER(w == -1);
+        VERIFIER(h == -2);
+    }
+
+    /* JSON illisible => false */
+    {
+        char chemin[64];
+        strcpy(chemin, "sentinelle");
+        int w = -1, h = -2;
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, "pas du json", 11, 400));
+        VERIFIER_TEXTE(chemin, "sentinelle");
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, "", 0, 400));
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, &h, NULL, 0, 400));
+    }
+
+    /* entrees NULL / tailles nulles => false, jamais de dereferencement */
+    {
+        char chemin[64];
+        int w, h;
+        static const char *UNE =
+            "{\"result\":{\"thumbnails\":[{\"width\":100,\"height\":100,\"relative_path\":\"a.png\"}]}}";
+        VERIFIER(!rpc_lire_miniature(NULL, sizeof(chemin), &w, &h, UNE, strlen(UNE), 400));
+        VERIFIER(!rpc_lire_miniature(chemin, 0, &w, &h, UNE, strlen(UNE), 400));
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), NULL, &h, UNE, strlen(UNE), 400));
+        VERIFIER(!rpc_lire_miniature(chemin, sizeof(chemin), &w, NULL, UNE, strlen(UNE), 400));
+    }
+}
+
+/* --- miniature_construire_chemin (feature "Miniatures gcode", tache A) ---- */
+
+static void section_construire_chemin_miniature(void)
+{
+    /* fichier a la racine "gcodes" (pas de '/') : resultat = relative_path
+     * tel quel, aucun prefixe */
+    {
+        char dest[64];
+        size_t r = miniature_construire_chemin(dest, sizeof(dest), "piece.gcode", ".thumbs/piece.png");
+        VERIFIER(r == strlen(".thumbs/piece.png"));
+        VERIFIER_TEXTE(dest, ".thumbs/piece.png");
+    }
+
+    /* sous-dossier simple */
+    {
+        char dest[64];
+        size_t r = miniature_construire_chemin(dest, sizeof(dest), "dir/foo.gcode", ".thumbs/foo.png");
+        VERIFIER(r == strlen("dir/.thumbs/foo.png"));
+        VERIFIER_TEXTE(dest, "dir/.thumbs/foo.png");
+    }
+
+    /* sous-dossier imbrique : seul ce qui precede le DERNIER '/' est gardé */
+    {
+        char dest[64];
+        size_t r = miniature_construire_chemin(dest, sizeof(dest), "a/b/foo.gcode", ".thumbs/foo.png");
+        VERIFIER(r == strlen("a/b/.thumbs/foo.png"));
+        VERIFIER_TEXTE(dest, "a/b/.thumbs/foo.png");
+    }
+
+    /* relative_path avec '/' en tete : pas de cas particulier, simple
+     * concatenation (voir moonraker_rpc.h -- Moonraker cote serveur
+     * interprete l'URL, cette fonction ne fait que joindre deux segments) */
+    {
+        char dest[64];
+        size_t r = miniature_construire_chemin(dest, sizeof(dest), "dir/foo.gcode", "/abs/thumb.png");
+        VERIFIER_TEXTE(dest, "dir//abs/thumb.png");
+        VERIFIER(r == strlen("dir//abs/thumb.png"));
+    }
+
+    /* gcode_chemin/relative_path NULL : traites comme des chaines vides,
+     * jamais de dereferencement NULL */
+    {
+        char dest[64];
+        size_t r = miniature_construire_chemin(dest, sizeof(dest), NULL, "x.png");
+        VERIFIER_TEXTE(dest, "x.png");
+        VERIFIER(r == strlen("x.png"));
+
+        r = miniature_construire_chemin(dest, sizeof(dest), "dir/foo.gcode", NULL);
+        VERIFIER_TEXTE(dest, "dir/");
+        VERIFIER(r == strlen("dir/"));
+    }
+
+    /* troncature : contrat a la snprintf() -- le retour est la longueur
+     * COMPLETE qui aurait ete ecrite, meme si `dest` est trop petit pour la
+     * recevoir ; `dest` reste correctement termine par un octet nul dans les
+     * limites de `n`. */
+    {
+        char petit[8];
+        size_t r = miniature_construire_chemin(petit, sizeof(petit), "dir/foo.gcode", ".thumbs/foo-300x300.png");
+        static const char *COMPLET = "dir/.thumbs/foo-300x300.png";
+        VERIFIER(r == strlen(COMPLET));
+        VERIFIER(r >= sizeof(petit));   /* signale bien une troncature */
+        VERIFIER(strlen(petit) == sizeof(petit) - 1);
+        VERIFIER(strncmp(petit, COMPLET, sizeof(petit) - 1) == 0);
+    }
+
+    /* n == 0, dest == NULL : calcule seulement la longueur, n'ecrit rien --
+     * ne doit jamais planter (meme regle que snprintf() : s peut etre NULL
+     * quand n vaut 0). */
+    {
+        size_t r = miniature_construire_chemin(NULL, 0, "dir/foo.gcode", ".thumbs/foo.png");
+        VERIFIER(r == strlen("dir/.thumbs/foo.png"));
+    }
+}
+
 /* --- rpc_lire_gcode_response (feature Console gcode, tache A) -------------
  * notify_gcode_response : params[0] est directement une STRING -- piege
  * distinct de rpc_fusionner_status (params[0] objet de statut) et de
@@ -1263,6 +1536,8 @@ void suite_moonraker_rpc(void)
     section_lire_reponse();
     section_lire_macros();
     section_lire_fichiers();
+    section_lire_miniature();
+    section_construire_chemin_miniature();
     section_lire_gcode_response();
     section_lire_methode();
     section_methode_commande();

@@ -258,6 +258,100 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur);
 bool rpc_lire_fichiers(klipper_fichiers_t *dest, const char *json, size_t longueur);
 
 /* ------------------------------------------------------------------------
+ * Miniatures gcode (feature "Miniatures gcode", tâche A -- cœur host,
+ * intégration ESP laissée à la tâche B, voir
+ * docs/superpowers/specs/2026-08-04-miniatures-design.md)
+ * ---------------------------------------------------------------------- */
+
+/* Extrait, depuis une réponse `server.files.metadata` (`result.thumbnails`,
+ * tableau d'objets `{width,height,size,relative_path}`), la meilleure
+ * miniature disponible : la plus GRANDE largeur telle que `width <=
+ * largeur_max`, ou -- si aucune ne satisfait cette borne -- la plus PETITE
+ * largeur disponible (jamais d'échec juste parce que la machine ne fournit
+ * que des miniatures plus grandes que `largeur_max` ; l'appelant peut
+ * toujours redimensionner à l'affichage). En cas d'égalité de largeur entre
+ * plusieurs candidats (même dans le tableau source), le PREMIER rencontré
+ * dans l'ordre du tableau l'emporte, aussi bien pour la sélection <= max que
+ * pour le repli sur la plus petite -- choix déterministe documenté ici pour
+ * ne pas dépendre d'un ordre de tri caché.
+ *
+ * `json`/`n` portent le message JSON-RPC COMPLET (avec son enveloppe
+ * `result`), pas seulement le contenu de `result` -- même convention que
+ * rpc_lire_fichiers() ci-dessus (voir moonraker_ws.c : le corrélateur passe
+ * toujours `json, longueur` bruts du message reçu, jamais un sous-arbre déjà
+ * déballé).
+ *
+ * `chemin_dest` reçoit `relative_path` du candidat retenu, tronqué
+ * proprement (UTF-8-safe, voir copier_texte_utf8_borne() dans
+ * moonraker_rpc.c) si `chemin_n` est trop petit pour le recevoir en entier --
+ * CONTRAIREMENT à rpc_lire_fichiers()/rpc_lire_macros() (où un nom trop long
+ * est IGNORÉ pour ne jamais désigner par erreur une AUTRE entrée existante),
+ * un `relative_path` de miniature est un simple SEGMENT d'URL construit par
+ * l'appelant (voir miniature_construire_chemin() ci-dessous) : une
+ * troncature ne fait qu'échouer le fetch HTTP qui suit (chemin introuvable
+ * côté Moonraker), elle ne risque jamais de pointer par erreur vers un AUTRE
+ * fichier existant. `*w_out`/`*h_out` reçoivent les dimensions du candidat
+ * retenu (jamais celles d'un autre).
+ *
+ * Un élément du tableau `thumbnails` est un candidat valide seulement s'il
+ * est un objet portant `width`/`height` (nombres finis STRICTEMENT positifs
+ * -- 0 ou négatif est rejeté comme non exploitable) et `relative_path`
+ * (chaîne non vide) ; tout élément qui ne l'est pas est IGNORÉ (poison PAR
+ * ÉLÉMENT, même esprit que traiter_candidat_fichier() dans moonraker_rpc.c),
+ * le reste du tableau continue d'être examiné normalement.
+ *
+ * Rend false SANS TOUCHER `chemin_dest`/`*w_out`/`*h_out` si `json` est
+ * illisible, si `result.thumbnails` est absent ou n'est pas un tableau, si
+ * le tableau est vide, ou si aucun élément du tableau n'est un candidat
+ * valide (poison par élément généralisé à tout le tableau). Rend aussi false
+ * SANS RIEN LIRE si `chemin_dest`/`w_out`/`h_out`/`json` est NULL ou si
+ * `chemin_n`/`n` vaut 0. */
+bool rpc_lire_miniature(char *chemin_dest, size_t chemin_n, int *w_out, int *h_out,
+                        const char *json, size_t n, int largeur_max);
+
+/* Recompose le chemin d'une miniature RELATIF À LA RACINE "gcodes" de
+ * Moonraker (celui à mettre dans l'URL
+ * `.../server/files/gcodes/<résultat de cette fonction>`, voir la spec
+ * miniatures §Chaîne Moonraker) : `relative_path` (tel que rendu par
+ * rpc_lire_miniature() ci-dessus) est documenté par Moonraker comme relatif
+ * au DOSSIER du fichier gcode, pas à la racine "gcodes" -- il faut donc lui
+ * préfixer le dossier de `gcode_chemin` (tout ce qui précède le DERNIER '/'
+ * de `gcode_chemin`, s'il y en a un).
+ *
+ * `gcode_chemin` SANS aucun '/' (fichier à la racine "gcodes", ex.
+ * "piece.gcode") : le résultat est `relative_path` tel quel, sans préfixe ni
+ * '/' ajouté -- le dossier du fichier EST la racine "gcodes", rien à
+ * préfixer. `gcode_chemin` avec un ou plusieurs '/' (ex. "dir/piece.gcode"
+ * ou "a/b/piece.gcode") : le résultat est `<tout ce qui précède le dernier
+ * '/'>/<relative_path>` (ex. "dir/relative_path", "a/b/relative_path").
+ *
+ * Contrat de retour À LA snprintf() : rend la longueur (hors octet nul) que
+ * le résultat COMPLET aurait occupée, MÊME si `n` est trop petit pour la
+ * recevoir en entier -- l'appelant compare le retour à `n` pour détecter une
+ * troncature, exactement comme snprintf() lui-même (voir
+ * rpc_construire_requete() plus haut pour la même convention appliquée à un
+ * `bool`, ici un `size_t` puisque l'appelant peut vouloir connaître la
+ * taille de tampon qui aurait suffi). `dest` peut être NULL si `n` vaut 0
+ * (même règle que snprintf() : sert alors uniquement à calculer la longueur
+ * nécessaire sans rien écrire). `gcode_chemin`/`relative_path` NULL sont
+ * traités comme des chaînes vides (jamais de déréférencement NULL).
+ *
+ * Défensif -- ne déborde JAMAIS `dest` (borné par `n` via snprintf() en
+ * interne) quel que soit le contenu de `relative_path`, y compris un
+ * `relative_path` commençant par '/' (produit alors un double '/' dans le
+ * résultat -- pas de cas particulier pour l'éliminer : cette fonction ne
+ * fait que joindre deux segments de chaîne, elle ne réalise PAS le chemin
+ * résultant sur un système de fichiers, elle construit un simple segment
+ * d'URL que Moonraker interprète et valide de son côté) ou contenant `..`
+ * (non filtré ici, même raison : c'est Moonraker, côté serveur, qui résout
+ * et borne l'accès réel au système de fichiers derrière cette URL -- cette
+ * fonction n'a par construction aucune vue sur le système de fichiers, une
+ * tentative de filtrage ici serait une fausse garantie de sécurité). Le SEUL
+ * invariant garanti ici est l'absence de débordement mémoire. */
+size_t miniature_construire_chemin(char *dest, size_t n, const char *gcode_chemin,
+                                   const char *relative_path);
+
+/* ------------------------------------------------------------------------
  * Prises Moonraker (machine.device_power.*)
  * ---------------------------------------------------------------------- */
 
