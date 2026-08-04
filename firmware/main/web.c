@@ -137,7 +137,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/log\">/log</a> — journal réseau</li>"
         "<li><a href=\"/revert\">/revert</a> — bouton de redémarrage (bascule OTA)</li>"
         "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
-        "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (verification a blanc, ecriture reelle en POST direct)</li>"
+        "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (panneau : etat + verification a blanc + flash reel)</li>"
         "<li><a href=\"/restore-btt\">/restore-btt</a> — restauration du firmware BTT depuis la sauvegarde</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -564,17 +564,19 @@ static esp_err_t gestion_backup_btt(httpd_req_t *req)
     return httpd_resp_sendstr(req, msg);
 }
 
-/* GET /ota : page de mise a jour OTA -- a ce jalon (tache 4), UNIQUEMENT la
-   verification a blanc (dry-run) est cablee ; le commit reel viendra dans
-   une tache ulterieure, deliberement absente ici (voir le commentaire de
-   tete de ce fichier sur l'absence historique de route OTA).
+/* GET /ota : panneau de controle complet -- etat (slot/version/sauvegarde
+   BTT) + verification a blanc (dry-run) + ecriture reelle (flash), celle-ci
+   gardee cote navigateur par un dry-run reussi sur le MEME fichier (bouton
+   desactive tant que ce n'est pas le cas -- la garde faisant foi reste bien
+   sur cote firmware, voir ota.c) + boutons de sauvegarde/restauration du
+   firmware BTT.
    Deliberement PAS un <form multipart> classique : ota_verifier_flux() (voir
    ota.c) lit le corps de la requete comme un flux OCTET BRUT (httpd_req_recv
    direct, sans parseur multipart/form-data cote firmware) -- un vrai
    formulaire multipart envelopperait le fichier choisi dans des
    en-tetes/limites qui casseraient le controle du magic 0xE9 des les
    premiers octets. La page utilise donc un `<input type="file">` lu cote
-   navigateur (File API) et poste son contenu BRUT via fetch(), ce qui
+   navigateur (File API) et poste son contenu BRUT via fetch()/XHR, ce qui
    correspond exactement a ce que le firmware sait lire. */
 static esp_err_t gestion_ota_page(httpd_req_t *req)
 {
@@ -582,62 +584,105 @@ static esp_err_t gestion_ota_page(httpd_req_t *req)
     const esp_app_desc_t *description = esp_app_get_description();
     const char *backup_btt = ota_backup_etat_nom(ota_backup_etat());
 
-    /* Page HTML + CSS + JS inline : nettement plus large que les pages
-       statiques de ce fichier (/revert, /backup-btt), d'ou une marge large
-       (2048, une page complete ici tient sous 1500 octets) -- voir la note
-       du brief de cette tache sur -Werror=format-truncation, qui ne se
-       declenche que sur la chaine idf (jamais visible cote hote). */
-    char page[2048];
-    int longueur = snprintf(page, sizeof(page),
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+
+    /* En-tete : seules les 3 valeurs d'etat passent par snprintf (tampon
+       modeste). Le gros corps HTML+JS ci-dessous est un litteral statique sans
+       aucun format, envoye tel quel en chunk -- pas de tampon geant, et
+       -Werror=format-truncation reste hors de portee sur la partie volumineuse.
+       Le corps POSTe le fichier en octet BRUT (File API + XHR/fetch), jamais un
+       form multipart, pour rester compatible avec la lecture octet brut cote
+       firmware (magic 0xE9 des les premiers octets). */
+    char tete[640];
+    int n = snprintf(tete, sizeof(tete),
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>Mise a jour OTA</title></head>"
-        "<body style=\"font-family:sans-serif;max-width:32em;margin:2em auto;padding:0 1em\">"
+        "<title>OTA K-Touch</title></head>"
+        "<body style=\"font-family:sans-serif;max-width:34em;margin:1.5em auto;padding:0 1em\">"
         "<h1>Mise a jour OTA</h1>"
-        "<p>Slot actuel : <strong>%s</strong> — version : <strong>%s</strong> — "
-        "sauvegarde BTT : <strong>%s</strong></p>"
-        "<p>La verification ci-dessous (bouton \"Verifier\") est un DRY-RUN : le "
-        "fichier .bin choisi est recu et son SHA-256 est calcule au fil de "
-        "l'eau, le magic 0xE9 et la taille sont controles — rien n'est jamais "
-        "efface ni ecrit dans un slot applicatif. L'ecriture reelle (POST /ota "
-        "sans dry_run, voir docs/hardware/flashing.md) reste volontairement "
-        "hors de cette page — declenchee en ligne de commande (curl), jamais "
-        "d'un simple clic navigateur — et refusee tant qu'app0 n'a pas encore "
-        "ete sauvegarde (POST /backup-btt) si le firmware BTT s'y trouve "
-        "encore.</p>"
-        "<p>SHA-256 attendu (optionnel, 64 caracteres hexadecimaux) :<br>"
-        "<input type=\"text\" id=\"sha\" placeholder=\"ex: 3a7bd3e2...\" size=\"70\"></p>"
-        "<p>Fichier .bin : <input type=\"file\" id=\"fichier\"><br>"
-        "<button type=\"button\" onclick=\"verifier()\">Verifier (dry-run, ne rien ecrire)</button></p>"
-        "<pre id=\"resultat\" style=\"white-space:pre-wrap;background:#eee;padding:.5em\"></pre>"
-        "<script>"
-        "function verifier(){"
-        "var f=document.getElementById('fichier').files[0];"
-        "var r=document.getElementById('resultat');"
-        "if(!f){r.textContent='choisir un fichier .bin d\\'abord';return;}"
-        "var sha=document.getElementById('sha').value;"
-        "var url='/ota?dry_run=1'+(sha?('&sha='+encodeURIComponent(sha)):'');"
-        "r.textContent='verification en cours...';"
-        "fetch(url,{method:'POST',body:f})"
-        ".then(function(resp){return resp.text().then(function(t){"
-        "r.textContent='HTTP '+resp.status+'\\n'+t;});})"
-        ".catch(function(e){r.textContent='erreur reseau : '+e;});"
-        "}"
-        "</script>"
-        "</body></html>",
+        "<p>Slot : <strong id=\"slot\">%s</strong> — version : "
+        "<strong id=\"ver\">%s</strong> — sauvegarde BTT : "
+        "<strong id=\"bkp\">%s</strong> "
+        "<button type=\"button\" onclick=\"rafraichir()\">Rafraichir</button></p>",
         courante != NULL ? courante->label : "?",
         description != NULL ? description->version : "?",
         backup_btt);
-
-    if (longueur < 0) {
-        /* Meme garde que gestion_status()/gestion_backup_btt_page() : ne
-           jamais envoyer une reponse tronquee etiquetee comme HTML valide si
-           snprintf a echoue. */
+    if (n < 0) {
         return httpd_resp_send_500(req);
     }
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    size_t a_envoyer = (size_t)longueur < sizeof(page) ? (size_t)longueur : sizeof(page) - 1;
-    return httpd_resp_send(req, page, a_envoyer);
+    esp_err_t e = httpd_resp_send_chunk(req, tete, HTTPD_RESP_USE_STRLEN);
+    if (e != ESP_OK) {
+        return e;
+    }
+
+    static const char corps[] =
+        "<h2>Firmware</h2>"
+        "<p>SHA-256 attendu (optionnel) :<br>"
+        "<input type=\"text\" id=\"sha\" size=\"66\" placeholder=\"64 hex, optionnel\"></p>"
+        "<p>Fichier .bin : <input type=\"file\" id=\"fichier\"></p>"
+        "<p><button type=\"button\" onclick=\"verifier()\">Verifier (dry-run)</button> "
+        "<button type=\"button\" id=\"btnflash\" onclick=\"flasher()\" disabled>"
+        "Flasher (ecriture reelle)</button></p>"
+        "<progress id=\"prog\" value=\"0\" max=\"100\" style=\"width:100%;display:none\"></progress>"
+        "<pre id=\"res\" style=\"white-space:pre-wrap;background:#eee;padding:.5em;min-height:2em\"></pre>"
+        "<h2>Sauvegarde BTT</h2>"
+        "<p><button type=\"button\" onclick=\"sauver()\">Sauvegarder BTT vers spiffs</button> "
+        "<button type=\"button\" onclick=\"restaurer()\">Restaurer BTT (redemarre sur BTT)</button></p>"
+        "<pre id=\"resb\" style=\"white-space:pre-wrap;background:#eee;padding:.5em;min-height:2em\"></pre>"
+        "<script>"
+        "var okFichier=null;"
+        "function elt(i){return document.getElementById(i);}"
+        "function majFlash(){elt('btnflash').disabled=(okFichier===null||elt('fichier').files[0]!==okFichier);}"
+        "elt('fichier').addEventListener('change',function(){okFichier=null;majFlash();elt('res').textContent='';});"
+        "function verifier(){"
+        "var f=elt('fichier').files[0];var r=elt('res');"
+        "if(!f){r.textContent='choisir un fichier .bin d\\'abord';return;}"
+        "var sha=elt('sha').value;"
+        "var url='/ota?dry_run=1'+(sha?('&sha='+encodeURIComponent(sha)):'');"
+        "r.textContent='verification en cours...';"
+        "fetch(url,{method:'POST',body:f}).then(function(resp){return resp.text().then(function(t){"
+        "r.textContent='HTTP '+resp.status+'\\n'+t;"
+        "if(resp.status===200&&t.indexOf('image valide')>=0){okFichier=f;}majFlash();"
+        "});}).catch(function(x){r.textContent='erreur reseau : '+x;});"
+        "}"
+        "function flasher(){"
+        "var f=elt('fichier').files[0];var r=elt('res');"
+        "if(!f||f!==okFichier){r.textContent='faire un dry-run valide sur ce fichier d\\'abord';return;}"
+        "if(!confirm('Ecriture REELLE dans le slot inactif, puis redemarrage. Continuer ?'))return;"
+        "var p=elt('prog');p.style.display='block';p.value=0;"
+        "var x=new XMLHttpRequest();"
+        "x.upload.onprogress=function(ev){if(ev.lengthComputable){p.value=Math.round(ev.loaded/ev.total*100);}};"
+        "x.onload=function(){r.textContent='HTTP '+x.status+'\\n'+x.responseText+"
+        "(x.status===200?'\\n(l\\'ecran va noircir puis redemarrer)':'');};"
+        "x.onerror=function(){r.textContent='connexion coupee (attendu si l\\'appareil redemarre)';};"
+        "x.open('POST','/ota');x.send(f);"
+        "}"
+        "function sauver(){"
+        "if(!confirm('Sauvegarder le firmware BTT (app0) vers spiffs ? Quelques secondes.'))return;"
+        "var r=elt('resb');r.textContent='sauvegarde en cours...';"
+        "fetch('/backup-btt',{method:'POST'}).then(function(resp){return resp.text().then(function(t){"
+        "r.textContent='HTTP '+resp.status+'\\n'+t;rafraichir();"
+        "});}).catch(function(x){r.textContent='erreur reseau : '+x;});"
+        "}"
+        "function restaurer(){"
+        "if(!confirm('RESTAURER BTT : reecrit le slot inactif et REDEMARRE la dalle sur le firmware BTT. Continuer ?'))return;"
+        "var r=elt('resb');r.textContent='restauration en cours...';"
+        "fetch('/restore-btt',{method:'POST'}).then(function(resp){return resp.text().then(function(t){"
+        "r.textContent='HTTP '+resp.status+'\\n'+t;"
+        "});}).catch(function(x){r.textContent='connexion coupee (attendu si l\\'appareil redemarre)';});"
+        "}"
+        "function rafraichir(){"
+        "fetch('/status').then(function(r){return r.json();}).then(function(j){"
+        "elt('slot').textContent=j.slot;elt('ver').textContent=j.version;elt('bkp').textContent=j.backup_btt;"
+        "}).catch(function(){});"
+        "}"
+        "</script>"
+        "</body></html>";
+    e = httpd_resp_send_chunk(req, corps, HTTPD_RESP_USE_STRLEN);
+    if (e != ESP_OK) {
+        return e;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 
 /* POST /ota : route unique, distinguee par la query `?dry_run=1` (+
