@@ -55,6 +55,8 @@ void suite_bascule_accueil(void);
 void suite_klipper_temp_historique(void);
 void suite_ota_image(void);
 void suite_power_devices(void);
+void suite_console_log(void);
+void suite_json_util(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -368,6 +370,17 @@ int main(void)
      * power_devices_definir() de test, aucun etat partage avec une autre
      * suite). */
     suite_power_devices();
+
+    /* Tache A (feature "Console gcode") : store de scrollback dedie
+     * (console_log.h) -- aucune contrainte d'ordre avec les autres suites
+     * (le store est remis a plat par chaque console_log_effacer() en tete de
+     * section de test, aucun etat partage avec une autre suite). */
+    suite_console_log();
+
+    /* Tache A (feature "Console gcode") : echappement JSON pur de la saisie
+     * libre de la console (json_util.h) -- fonction pure sans etat, aucune
+     * contrainte d'ordre. */
+    suite_json_util();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

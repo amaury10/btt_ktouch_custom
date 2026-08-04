@@ -315,6 +315,49 @@ bool rpc_lire_power_devices(power_devices_t *dest, const char *json, size_t long
  * qu'une par message. */
 bool rpc_lire_power_changed(power_devices_t *dest, const char *json, size_t longueur);
 
+/* ------------------------------------------------------------------------
+ * Console gcode (feature "Console gcode", tâche A -- store dédié
+ * console_log.h, câblage WS laissé à la tâche B)
+ * ---------------------------------------------------------------------- */
+
+/* Extrait le texte d'une notification `notify_gcode_response` :
+ * `{"method":"notify_gcode_response","params":["<texte>"]}` -- `params[0]`
+ * est directement une STRING (contrairement à `notify_status_update`, où
+ * `params[0]` est un OBJET de statut, voir rpc_fusionner_status ci-dessus :
+ * piège différent, à ne pas confondre). Rend false SANS TOUCHER `dest` si le
+ * JSON est illisible, ou si l'enveloppe est hostile (`params` absent/pas un
+ * tableau, `params[0]` absent ou n'étant pas une string) -- même politique
+ * d'anomalie d'ENVELOPPE que le reste de ce fichier.
+ *
+ * Klipper peut pousser une réponse arbitrairement longue (multi-lignes,
+ * séparées par `\n` -- c'est à l'APPELANT de les découper en lignes
+ * distinctes avant `console_log_ajouter()`, voir console_log.h) : `dest` est
+ * donc rempli avec la même discipline UTF-8-safe que `rpc_lire_reponse()`
+ * ci-dessus (jamais de coupe en plein milieu d'une séquence UTF-8
+ * multi-octets, voir copier_texte_utf8_borne() dans moonraker_rpc.c) plutôt
+ * que de faire échouer l'extraction entière pour une simple question de
+ * taille de tampon -- une réponse tronquée reste plus utile qu'une réponse
+ * perdue. Rend true dès que `params[0]` est bien une string, MÊME si `dest`
+ * a dû être tronqué. */
+bool rpc_lire_gcode_response(char *dest, size_t dest_n, const char *json, size_t n);
+
+/* Extrait le champ `"method"` d'un message JSON-RPC entrant, tel quel (pour
+ * le dispatch par NOM DE MÉTHODE de la tâche B, voir moonraker_ws.c). NOTE
+ * (recherche faite avant d'ajouter cette fonction) : `rpc_classifier()`
+ * ci-dessus lit déjà `"method"` en interne pour CLASSIFIER le message dans
+ * `rpc_message_type_t`, mais ne l'expose nulle part à l'appelant -- aucune
+ * fonction existante de ce fichier ne rend la chaîne `method` elle-même,
+ * d'où cet ajout plutôt qu'une réutilisation.
+ *
+ * Rend false SANS TOUCHER `dest` si `dest`/`json` est NULL, `dest_n`/`n` vaut
+ * 0, le JSON est illisible, si `"method"` est absent ou n'est pas une string,
+ * OU si `dest_n` est trop petit pour la recevoir ENTIÈREMENT -- contrairement
+ * à `rpc_lire_gcode_response()` ci-dessus, une méthode TRONQUÉE serait
+ * dangereuse (elle pourrait se lire comme un préfixe d'une AUTRE méthode
+ * connue et fausser le dispatch de l'appelant), donc jamais rendue comme un
+ * succès -- même politique que `rpc_methode_commande()` plus bas. */
+bool rpc_lire_methode(char *dest, size_t dest_n, const char *json, size_t n);
+
 /* Taille de tampon suffisante pour toute méthode rendue par
  * rpc_methode_commande() ci-dessous : la plus longue
  * ("printer.emergency_stop", 23 octets) plus marge, jusqu'à l'octet nul —

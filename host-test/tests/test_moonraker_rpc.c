@@ -1041,6 +1041,160 @@ static void section_lire_fichiers(void)
     }
 }
 
+/* --- rpc_lire_gcode_response (feature Console gcode, tache A) -------------
+ * notify_gcode_response : params[0] est directement une STRING -- piege
+ * distinct de rpc_fusionner_status (params[0] objet de statut) et de
+ * rpc_lire_power_changed (params[0] tableau). */
+
+static void section_lire_gcode_response(void)
+{
+    /* string simple */
+    {
+        char dest[128];
+        static const char *MSG =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\","
+            "\"params\":[\"// echo: G28\"]}";
+        VERIFIER(rpc_lire_gcode_response(dest, sizeof(dest), MSG, strlen(MSG)));
+        VERIFIER_TEXTE(dest, "// echo: G28");
+    }
+
+    /* reponse multi-lignes (separees par \n) : recopiee telle quelle, c'est
+     * a l'appelant (moonraker_ws.c, tache B) de la decouper avant
+     * console_log_ajouter() -- cette fonction ne fait QUE l'extraction. */
+    {
+        char dest[128];
+        static const char *MSG =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\","
+            "\"params\":[\"ligne1\\nligne2\\nligne3\"]}";
+        VERIFIER(rpc_lire_gcode_response(dest, sizeof(dest), MSG, strlen(MSG)));
+        VERIFIER_TEXTE(dest, "ligne1\nligne2\nligne3");
+    }
+
+    /* tampon trop court : troncature UTF-8-safe, PAS un echec (contrairement
+     * a rpc_lire_methode ci-dessous) -- une reponse Klipper tronquee reste
+     * plus utile qu'une reponse perdue. */
+    {
+        char petit[6];
+        static const char *MSG =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\","
+            "\"params\":[\"un texte bien plus long que le tampon\"]}";
+        VERIFIER(rpc_lire_gcode_response(petit, sizeof(petit), MSG, strlen(MSG)));
+        VERIFIER(strlen(petit) <= 5);
+        VERIFIER_TEXTE(petit, "un te");
+    }
+
+    /* params absent => false, dest INTACT */
+    {
+        char dest[32];
+        strcpy(dest, "sentinelle");
+        static const char *SANS_PARAMS =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\"}";
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), SANS_PARAMS, strlen(SANS_PARAMS)));
+        VERIFIER_TEXTE(dest, "sentinelle");
+    }
+
+    /* params[0] n'est pas une string (ex. objet de statut, comme
+     * notify_status_update) => false */
+    {
+        char dest[32];
+        strcpy(dest, "sentinelle");
+        static const char *PARAMS0_OBJET =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\",\"params\":[{\"a\":1}]}";
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), PARAMS0_OBJET, strlen(PARAMS0_OBJET)));
+        VERIFIER_TEXTE(dest, "sentinelle");
+    }
+
+    /* params n'est pas un tableau => false */
+    {
+        char dest[32];
+        strcpy(dest, "sentinelle");
+        static const char *PARAMS_OBJET =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\",\"params\":{\"a\":1}}";
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), PARAMS_OBJET, strlen(PARAMS_OBJET)));
+        VERIFIER_TEXTE(dest, "sentinelle");
+    }
+
+    /* params vide => false (params[0] absent) */
+    {
+        char dest[32];
+        strcpy(dest, "sentinelle");
+        static const char *PARAMS_VIDE =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\",\"params\":[]}";
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), PARAMS_VIDE, strlen(PARAMS_VIDE)));
+        VERIFIER_TEXTE(dest, "sentinelle");
+    }
+
+    /* JSON illisible / entrees NULL => false */
+    {
+        char dest[32];
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), "pas du json", 11));
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), "", 0));
+        VERIFIER(!rpc_lire_gcode_response(dest, sizeof(dest), NULL, 0));
+        VERIFIER(!rpc_lire_gcode_response(NULL, sizeof(dest), "{}", 2));
+        VERIFIER(!rpc_lire_gcode_response(dest, 0, "{}", 2));
+    }
+}
+
+/* --- rpc_lire_methode (feature Console gcode, tache A) --------------------
+ * Extrait le champ "method" tel quel -- pour le dispatch par nom de methode
+ * de la tache B (voir le commentaire de tete de moonraker_rpc.h : aucune
+ * fonction existante n'exposait deja cette chaine, rpc_classifier() la lit
+ * en interne mais ne la rend jamais a l'appelant). */
+
+static void section_lire_methode(void)
+{
+    /* methode presente */
+    {
+        char dest[64];
+        static const char *MSG =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\",\"params\":[\"ok\"]}";
+        VERIFIER(rpc_lire_methode(dest, sizeof(dest), MSG, strlen(MSG)));
+        VERIFIER_TEXTE(dest, "notify_gcode_response");
+    }
+
+    /* methode presente, message par ailleurs une REPONSE (result/id) : cette
+     * fonction ne se soucie que du champ "method", absent ici => false */
+    {
+        char dest[64];
+        strcpy(dest, "sentinelle");
+        static const char *REPONSE = "{\"result\":{},\"id\":5}";
+        VERIFIER(!rpc_lire_methode(dest, sizeof(dest), REPONSE, strlen(REPONSE)));
+        VERIFIER_TEXTE(dest, "sentinelle");
+    }
+
+    /* "method" n'est pas une string => false */
+    {
+        char dest[64];
+        strcpy(dest, "sentinelle");
+        static const char *METHODE_NOMBRE = "{\"method\":42}";
+        VERIFIER(!rpc_lire_methode(dest, sizeof(dest), METHODE_NOMBRE, strlen(METHODE_NOMBRE)));
+        VERIFIER_TEXTE(dest, "sentinelle");
+    }
+
+    /* tampon trop court : false, JAMAIS de methode tronquee rendue comme
+     * valide (contrairement a rpc_lire_gcode_response ci-dessus) -- une
+     * methode tronquee pourrait se lire comme le prefixe d'une AUTRE methode
+     * connue et fausser le dispatch de l'appelant. */
+    {
+        char petit[16];
+        strcpy(petit, "sentinelle");
+        static const char *MSG =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notify_gcode_response\",\"params\":[\"ok\"]}";
+        VERIFIER(!rpc_lire_methode(petit, sizeof(petit), MSG, strlen(MSG)));
+        VERIFIER_TEXTE(petit, "sentinelle");
+    }
+
+    /* JSON illisible / entrees NULL => false */
+    {
+        char dest[32];
+        VERIFIER(!rpc_lire_methode(dest, sizeof(dest), "pas du json", 11));
+        VERIFIER(!rpc_lire_methode(dest, sizeof(dest), "", 0));
+        VERIFIER(!rpc_lire_methode(dest, sizeof(dest), NULL, 0));
+        VERIFIER(!rpc_lire_methode(NULL, sizeof(dest), "{}", 2));
+        VERIFIER(!rpc_lire_methode(dest, 0, "{}", 2));
+    }
+}
+
 /* --- rpc_methode_commande (tache 5) -------------------------------------- */
 
 static void section_methode_commande(void)
@@ -1109,5 +1263,7 @@ void suite_moonraker_rpc(void)
     section_lire_reponse();
     section_lire_macros();
     section_lire_fichiers();
+    section_lire_gcode_response();
+    section_lire_methode();
     section_methode_commande();
 }

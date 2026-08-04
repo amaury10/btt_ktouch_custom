@@ -1048,6 +1048,87 @@ bool rpc_lire_power_changed(power_devices_t *dest, const char *json, size_t long
 }
 
 /* ------------------------------------------------------------------------
+ * Console gcode (feature "Console gcode", tache A)
+ * ---------------------------------------------------------------------- */
+
+bool rpc_lire_gcode_response(char *dest, size_t dest_n, const char *json, size_t n)
+{
+    if (dest == NULL || dest_n == 0 || json == NULL || n == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, n);
+    if (racine == NULL || !cJSON_IsObject(racine)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* params[0] est directement une STRING ici -- piege distinct de
+     * rpc_fusionner_status (params[0] objet de statut) et de
+     * rpc_lire_power_changed (params[0] tableau). Enveloppe hostile
+     * (params absent/pas un tableau, params[0] absent/pas une string) :
+     * anomalie D'ENVELOPPE, invalide le message entier -- meme politique
+     * que le reste de ce fichier. */
+    const cJSON *params = cJSON_GetObjectItemCaseSensitive(racine, "params");
+    if (!cJSON_IsArray(params) || cJSON_GetArraySize(params) < 1) {
+        cJSON_Delete(racine);
+        return false;
+    }
+    const cJSON *texte = cJSON_GetArrayItem(params, 0);
+    if (!cJSON_IsString(texte) || texte->valuestring == NULL) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Meme discipline UTF-8-safe que rpc_lire_reponse() ci-dessus : une
+     * reponse Klipper trop longue pour `dest` est TRONQUEE proprement (jamais
+     * de coupe en plein milieu d'une sequence UTF-8 multi-octets), pas
+     * rejetee -- une reponse partielle affichee vaut mieux qu'une reponse
+     * perdue dans la console. */
+    copier_texte_utf8_borne(texte->valuestring, dest, dest_n);
+
+    cJSON_Delete(racine);
+    return true;
+}
+
+bool rpc_lire_methode(char *dest, size_t dest_n, const char *json, size_t n)
+{
+    if (dest == NULL || dest_n == 0 || json == NULL || n == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, n);
+    if (racine == NULL || !cJSON_IsObject(racine)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    const cJSON *methode = cJSON_GetObjectItemCaseSensitive(racine, "method");
+    if (!cJSON_IsString(methode) || methode->valuestring == NULL) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Contrairement a rpc_lire_gcode_response() ci-dessus : jamais de
+     * troncature rendue comme un succes ici -- une methode partielle
+     * pourrait se lire comme le prefixe d'une AUTRE methode connue et fausser
+     * le dispatch de l'appelant (meme politique que rpc_methode_commande()
+     * plus bas et rpc_construire_requete() en tete de fichier). La longueur
+     * est verifiee AVANT toute ecriture dans `dest` : contrairement a
+     * snprintf() seul (qui ecrirait une chaine tronquee dans `dest` avant que
+     * l'appelant n'ait eu la main de comparer le retour a `dest_n`), le
+     * contrat "false SANS TOUCHER dest" de ce fichier doit tenir MEME dans
+     * le cas de troncature, pas seulement pour une enveloppe illisible. */
+    size_t len = strlen(methode->valuestring);
+    bool tient = len < dest_n;
+    if (tient) {
+        memcpy(dest, methode->valuestring, len + 1);
+    }
+    cJSON_Delete(racine);
+    return tient;
+}
+
+/* ------------------------------------------------------------------------
  * Correspondance action -> méthode JSON-RPC (transport WebSocket)
  * ---------------------------------------------------------------------- */
 
