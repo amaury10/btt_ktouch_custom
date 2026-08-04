@@ -549,7 +549,14 @@ static esp_err_t gestion_backup_btt(httpd_req_t *req)
        CETTE pile-ci (celle de la tache httpd). N'ecrit jamais dans un slot
        app -- seulement dans spiffs. */
     char msg[160];
+    /* Ecran noir pendant l'ecriture spiffs (meme raison que gestion_ota_post :
+       le cache flash coupe affame la dalle RGB, ~4,5 Mo ici). PAS de reboot sur
+       ce chemin -> restaurer le retroeclairage dans tous les cas, succes comme
+       echec. */
+    uint32_t retro = pt_backlight_get();
+    pt_backlight_set(0);
     esp_err_t resultat = ota_backup_btt(msg, sizeof(msg));
+    pt_backlight_set(retro);
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     if (resultat != ESP_OK) {
         httpd_resp_set_status(req, "500 Internal Server Error");
