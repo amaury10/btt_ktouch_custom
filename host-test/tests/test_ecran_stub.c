@@ -1,17 +1,21 @@
-/* Sous-projet "panneaux KlipperScreen", tache 7 : smoke test des cinq ecrans
- * stub restants (Power/Bed Mesh/Input Shaper/Spoolman/Console) -- backend
+/* Sous-projet "panneaux KlipperScreen", tache 7 : smoke test des quatre
+ * ecrans stub restants (Bed Mesh/Input Shaper/Spoolman/Console) -- backend
  * absent pour chacun (voir ecran_stub.h), donc rien a verifier au-dela du
  * contrat minimal : id/titre non vides et attendus, construire() ne plante
  * pas. Le sixieme stub d'origine, Updater, est parti dans
  * test_ecran_updater.c depuis Task 2 (jalon OTA firmware) -- ecran_updater.c
  * affiche desormais un vrai etat, plus un placeholder "backend absent".
- * Construction directe (calloc du contexte a la taille du descripteur,
- * puis <ECRAN>.construire()) plutot que navigation_empiler() -- meme choix
- * que test_ecran_niveau_lit.c/test_ecran_zcalibrate.c, pour la meme raison
+ * Power est parti de la meme facon (feature "Power devices Moonraker",
+ * tache B) : ECRAN_POWER a desormais un vrai `mettre_a_jour`, il ne remplit
+ * plus le contrat "purement statique" verifie ici -- pas de suite hote
+ * dediee a ce jour (voir ecran_power.c). Construction directe (calloc du
+ * contexte a la taille du descripteur, puis <ECRAN>.construire()) plutot que
+ * navigation_empiler() -- meme choix que
+ * test_ecran_niveau_lit.c/test_ecran_zcalibrate.c, pour la meme raison
  * (tester uniquement le contrat de cet ecran).
  *
  * Contrairement aux autres suites d'ecran de ce fichier, AUCUNE dependance
- * sur habillage_est_construit()/source_etat_sim_est_demarre() : ces six
+ * sur habillage_est_construit()/source_etat_sim_est_demarre() : ces quatre
  * ecrans n'envoient jamais de commande et ne lisent jamais l'etat backend
  * (mettre_a_jour = NULL), donc aucun seam a tracer -- peut tourner a
  * n'importe quel endroit de tests/main.c. */
@@ -67,7 +71,6 @@ void suite_ecran_stub(void)
     printf("suite : ecrans stub (backend absent)\n");
 
     static const stub_attendu_t STUBS_ATTENDUS[] = {
-        { &ECRAN_POWER, "power", "Power" },
         { &ECRAN_BED_MESH, "bed_mesh", "Bed Mesh" },
         { &ECRAN_INPUT_SHAPER, "input_shaper", "Input Shaper" },
         { &ECRAN_SPOOLMAN, "spoolman", "Spoolman" },

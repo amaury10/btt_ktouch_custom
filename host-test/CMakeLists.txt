@@ -201,6 +201,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_retraction.c
     ${ECRANS_DIR}/ecran_stub.c
     ${ECRANS_DIR}/ecran_updater.c
+    ${ECRANS_DIR}/ecran_power.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c

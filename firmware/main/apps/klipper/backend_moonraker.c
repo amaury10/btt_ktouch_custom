@@ -766,6 +766,20 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    /* Feature "Power devices Moonraker", tache B : ECART DELIBERE par
+     * rapport a est_macro/est_gcode ci-dessus -- ni extraction ni
+     * reconstruction du JSON ici, `arguments_json` EST deja les params
+     * attendus par machine.device_power.set_device
+     * ({"device":"...","action":"toggle"}, construits par l'ecran,
+     * ecran_power.c) et lui est relaye tel quel (voir BACKEND_ACTION_POWER,
+     * core/backend.h). Seule verification : un appelant qui invoque cette
+     * action doit fournir des arguments, sinon rien a transmettre. */
+    bool est_power = (strcmp(action, BACKEND_ACTION_POWER) == 0);
+    if (est_power && arguments_json == NULL) {
+        JOURNAL_ALERTE(TAG, "commande power sans arguments_json");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     if (moonraker_ws_en_ligne()) {
         /* Jalon 3a, tache 6 : BACKEND_ACTION_MACRO -> printer.gcode.script
          * {"script":"<nom>"} -- rpc_methode_commande() (tache 5) refuse
@@ -864,6 +878,35 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                 return ESP_FAIL;
             }
             JOURNAL_INFO(TAG, "commande gcode -> WS printer.gcode.script");
+            return ESP_OK;
+        }
+
+        if (est_power) {
+            /* Feature "Power devices Moonraker", tache B : `arguments_json`
+             * relaye TEL QUEL comme params_json -- voir le commentaire de
+             * est_power ci-dessus. Pas de repli HTTP (contrairement a
+             * macro/gcode ci-dessus) : hors perimetre de cette tache/de la
+             * spec (design doc, section "Envoi de la bascule" -- tout passe
+             * par moonraker_ws_commande()) ; WS hors ligne fait tomber ce
+             * chemin dans la table generique plus bas
+             * (moonraker_chemin_commande() ne connait pas "power" ->
+             * ESP_ERR_NOT_SUPPORTED, comportement honnete plutot qu'un
+             * silence). */
+            bool succes = false;
+            char erreur[128];
+            erreur[0] = '\0';
+            esp_err_t erreur_ws = moonraker_ws_commande("machine.device_power.set_device", arguments_json,
+                                                          MOONRAKER_WS_COMMANDE_TIMEOUT_MS, &succes, erreur,
+                                                          sizeof(erreur));
+            if (erreur_ws != ESP_OK) {
+                JOURNAL_ALERTE(TAG, "commande power (WS) en echec (%s)", esp_err_to_name(erreur_ws));
+                return erreur_ws;
+            }
+            if (!succes) {
+                JOURNAL_ALERTE(TAG, "power refusee par Moonraker (%s)", erreur);
+                return ESP_FAIL;
+            }
+            JOURNAL_INFO(TAG, "commande power -> WS machine.device_power.set_device");
             return ESP_OK;
         }
 

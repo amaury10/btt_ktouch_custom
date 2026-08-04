@@ -1,12 +1,13 @@
-/* Implementation : voir ecran_stub.h pour le contrat et pourquoi ces cinq
+/* Implementation : voir ecran_stub.h pour le contrat et pourquoi ces quatre
  * panneaux se limitent a un titre + une ligne d'explication, sans aucune
- * donnee ni action -- et pourquoi le sixieme stub d'origine (Updater) a
- * quitte ce fichier pour ecran_updater.c (Task 2, jalon OTA firmware).
+ * donnee ni action -- et pourquoi les stubs d'origine Updater et Power ont
+ * quitte ce fichier pour ecran_updater.c (Task 2, jalon OTA firmware) et
+ * ecran_power.c (feature "Power devices Moonraker", tache B) respectivement.
  *
- * STUBS(X) liste les cinq panneaux (symbole, id, titre, explication) ; X()
- * est instanciee deux fois plus bas -- une premiere pour generer les cinq
+ * STUBS(X) liste les quatre panneaux (symbole, id, titre, explication) ; X()
+ * est instanciee deux fois plus bas -- une premiere pour generer les quatre
  * `<symbole>_construire()` (chacun ferme sur ses propres litteraux, brief
- * option (a)), une seconde pour generer les cinq `ecran_desc_t` eux-memes.
+ * option (a)), une seconde pour generer les quatre `ecran_desc_t` eux-memes.
  * Ajouter un stub de plus se resume a une ligne de plus dans STUBS(). */
 #include "ecran_stub.h"
 
@@ -16,7 +17,7 @@
 #define COULEUR_TEXTE_PRINCIPAL  0xFFFFFF
 #define COULEUR_TEXTE_SECONDAIRE 0xC9D1D9
 
-/* Peint le fond + les deux labels centres, partage par les six construire()
+/* Peint le fond + les deux labels centres, partage par les quatre construire()
  * generes plus bas -- seule la paire (titre, explication) change d'un stub a
  * l'autre. Positionnes vers le HAUT du contenu (742x436, sous la barre
  * d'etat construite par habillage.c -- meme repere que
@@ -49,12 +50,13 @@ static void ecran_stub_peindre(lv_obj_t *parent, const char *titre, const char *
     lv_obj_align_to(label_explication, label_titre, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
 }
 
-/* Table maitresse des cinq stubs restants -- symbole du descripteur, id
+/* Table maitresse des quatre stubs restants -- symbole du descripteur, id
  * stable, titre KlipperScreen, ligne d'explication (valeurs EXACTES du brief
  * de la tache, verbatim). ECRAN_UPDATER n'y figure plus depuis Task 2 (jalon
- * OTA firmware) -- voir ecran_updater.c pour son remplacant reel. */
+ * OTA firmware) -- voir ecran_updater.c pour son remplacant reel. ECRAN_POWER
+ * n'y figure plus depuis la feature "Power devices Moonraker" (tache B) --
+ * voir ecran_power.c pour son remplacant reel. */
 #define STUBS(X)                                                                                                     \
-    X(ECRAN_POWER, "power", "Power", "Requires Moonraker power API - not yet available")                             \
     X(ECRAN_BED_MESH, "bed_mesh", "Bed Mesh", "Requires bed mesh data - not yet available")                          \
     X(ECRAN_INPUT_SHAPER, "input_shaper", "Input Shaper", "Requires resonance testing - not yet available")          \
     X(ECRAN_SPOOLMAN, "spoolman", "Spoolman", "Requires a Spoolman server - not yet available")                     \
@@ -73,7 +75,7 @@ static void ecran_stub_peindre(lv_obj_t *parent, const char *titre, const char *
 STUBS(DEFINIR_CONSTRUIRE)
 #undef DEFINIR_CONSTRUIRE
 
-/* Les cinq descripteurs -- mettre_a_jour/detruire a NULL (rien de dynamique,
+/* Les quatre descripteurs -- mettre_a_jour/detruire a NULL (rien de dynamique,
  * rien a liberer), meme choix que ecran_niveau_lit.c.
  *
  * ATTENTION : les parametres de macro NE PEUVENT PAS s'appeler `id`/`titre`

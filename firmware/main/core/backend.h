@@ -88,3 +88,12 @@ typedef struct {
  * Distinct de BACKEND_ACTION_MACRO (qui porte {"nom":...}) : ici l'appelant a
  * déjà construit le gcode complet, le backend ne fait que le transmettre. */
 #define BACKEND_ACTION_GCODE      "gcode"
+
+/* Feature "Power devices Moonraker", tâche B : bascule ("toggle") d'une
+ * prise pilotée par Moonraker (API machine.device_power.*). arguments_json =
+ * {"device":"<nom>","action":"toggle"} — déjà construit par l'écran
+ * (ecran_power.c), relayé tel quel au backend comme params_json de
+ * machine.device_power.set_device (voir backend_moonraker.c) : même esprit
+ * que BACKEND_ACTION_GCODE, l'appelant a déjà construit le JSON attendu par
+ * Moonraker, le backend ne fait que le transmettre. */
+#define BACKEND_ACTION_POWER      "power"

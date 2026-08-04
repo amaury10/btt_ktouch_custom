@@ -48,6 +48,7 @@
 #include "klipper_fichiers.h"
 #include "moonraker_boite.h"
 #include "moonraker_rpc.h"
+#include "power_devices.h"
 
 static const char *TAG = "moonraker_ws";
 
@@ -187,6 +188,27 @@ static uint32_t g_id_macros = 0;
  * fichiers ne depend pas d'un redemarrage de Klippy comme le ferait une
  * config de macros). */
 static uint32_t g_id_fichiers = 0;
+
+/* Feature "Power devices Moonraker", tache B : meme convention que
+ * g_id_fichiers juste au-dessus -- id de la requete
+ * `machine.device_power.devices` EN COURS, mis a jour a CHAQUE (re)connexion
+ * (envoyer_identify_et_abonnement()) ET a chaque notify_klippy_ready (voir
+ * g_power_a_demander juste en dessous -- design doc §"Cablage WS" : "Au
+ * connect / notify_klippy_ready", Moonraker peut re-scanner ses prises apres
+ * un redemarrage Klippy) -- CONTRAIREMENT a g_id_fichiers, qui ne redemande
+ * jamais (voir son commentaire, MVP fichiers). Lu uniquement depuis la tache
+ * WS -- aucun verrou necessaire, meme raison que g_id_abonnement/g_id_macros/
+ * g_id_fichiers. */
+static uint32_t g_id_power = 0;
+
+/* Drapeau "une requete power doit partir des que g_verrou sera relache" --
+ * MEME mecanisme que g_macros_a_demander juste en dessous (voir son
+ * commentaire complet pour le POURQUOI : envoyer_requete_power() appelle
+ * prochain_id(), qui prend g_verrou en interne -- l'appeler DEPUIS
+ * traiter_message_complet() (deja sous CE MEME verrou, cas
+ * RPC_MSG_KLIPPY_READY) auto-interbloquerait la tache WS). Consomme HORS
+ * verrou par traiter_data(), juste apres celui de g_macros_a_demander. */
+static bool g_power_a_demander = false;
 
 /* Drapeau "une requete macros doit partir des que g_verrou sera relache" --
  * voir son unique lecteur/ecrivain sous verrou (traiter_message_complet(),
@@ -386,6 +408,35 @@ static void envoyer_requete_fichiers(void)
     }
 }
 
+/* Feature "Power devices Moonraker", tache B : COPIE d'envoyer_requete_fichiers()
+ * ci-dessus, meme structure trait pour trait -- seules la methode
+ * (`machine.device_power.devices`) et les params (`{}`, Moonraker sert cette
+ * liste sans argument -- voir le design doc) different. Appelee a CHAQUE
+ * (re)connexion (voir envoyer_identify_et_abonnement() ci-dessous) ET sur
+ * notify_klippy_ready (via g_power_a_demander, voir son commentaire de
+ * declaration) -- CONTRAIREMENT a envoyer_requete_fichiers(), qui ne
+ * redemande jamais. JAMAIS appelee sous g_verrou directement -- prochain_id()
+ * prend ce meme verrou en interne. */
+static void envoyer_requete_power(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "machine.device_power.devices", "{}")) {
+        g_id_power = id;
+        /* Meme controle du resultat de l'envoi qu'envoyer_requete_fichiers()
+         * ci-dessus (fix round 1, revue tache 6, M1 MEDIUM) -- voir son
+         * commentaire pour la consequence concrete d'un envoi silencieusement
+         * perdu. */
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de machine.device_power.devices echoue (id=%u)", (unsigned)id);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de machine.device_power.devices impossible");
+    }
+}
+
 /* À WEBSOCKET_EVENT_CONNECTED : identify PUIS abonnement PUIS macros
  * (critère 2 -- à CHAQUE reconnexion, jamais seulement la première).
  * Appelée depuis la tâche WS elle-même (le gestionnaire d'événement) :
@@ -434,6 +485,10 @@ static void envoyer_identify_et_abonnement(void)
      * endroit, meme absence de verrou -- voir le commentaire de
      * envoyer_requete_fichiers() ci-dessus. */
     envoyer_requete_fichiers();
+    /* Feature "Power devices Moonraker", tache B : JUSTE APRES les fichiers,
+     * meme endroit, meme absence de verrou -- voir le commentaire de
+     * envoyer_requete_power() ci-dessus. */
+    envoyer_requete_power();
 }
 
 /* Traite un message JSON-RPC COMPLET (déjà réassemblé) -- appelée SOUS
@@ -489,6 +544,19 @@ static void traiter_message_complet(const char *json, size_t longueur)
             if (rpc_lire_fichiers(&f, json, longueur)) {
                 klipper_fichiers_definir(&f);
             }
+        } else if (id == g_id_power && g_id_power != 0) {
+            /* Feature "Power devices Moonraker", tache B : reponse a
+             * machine.device_power.devices -- meme raisonnement que le cas
+             * fichiers juste au-dessus, le store power ne vit PAS non plus
+             * dans etat_klipper_t (voir power_devices.h). `pd` est un POD
+             * local ~300 o (POWER_DEVICES_MAX * sizeof(power_device_t) + un
+             * peu), une seule copie ponctuelle sur la pile du handler --
+             * acceptable, meme discipline que `klipper_fichiers_t f`
+             * ci-dessus. */
+            power_devices_t pd;
+            if (rpc_lire_power_devices(&pd, json, longueur)) {
+                power_devices_definir(&pd);
+            }
         } else if (g_correlateur.en_cours && id == g_correlateur.id) {
             bool succes = false;
             char erreur[sizeof(g_correlateur.erreur_texte)];
@@ -525,18 +593,51 @@ static void traiter_message_complet(const char *json, size_t longueur)
          * Le drapeau ci-dessous est consomme par traiter_data() UNE FOIS
          * g_verrou relache. */
         g_macros_a_demander = true;
+        /* Feature "Power devices Moonraker", tache B : MEME raisonnement que
+         * g_macros_a_demander juste au-dessus, applique a la liste des
+         * prises -- design doc §"Cablage WS" ("Au connect /
+         * notify_klippy_ready"). NE PAS appeler envoyer_requete_power()
+         * directement ICI, meme raison exacte que pour les macros
+         * (auto-interblocage sur g_verrou). */
+        g_power_a_demander = true;
         break;
     case RPC_MSG_KLIPPY_DECONNECTE:
         g_klippy_pret = false;
         break;
-    case RPC_MSG_AUTRE:
-    case RPC_MSG_INVALIDE:
-    default:
-        /* RPC_MSG_AUTRE couvre notamment notify_gcode_response, le canal
-         * par lequel Klipper signale l'echec REEL d'une macro inconnue
-         * (voir le commentaire de tete de moonraker_rpc.h) -- son
+    case RPC_MSG_AUTRE: {
+        /* Feature "Power devices Moonraker", tache B : notify_power_changed
+         * n'a pas de classification RPC_MSG_* dediee -- rpc_classifier()
+         * (moonraker_rpc.c) ne distingue pas les notifications entre elles
+         * au-dela de status_update/klippy_ready/klippy_disconnected,
+         * notify_power_changed tombe ici comme notify_gcode_response (voir
+         * le commentaire plus bas). rpc_lire_power_changed() est une
+         * fonction PURE qui valide elle-meme la forme attendue (params[0]
+         * un TABLEAU d'objets {"device":...}, voir moonraker_rpc.h) et rend
+         * false sur toute AUTRE notification (notify_gcode_response, par
+         * exemple, a un params[0] qui est une CHAINE, pas un tableau --
+         * echoue deja ce test) : tenter l'appel inconditionnellement ici est
+         * donc sans risque de faux positif, meme discipline "essayer, la
+         * forme filtre" que le reste de ce fichier (rpc_fusionner_status,
+         * rpc_lire_reponse...). PAS `power_devices_definir()` (qui
+         * REMPLACERAIT tout le store par le seul sous-ensemble change, voir
+         * le rapport de la tache A) : une mise a jour CIBLEE par prise,
+         * `power_devices_maj_un()`, pour chacune des `pd.nb` prises
+         * changees. */
+        power_devices_t pd;
+        if (rpc_lire_power_changed(&pd, json, longueur)) {
+            for (uint8_t i = 0; i < pd.nb; i++) {
+                power_devices_maj_un(pd.devices[i].nom, pd.devices[i].allumee);
+            }
+        }
+        /* Sinon (forme non reconnue) : couvre notamment notify_gcode_response,
+         * le canal par lequel Klipper signale l'echec REEL d'une macro
+         * inconnue (voir le commentaire de tete de moonraker_rpc.h) -- son
          * interpretation est une decision de la tache 6 (ecran macros),
          * volontairement PAS prise ici. */
+        break;
+    }
+    case RPC_MSG_INVALIDE:
+    default:
         break;
     }
 }
@@ -628,6 +729,12 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         if (g_macros_a_demander) {
             g_macros_a_demander = false;
             envoyer_requete_macros();
+        }
+        /* Feature "Power devices Moonraker", tache B : meme mecanisme,
+         * drapeau distinct -- voir g_power_a_demander. */
+        if (g_power_a_demander) {
+            g_power_a_demander = false;
+            envoyer_requete_power();
         }
     }
 }
@@ -846,7 +953,9 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_id_abonnement = 0;
     g_id_macros = 0;
     g_id_fichiers = 0;
+    g_id_power = 0;
     g_macros_a_demander = false;
+    g_power_a_demander = false;
     g_id_suivant = 1;
     g_tampon_len = 0;
     g_tampon_deborde = false;
