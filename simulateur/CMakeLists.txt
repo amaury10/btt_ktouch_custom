@@ -119,16 +119,19 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c
+    ${ECRANS_DIR}/ecran_usb.c
     ${ECRANS_DIR}/ecran_reglages_wifi.c
     ${ECRANS_DIR}/ecran_menu_reglages.c
     ${ECRANS_DIR}/ecran_actions.c
     ${ECRANS_DIR}/ecran_homing.c
     ${WIFI_MOCK_DIR}/wifi_mock.c
+    ${WIFI_MOCK_DIR}/usb_upload_http_mock.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c
     ${KLIPPER_DIR}/moonraker_parse.c
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_fichiers.c
+    ${KLIPPER_DIR}/usb_fichiers.c
     ${KLIPPER_DIR}/klipper_temp_historique.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c

@@ -520,9 +520,11 @@ void suite_ecran_accueil_hub(void)
     VERIFIER(zone_menu != NULL);
     VERIFIER(lv_obj_get_child_count(zone_menu) == ECRAN_ACCUEIL_HUB_MENU_NB);
 
-    /* Table des cinq destinations attendues (task-4-brief.md de la refonte
-     * IHM KlipperScreen, verbatim, inchangee par cette tache) -- indice de
-     * la tuile, id de l'ecran cible qu'elle doit empiler. */
+    /* Table des six destinations attendues (task-4-brief.md de la refonte IHM
+     * KlipperScreen pour les cinq premieres, verbatim ; USB ajoutee par la
+     * feature "Impression depuis USB", tache B -- voir
+     * ECRAN_ACCUEIL_HUB_MENU_USB dans ecran_accueil_hub.h) -- indice de la
+     * tuile, id de l'ecran cible qu'elle doit empiler. */
     const struct {
         uint8_t     indice;
         const char *id_attendu;
@@ -532,6 +534,7 @@ void suite_ecran_accueil_hub(void)
         { ECRAN_ACCUEIL_HUB_MENU_ACTIONS,       "actions" },
         { ECRAN_ACCUEIL_HUB_MENU_CONFIGURATION, "menu_reglages" },
         { ECRAN_ACCUEIL_HUB_MENU_PRINT,         "fichiers" },
+        { ECRAN_ACCUEIL_HUB_MENU_USB,           "usb" },
     };
 
     for (size_t i = 0; i < ECRAN_ACCUEIL_HUB_MENU_NB; i++) {

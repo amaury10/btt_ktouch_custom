@@ -5,7 +5,9 @@
  * colonnes cote a cote. La colonne GAUCHE porte les lignes de chauffants
  * (nom + valeur, ECRAN_ACCUEIL_HUB_HEATER_LIGNES au plus) puis DIRECTEMENT un
  * `lv_chart` d'historique de temperature qui occupe le reste de la colonne.
- * La colonne DROITE porte les cinq tuiles de menu, empilees VERTICALEMENT
+ * La colonne DROITE porte les six tuiles de menu (Homing/Temperature/Actions/
+ * Configuration/Print/USB -- USB ajoutee par la feature "Impression depuis
+ * USB", tache B), empilees VERTICALEMENT
  * (contre une rangee horizontale sous le resume dans l'ancienne mise en page
  * une colonne) -- geometrie verifiee par _Static_assert, meme discipline que
  * ecran_menu_reglages.c/ecran_deplacer.c. SOUS les deux colonnes, une ligne
@@ -69,6 +71,7 @@
 #include "ecran_fichiers.h"      /* ECRAN_FICHIERS */
 #include "ecran_homing.h"        /* ECRAN_HOMING */
 #include "ecran_menu_reglages.h" /* ECRAN_MENU_REGLAGES */
+#include "ecran_usb.h"           /* ECRAN_USB -- feature "Impression depuis USB", tache B */
 /* ECRAN_TEMPERATURES + ECRAN_TEMPERATURES_TITRE_BUSE/PLATEAU/TEMP_MIN/MAX :
  * reutilises TELS QUELS pour le clavier de consigne pose par cette tache --
  * memes titres/bornes que le panneau dedie, jamais une seconde source de
@@ -186,11 +189,18 @@
 #define STATUT_HAUTEUR 20
 #define STATUT_Y       (ZONE_CONTENU_MAX + (BANDEAU_HAUTEUR_ECRAN - STATUT_HAUTEUR) / 2)
 
-/* --- Colonne droite : cinq tuiles empilees verticalement, meme hauteur
- * fixe -- TUILE_HAUTEUR est DERIVEE pour que les cinq tuiles + les quatre
- * ecarts remplissent EXACTEMENT la meme plage verticale que la colonne
- * gauche (CONTENU_Y .. ZONE_CONTENU_MAX), _Static_assert plus bas. -------- */
-#define TUILE_ECART            10
+/* --- Colonne droite : six tuiles empilees verticalement (feature
+ * "Impression depuis USB", tache B : USB ajoutee en 6e case, voir
+ * ECRAN_ACCUEIL_HUB_MENU_USB dans le .h), meme hauteur fixe -- TUILE_HAUTEUR
+ * est DERIVEE pour que les six tuiles + les cinq ecarts remplissent
+ * EXACTEMENT la meme plage verticale que la colonne gauche (CONTENU_Y ..
+ * ZONE_CONTENU_MAX), _Static_assert plus bas. TUILE_ECART reduit de 10 a 8
+ * (par rapport a l'ancienne grille de 5 tuiles) : DROITE_ZONE_HAUTEUR (370)
+ * ne se divise pas exactement par 6 tuiles + 5 ecarts de 10 (l'egalite EXACTE
+ * exigee par le _Static_assert plus bas echouerait), alors qu'elle le fait
+ * avec des ecarts de 8 (330 / 6 = 55 pile) -- purement arithmetique, aucune
+ * autre raison de ce choix. ------------------------------------------------ */
+#define TUILE_ECART            8
 #define DROITE_ZONE_HAUTEUR    (ZONE_CONTENU_MAX - CONTENU_Y)
 #define TUILE_HAUTEUR           ((DROITE_ZONE_HAUTEUR - (ECRAN_ACCUEIL_HUB_MENU_NB - 1) * TUILE_ECART) / \
                                   ECRAN_ACCUEIL_HUB_MENU_NB)
@@ -200,7 +210,7 @@ _Static_assert(MARGE + GAUCHE_LARGEUR + COL_ECART + DROITE_LARGEUR + MARGE == LA
 _Static_assert(TUILE_HAUTEUR >= 44, "les tuiles de menu doivent rester >= 44px de cible tactile");
 _Static_assert(ECRAN_ACCUEIL_HUB_MENU_NB * TUILE_HAUTEUR + (ECRAN_ACCUEIL_HUB_MENU_NB - 1) * TUILE_ECART ==
                     DROITE_ZONE_HAUTEUR,
-                "les cinq tuiles ne remplissent plus exactement la hauteur disponible de la colonne droite");
+                "les six tuiles ne remplissent plus exactement la hauteur disponible de la colonne droite");
 _Static_assert(CHAUFFANT_LIGNE_HAUTEUR >= 44,
                 "les boutons NOM/VALEUR des lignes de chauffants doivent rester >= 44px de cible tactile");
 _Static_assert(CHAUFFANT_VALEUR_X + CHAUFFANT_VALEUR_LARGEUR + CHAUFFANT_GOUTTIERE_SCROLLBAR == GAUCHE_LARGEUR,
@@ -653,6 +663,14 @@ static void ouvrir_print_cb(lv_event_t *e)
     navigation_empiler(&ECRAN_FICHIERS);
 }
 
+/* Feature "Impression depuis USB", tache B : 6e tuile, meme idiome que les
+ * cinq autres (aucune case no-op). */
+static void ouvrir_usb_cb(lv_event_t *e)
+{
+    (void)e;
+    navigation_empiler(&ECRAN_USB);
+}
+
 typedef void (*menu_cb_t)(lv_event_t *e);
 
 static const struct {
@@ -664,6 +682,7 @@ static const struct {
     [ECRAN_ACCUEIL_HUB_MENU_ACTIONS]       = { "Actions",       ouvrir_actions_cb },
     [ECRAN_ACCUEIL_HUB_MENU_CONFIGURATION] = { "Configuration", ouvrir_configuration_cb },
     [ECRAN_ACCUEIL_HUB_MENU_PRINT]         = { "Print",         ouvrir_print_cb },
+    [ECRAN_ACCUEIL_HUB_MENU_USB]           = { "USB",           ouvrir_usb_cb },
 };
 
 static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
@@ -794,7 +813,7 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
      * re-ajouter le dernier point que le backfill vient deja d'inclure. */
     ctx->derniere_gen = klipper_temp_historique_generation();
 
-    /* --- colonne droite : cinq tuiles empilees verticalement (voir
+    /* --- colonne droite : six tuiles empilees verticalement (voir
      * ECRAN_ACCUEIL_HUB_MENU_* -- meme idiome que la grille de menu de
      * l'ancien contenu de ce fichier, une seule colonne au lieu d'une
      * rangee). ------------------------------------------------------------ */

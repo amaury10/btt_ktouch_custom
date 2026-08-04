@@ -98,19 +98,23 @@
  * "Temperature"). */
 #define ECRAN_ACCUEIL_HUB_HEATER_LIGNES KLIPPER_HISTO_SERIES
 
-/* Grille de 5 tuiles de menu, ORDRE FIXE -- table verbatim de
+/* Grille de 6 tuiles de menu, ORDRE FIXE -- table verbatim de
  * task-4-brief.md (refonte IHM KlipperScreen) : Homing -> ECRAN_HOMING,
  * Temperature -> ECRAN_TEMPERATURES, Actions -> ECRAN_ACTIONS,
- * Configuration -> ECRAN_MENU_REGLAGES, Print -> ECRAN_FICHIERS. Reutilise
- * par la boucle de construction (MENU_DEFS dans le .c) et par host-test/
- * tests/test_ecran_accueil_hub.c pour retrouver la bonne tuile -- meme
- * convention que ECRAN_MENU_REGLAGES_CASE_xxx (ecran_menu_reglages.h). */
+ * Configuration -> ECRAN_MENU_REGLAGES, Print -> ECRAN_FICHIERS, PLUS
+ * USB -> ECRAN_USB (feature "Impression depuis USB", tache B -- 6e tuile
+ * ajoutee APRES task-4-brief.md, en fin de liste pour ne renumeroter aucune
+ * des cinq tuiles existantes ni les tests qui les referencent par nom).
+ * Reutilise par la boucle de construction (MENU_DEFS dans le .c) et par
+ * host-test/tests/test_ecran_accueil_hub.c pour retrouver la bonne tuile --
+ * meme convention que ECRAN_MENU_REGLAGES_CASE_xxx (ecran_menu_reglages.h). */
 #define ECRAN_ACCUEIL_HUB_MENU_HOMING        0
 #define ECRAN_ACCUEIL_HUB_MENU_TEMPERATURE   1
 #define ECRAN_ACCUEIL_HUB_MENU_ACTIONS       2
 #define ECRAN_ACCUEIL_HUB_MENU_CONFIGURATION 3
 #define ECRAN_ACCUEIL_HUB_MENU_PRINT         4
-#define ECRAN_ACCUEIL_HUB_MENU_NB            5
+#define ECRAN_ACCUEIL_HUB_MENU_USB           5
+#define ECRAN_ACCUEIL_HUB_MENU_NB            6
 
 /* user_data du rappel de clic d'UN label VALEUR de chauffant -- meme forme
  * que ecran_temperatures_cellule_info_t (ecran_temperatures.h), un tableau
