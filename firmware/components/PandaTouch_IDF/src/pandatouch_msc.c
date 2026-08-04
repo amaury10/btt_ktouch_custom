@@ -39,6 +39,17 @@
 #ifndef PT_USB_INSTALL_RETRY_DELAY_MS
 #define PT_USB_INSTALL_RETRY_DELAY_MS 500
 #endif
+/* PATCH LOCAL (K-Touch) : reprise du montage VFS. Certaines cles renvoient une
+ * unit-attention SCSI (Sense 0x06 / ASC 0x28 "not ready / medium may have
+ * changed") au tout premier acces, qui se resorbe apres re-emission de la
+ * commande -- sans reprise, msc_host_vfs_register echoue et la cle apparait
+ * "absente". */
+#ifndef PT_USB_VFS_MOUNT_MAX_RETRIES
+#define PT_USB_VFS_MOUNT_MAX_RETRIES 5
+#endif
+#ifndef PT_USB_VFS_MOUNT_RETRY_DELAY_MS
+#define PT_USB_VFS_MOUNT_RETRY_DELAY_MS 250
+#endif
 
 // -------- State --------
 static TaskHandle_t s_usb_events_task = NULL;
@@ -588,10 +599,25 @@ static void pt_usb_mount_vfs(msc_host_device_handle_t dev)
         .max_files = 6,
         .allocation_unit_size = 0,
     };
-    esp_err_t mr = msc_host_vfs_register(dev, PT_USB_MOUNT_PATH, &mnt, &s_vfs);
+    /* PATCH LOCAL (K-Touch) : reprise du montage. La 1re tentative peut
+       echouer sur une unit-attention SCSI (ASC 0x28, cf. les #define en tete),
+       resorbee par la re-emission -- on re-tente quelques fois avant d'abandonner
+       plutot que de declarer la cle absente au 1er echec. */
+    esp_err_t mr = ESP_FAIL;
+    for (int essai = 0; essai < PT_USB_VFS_MOUNT_MAX_RETRIES; ++essai)
+    {
+        mr = msc_host_vfs_register(dev, PT_USB_MOUNT_PATH, &mnt, &s_vfs);
+        if (mr == ESP_OK)
+            break;
+        ESP_LOGW(TAG, "msc_host_vfs_register essai %d/%d echoue: %s",
+                 essai + 1, PT_USB_VFS_MOUNT_MAX_RETRIES, esp_err_to_name(mr));
+        s_vfs = NULL;
+        vTaskDelay(pdMS_TO_TICKS(PT_USB_VFS_MOUNT_RETRY_DELAY_MS));
+    }
     if (mr != ESP_OK)
     {
-        ESP_LOGE(TAG, "msc_host_vfs_register failed: %s", esp_err_to_name(mr));
+        ESP_LOGE(TAG, "msc_host_vfs_register failed apres %d essais: %s",
+                 PT_USB_VFS_MOUNT_MAX_RETRIES, esp_err_to_name(mr));
         s_vfs = NULL;
         s_mounted = false;
         s_info.state = PT_USB_STATE_WAITING_DEVICE;
