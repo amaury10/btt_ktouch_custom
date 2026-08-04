@@ -36,7 +36,7 @@ typedef struct {
  * Moonraker. Le nom de fichier envoyé dans le multipart est le dernier
  * segment de `chemin_usb` (après le dernier '/'). `taille_fichier` est la
  * taille CONNUE du fichier (propagée depuis pt_usb_dir_entry_t.size par le
- * scan de app_main.c/usb_fichiers.h) -- jamais relue ici (pas de stat()
+ * scan de usb_scan.c/usb_fichiers.h) -- jamais relue ici (pas de stat()
  * supplémentaire), nécessaire pour calculer Content-Length AVANT le premier
  * octet écrit (voir usb_upload_content_length()).
  *

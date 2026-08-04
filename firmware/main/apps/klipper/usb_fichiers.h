@@ -1,6 +1,6 @@
 /* Store dédié de l'état de la clé USB (montée/absente) et des .gcode qui y
- * ont été trouvés par le scan de démarrage (voir app_main.c, callbacks
- * pt_usb_on_mount()/pt_usb_on_unmount()).
+ * ont été trouvés par le scan de démarrage paresseux (voir usb_scan.h,
+ * callbacks pt_usb_on_mount()/pt_usb_on_unmount()).
  *
  * POURQUOI un store séparé, HORS etat_klipper_t (même choix, même raison que
  * klipper_fichiers.h, voir son commentaire de tête complet) : etat_klipper_t
@@ -8,10 +8,12 @@
  * y ajouter une liste de fichiers USB (jusqu'à USB_FICHIERS_MAX x
  * USB_FICHIER_CHEMIN_MAX, ~4 Ko) reproduirait exactement l'épuisement de RAM
  * interne qui avait empêché la tâche WebSocket de s'allouer avant que
- * klipper_fichiers.h n'en soit sorti. Ce store-ci est écrit par la tâche de
- * scan dédiée créée au montage (app_main.c, jamais sur la pile 4 Ko des
- * tâches USB du BSP -- voir leur commentaire) et lu par l'écran USB (tâche
- * LVGL) : même politique de verrou COURT que klipper_fichiers.c.
+ * klipper_fichiers.h n'en soit sorti. Ce store lui-même vit désormais EN
+ * PSRAM plutôt qu'en .bss RAM interne (même fix, voir usb_fichiers.c). Il est
+ * écrit par la tâche de scan dédiée créée au montage (usb_scan.c, jamais sur
+ * la pile 4 Ko des tâches USB du BSP -- voir leur commentaire) et lu par
+ * l'écran USB (tâche LVGL) : même politique de verrou COURT que
+ * klipper_fichiers.c.
  *
  * `taille` (pt_usb_dir_entry_t.size, voir pandatouch_msc.h) est propagée ICI
  * depuis le scan pour que usb_upload_http.c puisse calculer le
@@ -35,7 +37,7 @@
  * relatif à la racine "gcodes" de Moonraker) : un chemin USB porte en plus
  * le préfixe "/usb/" et peut descendre plus profond en sous-dossiers -- 128
  * couvre largement un nom long FAT32 (LFN, 255 caractères max) tronqué au
- * besoin (voir usb_scan_recursif(), app_main.c, qui borne défensivement
+ * besoin (voir usb_scan_recursif(), usb_scan.c, qui borne défensivement
  * plutôt que déborder). */
 #define USB_FICHIER_CHEMIN_MAX 128
 

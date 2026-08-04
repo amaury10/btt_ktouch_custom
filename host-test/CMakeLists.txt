@@ -177,6 +177,7 @@ add_executable(tests
     ${KLIPPER_DIR}/json_util.c
     ${KLIPPER_DIR}/usb_upload.c
     ${KLIPPER_DIR}/usb_fichiers.c
+    ${KLIPPER_DIR}/usb_scan.c
     ${KLIPPER_DIR}/klipper_temp_historique.c
     ${KLIPPER_DIR}/miniature.c
     ${KLIPPER_DIR}/moonraker_boite.c

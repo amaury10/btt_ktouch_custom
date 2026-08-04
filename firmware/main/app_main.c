@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -21,7 +22,6 @@
 #include "lvgl.h"
 #include "nvs_flash.h"
 #include "pandatouch_display.h"
-#include "pandatouch_msc.h"
 
 #include "accueil_choix.h"
 #include "backend.h"
@@ -40,8 +40,6 @@
 #include "rail_actions.h"
 #include "reglages.h"
 #include "rescue.h"
-#include "usb_fichiers.h"
-#include "usb_upload.h" /* usb_est_gcode() -- tache A de "Impression depuis USB" */
 #include "web.h"
 #include "wifi.h"
 
@@ -65,172 +63,6 @@ static void on_touch(lv_event_t *event)
     lv_point_t point;
     lv_indev_get_point(lv_indev_active(), &point);
     ESP_LOGI(TAG, "appui a x=%d y=%d", (int)point.x, (int)point.y);
-}
-
-/* ------------------------------------------------------------------------
- * Feature "Impression depuis USB", tache B (integration ESP) : montage MSC
- * (BSP pandatouch_msc.h) + scan recursif au montage, qui remplit le store
- * dedie usb_fichiers.h (voir son commentaire de tete pour le POURQUOI hors
- * de etat_klipper_t -- meme raison que klipper_fichiers.h). Le reste de la
- * chaine (upload HTTP streame vers Moonraker, ecran) vit dans
- * usb_upload_http.{h,c}/ecran_usb.{h,c}, pas ici.
- * ------------------------------------------------------------------------ */
-
-/* Pile large (8 Kio, meme ordre de grandeur que les taches dediees d'ota.c) :
- * cette tache porte la recursion de usb_scan_recursif() (un cadre ~USB_FICHIER_CHEMIN_MAX
- * octets par niveau de sous-dossier) -- s_usb_scan_tampon, lui, est STATIQUE
- * (BSS, jamais sur cette pile). Priorite identique aux autres taches dediees
- * de ce firmware (ota.c) : nettement au-dessus d'IDLE, sans rivaliser avec
- * les taches internes du pilote WiFi/USB. */
-#define USB_SCAN_TASK_STACK 8192
-#define USB_SCAN_TASK_PRIO  (tskIDLE_PRIORITY + 5)
-
-/* Tampon de scan STATIQUE (jamais sur une pile, voir usb_scan_tache()) --
- * rempli par usb_scan_recursif() puis recopie EN UNE FOIS dans le store
- * verrouille (usb_fichiers_definir()) une fois le scan complet termine.
- * Partage entre scans successifs (un seul a la fois, voir s_usb_scan_en_cours
- * ci-dessous) : pas de risque de lecture partielle par le store, qui ne voit
- * jamais ce tampon directement. */
-static usb_fichier_t s_usb_scan_tampon[USB_FICHIERS_MAX];
-
-/* Garde contre un second scan concurrent (remontage rapide, ou callback de
- * montage rappelee alors qu'un scan precedent tourne encore) -- lu/ecrit
- * uniquement depuis usb_on_mount_cb() (tache "msc_inst_w" du BSP) et
- * usb_scan_tache() (sa propre tache dediee) : un seul ecrivain a la fois de
- * chaque cote, une simple variable volatile suffit (pas de portMUX -- meme
- * esprit que s_mounted dans pandatouch_msc.c, un flag booleen a ecriture
- * quasi-atomique sur cette architecture). */
-static volatile bool s_usb_scan_en_cours = false;
-
-/* Vrai si `nom` contient un octet de controle 0x00-0x1F -- prudence
- * demandee par la tache B, au-dela du seul filtre d'extension deja fait par
- * usb_est_gcode() (usb_upload.h, tache A) : usb_upload_preambule() nettoie
- * deja '"'/CR/LF d'un nom de fichier avant de l'inserer dans un en-tete HTTP,
- * mais un octet de controle "exotique" (tabulation, etc.) resterait possible
- * sur une clé FAT mal formee -- ce filtre-ci l'ecarte plus tot, avant meme
- * d'entrer dans le store. */
-static bool usb_nom_a_octet_controle(const char *nom)
-{
-    if (nom == NULL) {
-        return false;
-    }
-    for (const unsigned char *p = (const unsigned char *)nom; *p != '\0'; p++) {
-        if (*p <= 0x1F) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* Scanne recursivement `chemin` (sous /usb) et accumule dans
- * s_usb_scan_tampon les .gcode trouves -- filtre extension (usb_est_gcode(),
- * tache A) + noms sans octet de controle (ci-dessus). Copie de
- * scan_dir_recursive() (PandaTouch_IDF/examples/display_slideshow.c, meme
- * usage de pt_usb_list_dir()/pt_usb_dir_list_free()), adaptee au filtre
- * gcode et a la taille des fichiers (pt_usb_dir_entry_t.size, propagee dans
- * le store -- voir usb_fichiers.h). `nb`/`tronques` sont des accumulateurs
- * partages entre tous les niveaux de recursion (passes par pointeur). */
-static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
-{
-    int erreur = 0;
-    pt_usb_dir_list_t *liste = pt_usb_list_dir(chemin, &erreur);
-    if (liste == NULL) {
-        if (erreur != 0) {
-            JOURNAL_ALERTE(TAG, "pt_usb_list_dir(%s) a echoue (%d)", chemin ? chemin : "?", erreur);
-        }
-        return;
-    }
-
-    for (size_t i = 0; i < liste->count; i++) {
-        pt_usb_dir_entry_t *e = &liste->entries[i];
-        if (e->is_hidden) {
-            continue;
-        }
-
-        const char *chemin_entree = (e->path != NULL && e->path[0] != '\0') ? e->path : NULL;
-        char tampon_local[USB_FICHIER_CHEMIN_MAX];
-        if (chemin_entree == NULL) {
-            if (chemin != NULL && chemin[0] != '\0' && chemin[strlen(chemin) - 1] == '/') {
-                snprintf(tampon_local, sizeof(tampon_local), "%s%s", chemin, e->name ? e->name : "");
-            } else {
-                snprintf(tampon_local, sizeof(tampon_local), "%s/%s", chemin ? chemin : "", e->name ? e->name : "");
-            }
-            chemin_entree = tampon_local;
-        }
-
-        if (e->is_dir) {
-            usb_scan_recursif(chemin_entree, nb, tronques);
-            continue;
-        }
-
-        if (usb_nom_a_octet_controle(e->name) || !usb_est_gcode(e->name)) {
-            continue;
-        }
-
-        if (*nb >= USB_FICHIERS_MAX) {
-            *tronques = true;
-            continue;
-        }
-
-        usb_fichier_t *dest = &s_usb_scan_tampon[*nb];
-        size_t longueur = strlen(chemin_entree);
-        if (longueur >= sizeof(dest->chemin)) {
-            longueur = sizeof(dest->chemin) - 1;
-        }
-        memcpy(dest->chemin, chemin_entree, longueur);
-        dest->chemin[longueur] = '\0';
-        dest->taille = e->size;
-        (*nb)++;
-    }
-
-    pt_usb_dir_list_free(liste);
-}
-
-static void usb_scan_tache(void *arg)
-{
-    (void)arg;
-    uint8_t nb = 0;
-    bool tronques = false;
-    usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques);
-    /* La cle a pu etre ejectee PENDANT le scan (cette tache dediee tourne des
-       centaines de ms) : usb_on_unmount_cb() a alors deja publie monte=false.
-       Ne pas ecraser cet etat par un "true" en dur -- relire l'etat reel du
-       montage. Si demontee, publier monte=false + liste vide plutot qu'une
-       liste perimee etiquetee "cle presente" (scenario ejection a chaud). */
-    bool encore_monte = pt_usb_is_mounted();
-    usb_fichiers_definir(encore_monte, encore_monte ? s_usb_scan_tampon : NULL,
-                         encore_monte ? nb : 0, encore_monte ? tronques : false);
-    JOURNAL_INFO(TAG, "scan USB : %u fichier(s) .gcode trouve(s)%s", (unsigned)nb,
-                 tronques ? " (liste tronquee)" : "");
-    s_usb_scan_en_cours = false;
-    vTaskDelete(NULL);
-}
-
-/* Callback pt_usb_on_mount() -- tourne sur "msc_inst_w", une tache du BSP a
- * SEULEMENT 4096 o de pile (voir pandatouch_msc.c, pt_usb_install_device_task()) :
- * jamais de scan direct ici (la recursion + les tampons locaux de
- * usb_scan_recursif() y depasseraient vite ce budget -- la spec de cette
- * tache demande explicitement de ne pas gonfler les piles USB du BSP). Une
- * tache DEDIEE (8 Kio, voir USB_SCAN_TASK_STACK) fait le travail reel ; ce
- * callback ne fait que la creer et revenir immediatement. */
-static void usb_on_mount_cb(void)
-{
-    if (s_usb_scan_en_cours) {
-        JOURNAL_ALERTE(TAG, "scan USB deja en cours, montage ignore");
-        return;
-    }
-    s_usb_scan_en_cours = true;
-    BaseType_t cree = xTaskCreate(usb_scan_tache, "usb_scan", USB_SCAN_TASK_STACK, NULL, USB_SCAN_TASK_PRIO, NULL);
-    if (cree != pdPASS) {
-        s_usb_scan_en_cours = false;
-        JOURNAL_ERREUR(TAG, "creation de la tache de scan USB echouee (memoire epuisee)");
-    }
-}
-
-static void usb_on_unmount_cb(void)
-{
-    usb_fichiers_definir(false, NULL, 0, false);
-    JOURNAL_ALERTE(TAG, "cle USB retiree, store vide");
 }
 
 /* Rappel du minuteur récurrent (tâche 10) : par construction, un lv_timer
@@ -505,21 +337,16 @@ void app_main(void)
     web_set_boot_count(compteur_demarrages);
 
     /* Feature "Impression depuis USB", tache B : montage MSC + scan --
-       independant du backend Klipper/du serveur HTTP ci-dessous (aucun lien),
-       demarre ICI (juste apres web_set_boot_count()) pour que le scan tourne
-       des que possible si une cle est deja inseree au boot, sans attendre
-       reglages_charger()/boucle_demarrer() plus bas.
-       ATTENTION (constat, non corrige ici -- hors perimetre de cette tache,
-       toucherait le BSP vendore) : pt_usb_start() (pandatouch_msc.c) appelle
-       en interne ESP_ERROR_CHECK(usb_host_install(...)) -- contrairement a
-       TOUT le reste de cette fonction (NVS, WiFi, serveur HTTP, ecran, qui
-       journalisent et continuent sur erreur), un echec d'installation du
-       pilote USB host (materiel absent, conflit de ressources) ferait donc
-       PANIQUER/redemarrer tout le firmware ici. Voir le rapport de cette
-       tache. */
-    pt_usb_on_mount(usb_on_mount_cb);
-    pt_usb_on_unmount(usb_on_unmount_cb);
-    pt_usb_start();
+       NE démarre PLUS ici (fix RAM interne, voir la mémoire du projet) :
+       pt_usb_start() créait à ce point 2 tâches hôte USB (~8 Ko de RAM
+       INTERNE) juste avant que boucle_demarrer() plus bas ne cherche à
+       allouer la tâche WebSocket (16 Ko, elle aussi RAM interne) --
+       "Error create websocket task". Ce sous-système démarre désormais à la
+       PREMIÈRE ouverture de l'écran USB (voir usb_scan.h/ecran_usb.c), plus
+       au boot. Bonus documenté par usb_scan.h : repousse aussi le risque de
+       reboot par l'ESP_ERROR_CHECK interne de pt_usb_start() bien après que
+       WiFi/serveur HTTP/écran soient déjà debout, au lieu du tout premier
+       étage du boot. */
 
     /* Le serveur HTTP démarre ici, juste après le WiFi et AVANT l'écran :
      * c'est ce qui garantit que /revert et /log restent joignables même si
@@ -590,6 +417,18 @@ void app_main(void)
 
         backend_hote_t hote;
         reglages_hote(&hote);
+
+        /* Diagnostic RAM interne (fix lot Power/Console/Miniatures/USB, voir
+         * la mémoire du projet) : juste AVANT boucle_demarrer(), qui est ce
+         * qui déclenche la création de la tâche WebSocket (16 Ko de pile,
+         * RAM interne -- voir moonraker_ws.c ~l.860-882) côté backend
+         * Moonraker. Permet de confirmer dans /log, après ce fix, que la RAM
+         * interne libre est bien revenue au-dessus de ~20 Ko contigus (le
+         * symptôme d'origine était "Error create websocket task" faute de
+         * bloc contigu suffisant, pas faute de RAM totale). */
+        JOURNAL_INFO(TAG, "avant demarrage boucle/WS : RAM interne libre %u o (plus grand bloc contigu %u o)",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
         if (desc_choisi != NULL) {
             esp_err_t erreur_boucle = boucle_demarrer(desc_choisi, &hote);

@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -42,10 +43,18 @@ static const char *TAG = "usb_upload_http";
 /* Taille de bloc de lecture/écriture : bornée, jamais le fichier entier en
  * RAM (contrainte de la spec) -- même ordre de grandeur que OTA_TAILLE_BLOC
  * (ota.c), suffisant pour amortir le coût par appel fread()/esp_http_client_write()
- * sans jamais engager plus de 4 Kio à la fois. Statique (BSS), jamais sur la
- * pile de la tâche dédiée -- même discipline que le tampon d'ota.c. */
+ * sans jamais engager plus de 4 Kio à la fois. EN PSRAM (fix RAM interne, lot
+ * Power/Console/Miniatures/USB -- voir la mémoire du projet) : ce tampon
+ * vivait auparavant en .bss RAM interne comme un tableau statique, ce qui
+ * contribuait à épuiser la RAM interne dont la tâche WebSocket (16 Ko de
+ * pile) a besoin. Alloué UNE SEULE FOIS, paresseusement, dans
+ * usb_upload_http_demarrer() (même idiome que g_verrou juste en dessous) --
+ * jamais sur la pile de la tâche dédiée, même discipline que l'ancien tampon
+ * statique. Un échec d'allocation fait échouer usb_upload_http_demarrer()
+ * proprement (même voie que l'échec de xSemaphoreCreateMutex() ci-dessous),
+ * jamais un firmware qui plante. */
 #define USB_UPLOAD_HTTP_TAMPON_OCTETS 4096u
-static uint8_t s_tampon_lecture[USB_UPLOAD_HTTP_TAMPON_OCTETS];
+static uint8_t *s_tampon_lecture = NULL;
 
 /* Boundary FIXE : ce dépôt ne génère jamais de contenu utilisateur AVANT le
  * multipart (le fichier vient de la clé USB, jamais composé par ce firmware),
@@ -76,9 +85,9 @@ static uint8_t s_tampon_lecture[USB_UPLOAD_HTTP_TAMPON_OCTETS];
 /* Pile large (comme ota.c : 8192) -- cette tâche porte esp_http_client
  * (plusieurs structures internes) + les tampons de pile locaux (préambule/
  * trailer/URL, quelques centaines d'octets), le tampon de lecture lui-même
- * étant statique (BSS, voir plus haut). Sans lien avec les tâches USB du
- * BSP (4096 o chacune, non touchées ici) : celle-ci est une tâche DÉDIÉE,
- * propre à ce fichier. */
+ * étant en PSRAM (jamais sur cette pile, voir plus haut). Sans lien avec les
+ * tâches USB du BSP (4096 o chacune, non touchées ici) : celle-ci est une
+ * tâche DÉDIÉE, propre à ce fichier. */
 #define USB_UPLOAD_HTTP_TASK_STACK 8192
 #define USB_UPLOAD_HTTP_TASK_PRIO  (tskIDLE_PRIORITY + 5)
 
@@ -297,7 +306,7 @@ static void usb_upload_http_tache(void *arg)
        Jamais le fichier entier en RAM -- exactement la contrainte de la
        spec. */
     while (ok) {
-        size_t lu = fread(s_tampon_lecture, 1, sizeof(s_tampon_lecture), fichier);
+        size_t lu = fread(s_tampon_lecture, 1, USB_UPLOAD_HTTP_TAMPON_OCTETS, fichier);
         if (lu == 0) {
             if (ferror(fichier)) {
                 ok = false;
@@ -358,6 +367,20 @@ bool usb_upload_http_demarrer(const char *chemin_usb, size_t taille_fichier)
         g_verrou = xSemaphoreCreateMutex();
         if (g_verrou == NULL) {
             JOURNAL_ERREUR(TAG, "xSemaphoreCreateMutex a echoue (memoire epuisee)");
+            return false;
+        }
+    }
+
+    /* Tampon de lecture EN PSRAM (voir le commentaire de tete sur
+       USB_UPLOAD_HTTP_TAMPON_OCTETS) : meme idiome paresseux que g_verrou
+       juste au-dessus, alloue au tout premier upload plutot qu'en .bss RAM
+       interne. Echec -> upload refuse proprement, meme voie que l'echec de
+       xSemaphoreCreateMutex() ci-dessus. */
+    if (s_tampon_lecture == NULL) {
+        s_tampon_lecture = (uint8_t *)heap_caps_malloc(USB_UPLOAD_HTTP_TAMPON_OCTETS, MALLOC_CAP_SPIRAM);
+        if (s_tampon_lecture == NULL) {
+            JOURNAL_ERREUR(TAG, "heap_caps_malloc(PSRAM) a echoue pour le tampon de lecture (%u octets)",
+                           (unsigned)USB_UPLOAD_HTTP_TAMPON_OCTETS);
             return false;
         }
     }

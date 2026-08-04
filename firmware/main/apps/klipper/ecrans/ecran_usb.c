@@ -20,6 +20,7 @@
 #include "confirmation.h"
 #include "habillage.h" /* habillage_notifier() -- refus tardif d'un second upload */
 #include "usb_fichiers.h"
+#include "usb_scan.h" /* usb_scan_demarrage_paresseux() -- fix RAM interne, voir son commentaire de tete */
 #include "usb_upload_http.h"
 
 #define LARGEUR_CONTENU 742 /* 800 - RAIL_LARGEUR (58), voir habillage.c */
@@ -318,6 +319,15 @@ static void ecran_usb_construire(lv_obj_t *parent, void *contexte)
     if (parent == NULL || ctx == NULL) {
         return;
     }
+
+    /* Démarrage paresseux du sous-système USB (fix RAM interne, voir le
+     * commentaire de tête de usb_scan.h) : la toute PREMIÈRE ouverture de
+     * cet écran est ce qui déclenche pt_usb_start() + les callbacks
+     * mount/unmount, plus le boot -- idempotent (no-op après le premier
+     * appel réel, et no-op complet côté host-test). Appelé ICI plutôt que
+     * dans mettre_a_jour() : construire() ne tourne qu'une fois par
+     * ouverture d'écran, pas à chaque pompage. */
+    usb_scan_demarrage_paresseux();
 
     lv_obj_set_style_bg_color(parent, lv_color_hex(COULEUR_FOND), 0);
     lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);

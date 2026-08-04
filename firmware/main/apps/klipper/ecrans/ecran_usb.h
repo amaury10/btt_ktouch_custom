@@ -1,7 +1,9 @@
 /* Écran USB (feature "Impression depuis USB", tâche B) : pont clé USB ->
  * Moonraker -- liste les .gcode trouvés sur la clé montée (usb_fichiers.h,
- * rempli par le scan de app_main.c au montage) et, sur confirmation, les
- * envoie en streaming vers Moonraker (usb_upload_http.h) avec `print=true`
+ * rempli par le scan de usb_scan.c au montage, démarré paresseusement par cet
+ * écran lui-même -- voir usb_scan.h et ecran_usb_construire()) et, sur
+ * confirmation, les envoie en streaming vers Moonraker (usb_upload_http.h)
+ * avec `print=true`
  * (Moonraker démarre l'impression lui-même, pas de SDCARD_PRINT_FILE séparé
  * -- voir docs/superpowers/specs/2026-08-04-usb-impression-design.md).
  *
