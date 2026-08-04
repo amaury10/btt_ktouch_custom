@@ -815,6 +815,14 @@ static void enregistrer_route(httpd_handle_t serveur, const httpd_uri_t *route)
 esp_err_t web_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    /* 12 routes sont enregistrees plus bas. Le defaut de HTTPD_DEFAULT_CONFIG
+       pour max_uri_handlers vaut 8 : sans ce relevement, l'enregistrement des
+       routes au-dela de la 8e echouait silencieusement (ESP_ERR_HTTPD_HANDLERS_FULL,
+       visible seulement dans /log), et ces URI repondaient 404 -- notamment
+       GET/POST /ota et GET/POST /restore-btt. Invisible a la compilation comme
+       en host-test (echec d'EXECUTION). 16 laisse de la marge pour de futures
+       routes sans re-toucher ceci. */
+    config.max_uri_handlers = 16;
 
     httpd_handle_t serveur = NULL;
     esp_err_t erreur = httpd_start(&serveur, &config);
