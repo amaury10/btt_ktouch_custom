@@ -435,6 +435,21 @@ void app_main(void)
         }
 
         PT_LVGL_SCOPE_LOCK() {
+            /* Feature "Miniatures gcode", tache B : enregistre le decodeur
+             * PNG une fois pour toute la duree de vie du firmware, AVANT
+             * toute construction d'ecran (pt_display_init() ci-dessus a deja
+             * appele lv_init() en interne -- voir esp_lvgl_port/le BSP
+             * vendorise -- donc la liste globale de decodeurs d'images
+             * existe deja ici). CONFIG_LV_USE_LODEPNG=y (firmware/sdkconfig[.
+             * defaults]) : sans lui, lv_lodepng_init() n'est meme pas
+             * declaree (voir lv_lodepng.h, entierement sous #if
+             * LV_USE_LODEPNG) -- le controleur (gate idf) verifie cette
+             * activation, voir le rapport de la tache B. Sous le meme verrou
+             * LVGL que build_test_pattern() juste en dessous : l'enregistrement
+             * d'un decodeur touche l'etat global LVGL (liste chainee des
+             * decodeurs), meme discipline que tout le reste de ce bloc. */
+            lv_lodepng_init();
+
             build_test_pattern();
 
             /* Le rappel est enregistré sur le périphérique d'entrée tactile

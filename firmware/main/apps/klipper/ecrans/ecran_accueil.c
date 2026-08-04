@@ -18,6 +18,7 @@
 #include "ecran_reglage_fin.h" /* ECRAN_REGLAGE_FIN, tache 5 */
 #include "etat_klipper.h"
 #include "habillage.h"
+#include "miniature.h" /* feature "Miniatures gcode", tache B */
 #include "navigation.h"
 #include "source_etat.h"
 
@@ -35,10 +36,29 @@
  * restituait une marge droite de 20 px, identique à la marge gauche.
  * Sous-projet 5 (conversion 742, rail persistant -- voir LARGEUR_CONTENU
  * ci-dessus) : (742 - 3*MARGE)/2 = 341 conserve exactement cette même
- * symétrie, marge droite = marge gauche = 20 px. */
-#define TUILE_LARGEUR 341
+ * symétrie, marge droite = marge gauche = 20 px.
+ *
+ * Feature "Miniatures gcode", tâche B (intégration ESP) : la rangée de
+ * tuiles cède désormais sa portion droite à un troisième élément, la
+ * miniature (MINIATURE_LARGEUR/MINIATURE_HAUTEUR plus bas) -- TUILE_LARGEUR
+ * n'est donc plus une constante à recopier, mais DÉRIVÉE de la largeur
+ * disponible une fois MINIATURE_LARGEUR et ses QUATRE marges (gauche, entre
+ * les deux tuiles, entre la 2e tuile et la miniature, droite) retirées ; même
+ * philosophie que le reste de ce fichier ("les macros dérivées empêchent un
+ * désalignement silencieux", voir le commentaire des _Static_assert plus
+ * bas). (742 - 4*20 - 120) / 2 = 271 -- toujours largement assez pour
+ * "205.0"/"100.0" en Montserrat 48 (341 d'origine avait de la marge à
+ * revendre). */
+#define MINIATURE_LARGEUR 120
+#define MINIATURE_HAUTEUR 120
+#define TUILE_LARGEUR ((LARGEUR_CONTENU - 4 * MARGE - MINIATURE_LARGEUR) / 2)
 #define TUILE_HAUTEUR 140
 #define TUILE_Y        16
+/* Miniature : alignée en haut avec les tuiles, à leur droite -- voir
+ * MINIATURE_LARGEUR ci-dessus pour la dérivation de TUILE_LARGEUR qui lui
+ * laisse exactement la place. */
+#define MINIATURE_X (3 * MARGE + 2 * TUILE_LARGEUR)
+#define MINIATURE_Y TUILE_Y
 
 #define FICHIER_Y       (TUILE_Y + TUILE_HAUTEUR + 10)
 #define FICHIER_HAUTEUR  30
@@ -75,13 +95,23 @@
  * d'impression, pas dans Configuration -- voir ecran_menu_reglages.c, qui ne
  * le referme plus). Pas de TROISIEME rangee pleine largeur possible : le bas
  * du contenu est deja serre (voir MACROS_BOUTON_Y, tout juste sous
- * HAUTEUR_CONTENU, _Static_assert plus bas). RANGEE2_BOUTON_LARGEUR reprend
- * TUILE_LARGEUR (meme largeur que les tuiles de temperature en haut de
- * l'ecran, meme ecart MARGE entre les deux) plutot qu'une valeur arbitraire,
- * pour garder le meme rythme visuel que la rangee de tuiles. */
+ * HAUTEUR_CONTENU, _Static_assert plus bas). RANGEE2_BOUTON_LARGEUR reprenait
+ * a l'origine TUILE_LARGEUR (meme largeur que les tuiles de temperature en
+ * haut de l'ecran, meme ecart MARGE entre les deux) pour garder le meme
+ * rythme visuel que la rangee de tuiles.
+ *
+ * Feature "Miniatures gcode", tache B : TUILE_LARGEUR a RETRECI pour laisser
+ * la place a la miniature (voir sa definition plus haut) -- cette rangee-ci,
+ * elle, N'A PAS de miniature a loger et n'a donc AUCUNE raison de retrecir
+ * avec elle. RANGEE2_BOUTON_LARGEUR est donc desormais calculee
+ * INDEPENDAMMENT, avec la MEME formule a DEUX boutons que TUILE_LARGEUR avait
+ * a l'origine (742 - 3*MARGE)/2 -- plus le meme rythme visuel "gratuit" que
+ * documente ci-dessus (les deux largeurs coincidaient par construction avant
+ * cette feature), mais un calcul explicite plutot qu'une dependance
+ * accidentelle a une autre rangee qui n'a plus rien a voir. */
 #define MACROS_BOUTON_Y       (BOUTONS_Y + BOUTON_HAUTEUR + 20)
 #define MACROS_BOUTON_HAUTEUR 60
-#define RANGEE2_BOUTON_LARGEUR TUILE_LARGEUR
+#define RANGEE2_BOUTON_LARGEUR ((LARGEUR_CONTENU - 3 * MARGE) / 2)
 #define RANGEE2_ECART           MARGE
 
 #define FINE_TUNE_BOUTON_X (MARGE + RANGEE2_BOUTON_LARGEUR + RANGEE2_ECART)
@@ -116,8 +146,28 @@
  * déjà les 742px, sans laisser de place à une troisième MARGE) fait échouer
  * cette assertion à la compilation plutôt que de laisser un pixel sortir du
  * cadre sans que personne ne le remarque avant une capture. */
-_Static_assert(3 * MARGE + 2 * TUILE_LARGEUR == LARGEUR_CONTENU,
-                "la rangee de tuiles n'est plus symetrique (marge gauche != marge droite)");
+/* Feature "Miniatures gcode", tâche B : QUATRE occurrences de MARGE
+ * désormais (gauche, entre les deux tuiles, entre la 2e tuile et la
+ * miniature, droite -- voir MINIATURE_LARGEUR/TUILE_LARGEUR ci-dessus), plus
+ * MINIATURE_LARGEUR lui-même. Remplace l'ancienne assertion à trois MARGE
+ * (qui datait d'avant la miniature) -- même égalité STRICTE, même raison
+ * (fix défaut 2, revue live jalon 3a, voir le commentaire ci-dessus). */
+_Static_assert(4 * MARGE + 2 * TUILE_LARGEUR + MINIATURE_LARGEUR == LARGEUR_CONTENU,
+                "la rangee de tuiles + miniature n'est plus symetrique (marges incoherentes)");
+/* La miniature elle-même ne doit jamais recouvrir la barre de progression
+ * (PROGRESSION_Y, plus bas dans ce fichier) ni la bande de notification
+ * persistante (habillage.c : ancrée au bas de l'écran, HAUTEUR_ECRAN(480) -
+ * BANDEAU_HAUTEUR(60) = absolu y=420..480 -- soit local y=376..436 ici, ce
+ * contenu démarrant à l'absolu y=BARRE_HAUTEUR(44), voir LARGEUR_CONTENU/
+ * HAUTEUR_CONTENU en tête de fichier). Vérifié ici, à la compilation, comme
+ * les autres garde-fous de non-recouvrement de ce fichier -- la miniature
+ * étant alignée en haut de l'écran (MINIATURE_Y == TUILE_Y == 16), cette
+ * marge est énorme, mais l'assertion reste la preuve, pas la conviction. */
+#define BANDEAU_Y_LOCAL 376 /* 420 (absolu, habillage.c) - BARRE_HAUTEUR(44) */
+_Static_assert(MINIATURE_Y + MINIATURE_HAUTEUR <= PROGRESSION_Y,
+                "la miniature deborde sur la barre de progression");
+_Static_assert(MINIATURE_Y + MINIATURE_HAUTEUR <= BANDEAU_Y_LOCAL,
+                "la miniature deborde sur la bande de notification (absolu y>=420)");
 _Static_assert(MARGE + 3 * BOUTON_LARGEUR + 2 * BOUTON_ECART + MARGE <= LARGEUR_CONTENU,
                 "les trois boutons + marges/ecarts debordent de la largeur du contenu");
 _Static_assert(MACROS_BOUTON_Y + MACROS_BOUTON_HAUTEUR <= HAUTEUR_CONTENU,
@@ -423,6 +473,130 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_size(ctx->bouton_reglage_fin, RANGEE2_BOUTON_LARGEUR, MACROS_BOUTON_HAUTEUR);
     lv_obj_set_pos(ctx->bouton_reglage_fin, FINE_TUNE_BOUTON_X, MACROS_BOUTON_Y);
     lv_obj_add_event_cb(ctx->bouton_reglage_fin, bouton_reglage_fin_cb, LV_EVENT_CLICKED, ctx);
+
+    /* Feature "Miniatures gcode", tâche B : masquée par défaut -- rendue
+     * visible par mettre_a_jour() seulement quand le store (miniature.h)
+     * porte un PNG PRÊT (jamais un widget "actif" par défaut sur des données
+     * qui n'existent pas encore, même principe que bouton_macros ci-dessus).
+     * Position/taille posées ici en valeur de repli (le coin haut-gauche du
+     * rectangle réservé, MINIATURE_X/MINIATURE_Y) ; mettre_a_jour() les
+     * RECALCULE à chaque affichage réel pour centrer l'image (dimensions
+     * réelles inconnues avant le premier décodage, voir son commentaire). */
+    ctx->miniature_image = lv_image_create(parent);
+    lv_obj_set_pos(ctx->miniature_image, MINIATURE_X, MINIATURE_Y);
+    lv_obj_add_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+    ctx->miniature_generation = 0; /* jamais affichée -- 0 n'est jamais une generation reelle du store */
+}
+
+/* Feature "Miniatures gcode", tâche B : affiche/masque ctx->miniature_image
+ * selon le store dédié miniature.h (HORS etat_klipper_t -- `e`/`etat` ne
+ * porte donc rien à ce sujet, contrairement au reste de mettre_a_jour()).
+ *
+ * Ordre STRICT à l'intérieur de cette fonction, jamais à inverser (voir le
+ * contrat détaillé de miniature_lire()/miniature_purger() dans miniature.h,
+ * §"transfert différé") : 1) lire l'instantané, 2) si une NOUVELLE
+ * génération PRÊTE est disponible, ré-orienter le widget vers son pointeur
+ * (ou le masquer si l'état n'est pas PRÊT), 3) PURGER en tout dernier -- le
+ * tampon qu'un dépôt producteur a pu retirer depuis le dernier appel n'est
+ * JAMAIS celui que cette fonction vient elle-même de poser sur le widget
+ * dans CE cycle (il a forcément été remplacé par un dépôt ANTÉRIEUR), donc
+ * purger après avoir ré-orienté le widget est toujours sûr.
+ *
+ * API LVGL 9.2 exacte pour une source PNG en mémoire (voir
+ * simulateur/lvgl/src/libs/lodepng/lv_lodepng.c, decoder_info()/decoder_open()
+ * -- vendorisé dans ce dépôt) : un `lv_image_dsc_t` dont `header.magic ==
+ * LV_IMAGE_HEADER_MAGIC` (c'est CE bit, pas `header.cf`, qui fait classer la
+ * source comme LV_IMAGE_SRC_VARIABLE par lv_image_src_get_type() -- un
+ * `lv_image_dsc_t*` est reconnu par son PREMIER octet, qui doit être < 0x20,
+ * voir lv_draw_image.c) et `data`/`data_size` = les octets PNG bruts. Le
+ * décodeur LODEPNG (enregistré une fois pour toutes par lv_lodepng_init(),
+ * voir app_main.c/host-test main.c) lit lui-même la signature PNG et les
+ * dimensions réelles depuis `data` -- `header.w`/`header.h`/`header.cf` de CE
+ * descripteur ne sont QUE des valeurs de repli, jamais utilisées par ce
+ * chemin de décodage précis, donc laissées à 0/LV_COLOR_FORMAT_RAW ici. */
+static void mettre_a_jour_miniature(ecran_accueil_ctx_t *ctx)
+{
+    miniature_instantane_t snap;
+    miniature_lire(&snap);
+
+    if (snap.etat == MINIATURE_PRETE && snap.donnees != NULL &&
+        snap.generation != ctx->miniature_generation) {
+        ctx->miniature_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+        ctx->miniature_dsc.header.cf = LV_COLOR_FORMAT_RAW; /* ignoré par LODEPNG, voir ci-dessus */
+        ctx->miniature_dsc.header.flags = 0;
+        ctx->miniature_dsc.header.w = 0;
+        ctx->miniature_dsc.header.h = 0;
+        ctx->miniature_dsc.header.stride = 0;
+        ctx->miniature_dsc.data = snap.donnees;
+        ctx->miniature_dsc.data_size = (uint32_t)snap.taille;
+
+        /* Interroge le décodeur pour les dimensions RÉELLES (lit seulement
+         * la signature + l'en-tête IHDR, pas un décodage pixel complet --
+         * voir decoder_info() dans lv_lodepng.c) AVANT de poser quoi que ce
+         * soit sur le widget : sans ça, `snap.largeur`/`snap.hauteur` (issus
+         * de la métadonnée Moonraker, potentiellement optimistes ou
+         * absents pour ce chemin) ne garantiraient pas que l'image dessinée
+         * tienne dans le rectangle réservé -- le calcul de zoom ci-dessous a
+         * besoin des VRAIES dimensions pour garantir cette borne. Si le
+         * décodeur échoue ici (PNG corrompu au-delà de sa seule signature,
+         * déjà vérifiée par miniature.c mais jamais décodé en profondeur à
+         * ce stade), l'image reste masquée -- jamais de crash, jamais un
+         * lv_image_set_src() sur une source dont on ne connaît pas la
+         * taille réelle. */
+        lv_image_header_t header;
+        if (lv_image_decoder_get_info(&ctx->miniature_dsc, &header) == LV_RESULT_OK &&
+            header.w > 0 && header.h > 0) {
+            lv_image_set_src(ctx->miniature_image, &ctx->miniature_dsc);
+
+            /* Zoom "contain" calculé à la main (pas de mode d'ajustement
+             * proportionnel automatique disponible sur cette version de
+             * lv_image, voir lv_image_set_inner_align() dans lv_image.h --
+             * seul LV_IMAGE_ALIGN_STRETCH déforme l'image pour remplir tout
+             * le rectangle, jamais ce qu'on veut ici) : le plus petit des
+             * deux facteurs horizontal/vertical, jamais l'inverse, pour
+             * GARANTIR que l'image dessinée tient dans MINIATURE_LARGEUR x
+             * MINIATURE_HAUTEUR quelle que soit la forme réelle du PNG (300x300
+             * carré, ou un thumbnail plus rectangulaire). 256 = LV_ZOOM_IMAGE_NONE
+             * (aucun zoom), voir lv_image_set_scale(). */
+            uint32_t zoom_w = (uint32_t)MINIATURE_LARGEUR * 256u / (uint32_t)header.w;
+            uint32_t zoom_h = (uint32_t)MINIATURE_HAUTEUR * 256u / (uint32_t)header.h;
+            uint32_t zoom = (zoom_w < zoom_h) ? zoom_w : zoom_h;
+            lv_image_set_scale(ctx->miniature_image, zoom);
+
+            /* Taille/position du widget recalculées à partir du zoom retenu
+             * -- CE calcul, pas la simple confiance en LVGL pour clipper une
+             * image plus grande que l'objet, est ce qui garantit
+             * mécaniquement le non-recouvrement prouvé par les
+             * _Static_assert sur MINIATURE_X/MINIATURE_Y plus haut : la
+             * zone RÉELLEMENT dessinée (largeur_dessinee x hauteur_dessinee)
+             * ne dépasse jamais MINIATURE_LARGEUR x MINIATURE_HAUTEUR par
+             * construction (zoom = MIN des deux facteurs), donc son
+             * placement centré reste toujours À L'INTÉRIEUR du rectangle
+             * réservé. */
+            int32_t largeur_dessinee = (int32_t)((uint32_t)header.w * zoom / 256u);
+            int32_t hauteur_dessinee = (int32_t)((uint32_t)header.h * zoom / 256u);
+            lv_obj_set_size(ctx->miniature_image, largeur_dessinee, hauteur_dessinee);
+            lv_obj_set_pos(ctx->miniature_image,
+                           MINIATURE_X + (MINIATURE_LARGEUR - largeur_dessinee) / 2,
+                           MINIATURE_Y + (MINIATURE_HAUTEUR - hauteur_dessinee) / 2);
+            lv_obj_clear_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+        }
+        ctx->miniature_generation = snap.generation;
+    } else if (snap.etat != MINIATURE_PRETE) {
+        /* Systematique a chaque appel, meme discipline que le reste de ce
+         * fichier (bouton_macros, grisage...) : ABSENTE/EN_COURS/ECHEC
+         * masque TOUJOURS, y compris apres plusieurs allers-retours. */
+        lv_obj_add_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+    }
+    /* Sinon (PRETE mais generation deja affichee) : rien a refaire, le
+     * widget reste tel quel -- pas de decodage/redimensionnement inutile a
+     * chaque cycle de rafraichissement pour une image qui n'a pas change. */
+
+    /* TOUJOURS en dernier -- voir le commentaire de tete de cette fonction
+     * et miniature_purger() dans miniature.h. */
+    miniature_purger();
 }
 
 static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
@@ -510,6 +684,8 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
     } else {
         lv_obj_add_flag(ctx->bouton_macros, LV_OBJ_FLAG_HIDDEN);
     }
+
+    mettre_a_jour_miniature(ctx);
 }
 
 const ecran_desc_t ECRAN_ACCUEIL = {

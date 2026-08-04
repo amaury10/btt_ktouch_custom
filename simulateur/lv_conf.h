@@ -84,8 +84,30 @@
      * est justement de rendre fidelement ce que rend l'appareil. 256 Ko : ~4x
      * le pic mesure, marge pour les ecrans encore a venir de ce jalon
      * (temperatures, macros) et pour la fragmentation TLSF, tout en restant
-     * modeste sur un hote. */
-    #define LV_MEM_SIZE (256 * 1024U)          /*[bytes]*/
+     * modeste sur un hote.
+     *
+     * Feature "Miniatures gcode" (tache B) : porte a 1024 Ko (256 -> 1024).
+     * Constate en pratique, PAS en theorie : suite_miniature() (host-test/
+     * tests/test_miniature.c) encode un PNG de test via lodepng_encode32()
+     * -- lodepng.c VENDORISE ici route lodepng_malloc/free/realloc vers
+     * lv_malloc/lv_free/lv_realloc (voir sa tete de fichier, LODEPNG_COMPILE_
+     * ALLOCATORS), donc CE meme pool TLSF de 256 Ko -- ECHOUAIT avec l'erreur
+     * LodePNG 83 ("memory allocation failed") alors que le calcul isole ne
+     * demande que quelques centaines d'octets pour une image 2x2 : la suite
+     * tourne en TOUT DERNIER dans main.c, apres une cinquantaine d'autres
+     * suites qui construisent des dizaines d'ecrans LVGL JAMAIS liberes
+     * pendant toute la duree du binaire (un seul lv_init(), jamais de
+     * lv_deinit() -- process unique, voir main.c) : le pool, deja fragmente/
+     * presque plein a ce stade, ne trouvait plus de bloc CONTIGU suffisant
+     * pour les tampons internes de Huffman/deflate de LodePNG. Sans
+     * consequence sur l'appareil reel (voir le commentaire ci-dessus :
+     * CONFIG_LV_USE_CUSTOM_MALLOC=y + CONFIG_PT_LVGL_USE_PT_INTERNAL_MALLOC=y
+     * y font passer lv_malloc par l'allocateur PSRAM du BSP, plusieurs Mo,
+     * jamais ce pool fixe -- confirme au passage que le PIXEL DECODE d'une
+     * miniature, lui aussi issu de lodepng_malloc=lv_malloc, atterrit DEJA en
+     * PSRAM sur cet appareil sans rien de plus a faire cote miniature.c).
+     * 1024 Ko reste modeste sur un hote de developpement. */
+    #define LV_MEM_SIZE (1024 * 1024U)          /*[bytes]*/
 
     /*Size of the memory expand for `lv_malloc()` in bytes*/
     #define LV_MEM_POOL_EXPAND_SIZE 0
@@ -803,7 +825,13 @@
 #endif
 
 /*LODEPNG decoder library*/
-#define LV_USE_LODEPNG 0
+/* Feature "Miniatures gcode" (tache B) : active ici aussi -- cette lv_conf.h
+ * est PARTAGEE avec host-test/ (voir host-test/CMakeLists.txt, LV_CONF_PATH),
+ * qui en a besoin pour de-risker le chemin de decodage PNG au host-test
+ * (test_miniature.c) avant la cible reelle. Cote firmware ESP, c'est
+ * firmware/sdkconfig[.defaults] qui pilote CONFIG_LV_USE_LODEPNG -- ce
+ * fichier-ci ne le concerne pas. */
+#define LV_USE_LODEPNG 1
 
 /*PNG decoder(libpng) library*/
 #define LV_USE_LIBPNG 0

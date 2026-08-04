@@ -164,6 +164,7 @@ add_executable(tests
     tests/test_power_devices.c
     tests/test_console_log.c
     tests/test_json_util.c
+    tests/test_miniature.c
     ${MAIN_DIR}/web_macros.c
     ${MAIN_DIR}/ota_image.c
     ${KLIPPER_DIR}/moonraker_parse.c
@@ -173,6 +174,7 @@ add_executable(tests
     ${KLIPPER_DIR}/console_log.c
     ${KLIPPER_DIR}/json_util.c
     ${KLIPPER_DIR}/klipper_temp_historique.c
+    ${KLIPPER_DIR}/miniature.c
     ${KLIPPER_DIR}/moonraker_boite.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c

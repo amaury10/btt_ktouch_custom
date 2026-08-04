@@ -1,0 +1,18 @@
+# Feature "Miniatures gcode" (tâche B, intégration ESP) : décodeur PNG LVGL,
+# nécessaire pour afficher la miniature du fichier en cours d'impression sur
+# ecran_accueil.c -- décodage depuis un BUFFER mémoire (les octets PNG
+# récupérés par miniature_fetch.c via HTTP), pas besoin d'activer un
+# LV_USE_FS_* (aucun chemin de fichier en jeu).
+#
+# NOTE (persistance) : ESP-IDF ne lit `sdkconfig.defaults` QUE depuis la
+# racine du projet (`firmware/sdkconfig.defaults`) sauf configuration
+# explicite (variable d'environnement/CMake SDKCONFIG_DEFAULTS) qui inclurait
+# aussi ce fichier -- ce dépôt n'a, à ce jour, aucune trace d'une telle
+# configuration (aucun script de build ne référence SDKCONFIG_DEFAULTS). Ce
+# fichier est donc déposé ici comme demandé (persistance par composant, si un
+# tel mécanisme existe ou est ajouté côté outillage du contrôleur), mais la
+# ligne réellement effective pour un `idf.py build` standard est celle déjà
+# dupliquée dans `firmware/sdkconfig.defaults` (racine du projet) -- voir son
+# commentaire. `firmware/sdkconfig` a en outre été appliqué directement pour
+# un effet immédiat sans regénération.
+CONFIG_LV_USE_LODEPNG=y

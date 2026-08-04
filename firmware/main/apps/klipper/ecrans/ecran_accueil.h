@@ -29,6 +29,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "ecran.h"
 #include "lvgl.h"
@@ -66,6 +67,21 @@ typedef struct {
      * lv_obj_send_event(), qui ne passe jamais par l'entrée tactile). */
     bool            en_pause;
     bool            donnees_perimees;
+
+    /* Feature "Miniatures gcode", tâche B (intégration ESP) : thumbnail du
+     * fichier en cours, lu depuis le store dédié miniature.h (HORS
+     * etat_klipper_t, voir son commentaire de tête). `miniature_dsc` est le
+     * descripteur LVGL passé à lv_image_set_src() -- DOIT vivre aussi
+     * longtemps que le widget peut y faire référence (jamais une variable
+     * locale de mettre_a_jour(), qui sortirait de portée dès son retour) :
+     * stocké ici, dans le contexte de l'écran, comme `progression`/`buse`
+     * ci-dessus. `miniature_generation` mémorise la dernière génération du
+     * store affichée (0 = jamais) pour ne reconstruire `miniature_dsc`/
+     * rappeler lv_image_set_src() que sur un changement réel -- voir
+     * ecran_accueil.c, mettre_a_jour(). */
+    lv_obj_t       *miniature_image;
+    lv_image_dsc_t  miniature_dsc;
+    uint32_t        miniature_generation;
 } ecran_accueil_ctx_t;
 
 extern const ecran_desc_t ECRAN_ACCUEIL;

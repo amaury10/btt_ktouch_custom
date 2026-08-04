@@ -93,3 +93,14 @@ CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# --- Miniatures gcode (feature "Miniatures gcode", tache B) : decodeur PNG
+# LVGL, necessaire pour afficher la miniature du fichier en cours sur l'ecran
+# d'impression (ecran_accueil.c) -- decodage depuis un BUFFER memoire (les
+# octets PNG recuperes par miniature_fetch.c), pas besoin d'activer un
+# LV_USE_FS_* (aucun chemin de fichier). Meme piege que les polices
+# Montserrat ci-dessus : sdkconfig.defaults ne remplace jamais un symbole
+# deja present dans un sdkconfig genere -- tout ajout ici exige de supprimer
+# firmware/sdkconfig et de regenerer (ou d'editer les deux directement,
+# comme fait ici au moment d'ajouter cette ligne).
+CONFIG_LV_USE_LODEPNG=y

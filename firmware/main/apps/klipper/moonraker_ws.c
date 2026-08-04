@@ -44,9 +44,12 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "cJSON.h"
 #include "console_log.h"
 #include "journal.h"
 #include "klipper_fichiers.h"
+#include "miniature.h"       /* feature "Miniatures gcode", tache B */
+#include "miniature_fetch.h" /* feature "Miniatures gcode", tache B */
 #include "moonraker_boite.h"
 #include "moonraker_rpc.h"
 #include "power_devices.h"
@@ -247,6 +250,44 @@ static bool g_power_a_demander = false;
  * traiter_message_complet() ne tournent jamais que la, en sequence, jamais
  * en concurrence l'une de l'autre). */
 static bool g_macros_a_demander = false;
+
+/* Feature "Miniatures gcode", tâche B : id de la requête
+ * `server.files.metadata` EN COURS -- même convention que g_id_fichiers/
+ * g_id_power ci-dessus, lu UNIQUEMENT depuis la tâche WS (aucun verrou
+ * nécessaire, même raison). CONTRAIREMENT aux id précédents, jamais
+ * redemandé à CHAQUE (re)connexion ni sur notify_klippy_ready -- ce n'est
+ * PAS une liste qu'il faut rafraîchir périodiquement, mais une requête
+ * PONCTUELLE déclenchée par `verifier_declenchement_miniature()` ci-dessous
+ * dès qu'un `print_stats.filename` nouveau apparaît sur une impression
+ * active (voir son commentaire). */
+static uint32_t g_id_miniature = 0;
+
+/* Dernier fichier gcode pour lequel une miniature a déjà été demandée (ou
+ * est en train de l'être) -- évite de redemander en boucle à chaque
+ * notify_status_update tant que l'impression en cours n'a pas changé de
+ * fichier. "" = aucune impression suivie actuellement (voir
+ * verifier_declenchement_miniature()). Lu/écrit UNIQUEMENT depuis la tâche
+ * WS (aucun verrou nécessaire, même raison que g_id_abonnement) --
+ * volontairement PAS remis à "" par une reconnexion WS ordinaire au sein
+ * d'une même session backend (le fichier en cours d'impression, lui, n'a pas
+ * changé pendant une brève coupure -- redemander à chaque reconnexion
+ * gaspillerait un aller-retour réseau pour rien) : seul
+ * moonraker_ws_demarrer() (une VRAIE nouvelle session, potentiellement un
+ * autre hôte -- voir 3f) le remet à "" (avec miniature_effacer(), voir son
+ * commentaire dans ce fichier). */
+static char g_dernier_fichier_miniature[KLIPPER_FICHIER_MAX] = "";
+
+/* Drapeau + fichier associé "une requête server.files.metadata doit partir
+ * dès que g_verrou sera relâché" -- MÊME mécanisme que g_macros_a_demander/
+ * g_power_a_demander ci-dessus (voir leur commentaire complet pour le
+ * POURQUOI : envoyer_requete_miniature() ci-dessous appelle prochain_id(),
+ * qui prend g_verrou en interne -- l'appeler DEPUIS
+ * verifier_declenchement_miniature() (déjà sous CE MÊME verrou, appelée
+ * depuis traiter_message_complet()) auto-interbloquerait la tâche WS).
+ * Consommé HORS verrou par traiter_data(), juste après les drapeaux
+ * macros/power. */
+static bool g_miniature_a_demander = false;
+static char g_fichier_a_demander_miniature[KLIPPER_FICHIER_MAX] = "";
 
 /* Corrélateur "un coup à la fois" pour moonraker_ws_commande() -- voir le
  * commentaire de tête pour le mécanisme complet. Protégé par g_verrou. */
@@ -460,6 +501,49 @@ static void envoyer_requete_power(void)
     }
 }
 
+/* Feature "Miniatures gcode", tâche B : requête `server.files.metadata`
+ * ponctuelle pour `fichier` -- params `{"filename":"<fichier>"}` construits
+ * via cJSON (pas un snprintf à la main comme envoyer_requete_fichiers()/
+ * envoyer_requete_power() ci-dessus, dont les params sont des CONSTANTES) :
+ * `fichier` vient de Moonraker lui-même (print_stats.filename, potentiellement
+ * un sous-dossier avec des caractères qu'un JSON littéral à la main
+ * n'échapperait pas correctement -- même raison, même choix que
+ * moonraker_extraire_champ_script()/est_gcode dans backend_moonraker.c pour
+ * un script gcode "qui vient d'ailleurs que de ce firmware"). CONTRAIREMENT
+ * à envoyer_requete_macros()/_fichiers()/_power() ci-dessus, appelée non pas
+ * à chaque (re)connexion mais PONCTUELLEMENT par traiter_data() sur
+ * consommation de g_miniature_a_demander -- voir sa déclaration. */
+static void envoyer_requete_miniature(const char *fichier)
+{
+    cJSON *params_obj = cJSON_CreateObject();
+    if (params_obj == NULL || cJSON_AddStringToObject(params_obj, "filename", fichier) == NULL) {
+        cJSON_Delete(params_obj);
+        JOURNAL_ALERTE(TAG, "construction des parametres server.files.metadata impossible (memoire)");
+        return;
+    }
+    char *params = cJSON_PrintUnformatted(params_obj);
+    cJSON_Delete(params_obj);
+    if (params == NULL) {
+        JOURNAL_ALERTE(TAG, "impression JSON des parametres server.files.metadata impossible");
+        return;
+    }
+
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "server.files.metadata", params)) {
+        g_id_miniature = id;
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de server.files.metadata echoue (id=%u, fichier=%s)",
+                           (unsigned)id, fichier);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de server.files.metadata impossible pour %s", fichier);
+    }
+    cJSON_free(params);
+}
+
 /* À WEBSOCKET_EVENT_CONNECTED : identify PUIS abonnement PUIS macros
  * (critère 2 -- à CHAQUE reconnexion, jamais seulement la première).
  * Appelée depuis la tâche WS elle-même (le gestionnaire d'événement) :
@@ -514,6 +598,61 @@ static void envoyer_identify_et_abonnement(void)
     envoyer_requete_power();
 }
 
+/* Feature "Miniatures gcode", tâche B : détecte un `print_stats.filename`
+ * NOUVEAU sur une impression ACTIVE (spec : « fetch déclenché quand une
+ * impression est active et que le nom de fichier est connu/nouveau »).
+ * Appelée SOUS g_verrou, juste après un `boite_deposer()` réussi (voir
+ * traiter_message_complet() ci-dessous, ses deux seuls appels) -- `e` porte
+ * l'état FUSIONNÉ le plus à jour (`copie`), pas nécessairement tout ce que
+ * CE message précis a touché (une fusion est partielle, voir
+ * rpc_fusionner_status() dans moonraker_rpc.h).
+ *
+ * NE PAS appeler miniature_poser_en_cours()/miniature_effacer() en dehors
+ * de cette fonction -- ce sont des opérations SANS RAPPORT avec g_verrou
+ * (miniature.c a son propre verrou indépendant, voir son commentaire de
+ * tête), donc sûres à appeler ICI, sous g_verrou de CE fichier -- mais
+ * `envoyer_requete_miniature()` (qui appelle prochain_id(), lequel prend
+ * CE MÊME g_verrou) ne peut PAS l'être : voir g_miniature_a_demander,
+ * consommé hors verrou par traiter_data(), même mécanisme que
+ * g_macros_a_demander/g_power_a_demander. */
+static void verifier_declenchement_miniature(const etat_klipper_t *e)
+{
+    /* `impression_en_cours` seul (state=="printing") EXCLUT une impression
+     * EN PAUSE (state=="paused", voir fusionner_print_stats() dans
+     * moonraker_rpc.c -- deux drapeaux distincts, jamais tous les deux vrais
+     * a la fois) : une pause ne doit PAS faire disparaitre la miniature ni
+     * redeclencher un fetch complet a la reprise (le fichier n'a pas changé)
+     * -- d'où `|| e->impression_en_pause` ici, absent de la condition
+     * `impression_en_cours` seule utilisée par le reste de ce fichier. */
+    bool impression_active = e->impression_en_cours || e->impression_en_pause;
+    if (impression_active && e->fichier[0] != '\0') {
+        if (strcmp(e->fichier, g_dernier_fichier_miniature) != 0) {
+            snprintf(g_dernier_fichier_miniature, sizeof(g_dernier_fichier_miniature), "%s", e->fichier);
+            miniature_poser_en_cours(e->fichier);
+            snprintf(g_fichier_a_demander_miniature, sizeof(g_fichier_a_demander_miniature), "%s",
+                     e->fichier);
+            g_miniature_a_demander = true;
+        }
+        /* Meme fichier que la derniere fois (impression toujours en cours,
+         * ou redevenue "printing" apres une pause -- e->fichier ne change
+         * pas dans ce dernier cas) : deja demande ou en cours, rien a
+         * refaire ici, systematique sur CHAQUE notify_status_update sinon
+         * une requete server.files.metadata partirait a chaque appel. */
+    } else if (g_dernier_fichier_miniature[0] != '\0') {
+        /* Plus d'impression active (ou plus de nom de fichier connu) alors
+         * qu'on en suivait une : fin d'impression (ou changement d'etat
+         * imprevu) -- efface tout, y compris une eventuelle reponse
+         * server.files.metadata deja en vol pour cet ancien fichier (id mis
+         * a 0 : une reponse tardive pour ce fichier ne correspondra plus a
+         * aucun id connu, voir le cas RPC_MSG_REPONSE ci-dessous -- ignoree
+         * silencieusement, meme politique defensive que le reste de ce
+         * fichier). */
+        g_dernier_fichier_miniature[0] = '\0';
+        g_id_miniature = 0;
+        miniature_effacer();
+    }
+}
+
 /* Traite un message JSON-RPC COMPLET (déjà réassemblé) -- appelée SOUS
  * g_verrou (voir traiter_data() ci-dessous, seul appelant). */
 static void traiter_message_complet(const char *json, size_t longueur)
@@ -532,6 +671,10 @@ static void traiter_message_complet(const char *json, size_t longueur)
         etat_klipper_t copie = g_boite.etat;
         if (rpc_fusionner_status(&copie, json, longueur)) {
             boite_deposer(&g_boite, &copie);
+            /* Feature "Miniatures gcode", tache B : verifie APRES le depot,
+             * sur l'etat FUSIONNE le plus a jour -- voir le commentaire de
+             * verifier_declenchement_miniature(). */
+            verifier_declenchement_miniature(&copie);
         }
         break;
     }
@@ -542,6 +685,10 @@ static void traiter_message_complet(const char *json, size_t longueur)
             etat_klipper_t copie = g_boite.etat;
             if (rpc_fusionner_instantane(&copie, json, longueur)) {
                 boite_deposer(&g_boite, &copie);
+                /* Meme raison que dans le cas STATUS_UPDATE ci-dessus :
+                 * l'instantane initial peut deja reveler une impression
+                 * active des la (re)connexion. */
+                verifier_declenchement_miniature(&copie);
             }
         } else if (id == g_id_macros && g_id_macros != 0) {
             /* Trouvaille A : reponse a printer.objects.list -- rpc_lire_macros()
@@ -579,6 +726,55 @@ static void traiter_message_complet(const char *json, size_t longueur)
             power_devices_t pd;
             if (rpc_lire_power_devices(&pd, json, longueur)) {
                 power_devices_definir(&pd);
+            }
+        } else if (id == g_id_miniature && g_id_miniature != 0) {
+            /* Feature "Miniatures gcode", tache B : reponse a
+             * server.files.metadata (declenchee ponctuellement par
+             * verifier_declenchement_miniature() ci-dessus, PAS a chaque
+             * (re)connexion comme les autres id -- voir sa declaration).
+             * rpc_lire_miniature() (tache A) choisit la meilleure miniature
+             * <= MINIATURE_LARGEUR_MAX_PX puis miniature_construire_chemin()
+             * (tache A aussi) recompose le chemin relatif a la racine
+             * "gcodes" -- json/longueur BRUTS avec leur enveloppe "result",
+             * meme convention que rpc_lire_fichiers()/rpc_lire_power_devices()
+             * ci-dessus (voir moonraker_rpc.h). Echec de l'UN OU L'AUTRE
+             * (aucune miniature listee, ou chemin trop long pour tenir) ->
+             * echec pose explicitement, jamais silencieux : le store
+             * resterait sinon bloque en EN_COURS pour toujours (voir
+             * miniature_poser_en_cours(), deja appelee par
+             * verifier_declenchement_miniature() avant cette reponse). */
+            char chemin_relatif[128];
+            /* `int`, pas `int32_t` -- rpc_lire_miniature() (moonraker_rpc.h)
+             * prend des `int*` ; les dimensions declarees par Moonraker ne
+             * sont d'ailleurs pas utilisees plus loin ici (ecran_accueil.c
+             * redecouvre les VRAIES dimensions depuis le PNG lui-meme via
+             * lv_image_decoder_get_info(), voir son commentaire -- plus
+             * fiable qu'une metadonnee potentiellement optimiste). */
+            int largeur_declaree = 0, hauteur_declaree = 0;
+            bool trouve = rpc_lire_miniature(chemin_relatif, sizeof(chemin_relatif),
+                                             &largeur_declaree, &hauteur_declaree, json, longueur,
+                                             MINIATURE_LARGEUR_MAX_PX);
+            if (trouve) {
+                /* MINIATURE_CHEMIN_MAX (miniature.h), PAS un calcul local --
+                 * DOIT rester identique au tampon que miniature_fetch.c
+                 * utilise pour recopier ce meme chemin dans son contexte de
+                 * tache (voir son commentaire), sous peine d'une troncature
+                 * silencieuse entre les deux. */
+                char chemin_complet[MINIATURE_CHEMIN_MAX];
+                size_t necessaire = miniature_construire_chemin(
+                    chemin_complet, sizeof(chemin_complet), g_dernier_fichier_miniature, chemin_relatif);
+                if (necessaire > 0 && necessaire < sizeof(chemin_complet)) {
+                    /* miniature_fetch_lancer() lance la tache dediee et rend
+                     * la main immediatement -- jamais bloquant ici, voir
+                     * miniature_fetch.h. */
+                    miniature_fetch_lancer(&g_hote, chemin_complet, g_dernier_fichier_miniature);
+                } else {
+                    JOURNAL_ALERTE(TAG, "chemin miniature trop long pour %s",
+                                   g_dernier_fichier_miniature);
+                    miniature_poser_echec(g_dernier_fichier_miniature);
+                }
+            } else {
+                miniature_poser_echec(g_dernier_fichier_miniature);
             }
         } else if (g_correlateur.en_cours && id == g_correlateur.id) {
             bool succes = false;
@@ -791,6 +987,16 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         if (g_power_a_demander) {
             g_power_a_demander = false;
             envoyer_requete_power();
+        }
+        /* Feature "Miniatures gcode", tache B : meme mecanisme, drapeau
+         * distinct -- voir g_miniature_a_demander. Copie locale du fichier
+         * AVANT le drapeau (g_fichier_a_demander_miniature n'est protege par
+         * aucun verrou -- lu/ecrit uniquement depuis cette tache WS, voir sa
+         * declaration -- mais autant garder le meme idiome defensif que le
+         * reste de ce bloc). */
+        if (g_miniature_a_demander) {
+            g_miniature_a_demander = false;
+            envoyer_requete_miniature(g_fichier_a_demander_miniature);
         }
     }
 }
@@ -1010,11 +1216,27 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_id_macros = 0;
     g_id_fichiers = 0;
     g_id_power = 0;
+    g_id_miniature = 0;
     g_macros_a_demander = false;
     g_power_a_demander = false;
+    g_miniature_a_demander = false;
+    g_fichier_a_demander_miniature[0] = '\0';
     g_id_suivant = 1;
     g_tampon_len = 0;
     g_tampon_deborde = false;
+
+    /* Feature "Miniatures gcode", tache B : une VRAIE nouvelle session (hote
+     * potentiellement different, voir 3f) ne doit jamais laisser survivre la
+     * miniature -- ni le nom de fichier suivi -- d'une session precedente,
+     * meme raisonnement que g_dernier_etat_ws_valide dans
+     * backend_moonraker.c (spec §7, "jamais l'etat de l'ancienne connexion
+     * presente comme celui de la nouvelle"). CONTRAIREMENT a un simple
+     * auto-reconnect au sein de CETTE session (WEBSOCKET_EVENT_CONNECTED,
+     * qui NE touche PAS g_dernier_fichier_miniature -- voir sa declaration) :
+     * demarrer() n'est appelee qu'au demarrage du backend / changement
+     * d'hote, jamais par le backoff de reconnexion interne a ce fichier. */
+    g_dernier_fichier_miniature[0] = '\0';
+    miniature_effacer();
 
     char url[BACKEND_HOTE_LONGUEUR_MAX + 32];
     construire_url(url, sizeof(url), &g_hote);

@@ -58,6 +58,7 @@ void suite_ota_image(void);
 void suite_power_devices(void);
 void suite_console_log(void);
 void suite_json_util(void);
+void suite_miniature(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -91,6 +92,19 @@ static void initialiser_affichage_test(void)
     lv_display_set_buffers(disp, g_tampon_affichage_test, NULL, sizeof(g_tampon_affichage_test),
                             LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(disp, vidage_test);
+
+    /* Feature "Miniatures gcode", tâche B : enregistre le décodeur PNG une
+     * fois pour toute la suite (comme lv_init() juste au-dessus) --
+     * LV_USE_LODEPNG est activé dans simulateur/lv_conf.h, PARTAGÉE avec ce
+     * harnais (voir host-test/CMakeLists.txt). Appelé APRÈS lv_init() : la
+     * liste globale de décodeurs d'images n'existe qu'une fois celui-ci
+     * passé (voir lv_image_decoder_init(), appelée en interne par
+     * lv_init()). Consommé par suite_miniature() (test_miniature.c), mais
+     * posé ici plutôt que dans cette suite-là : un décodeur d'image est un
+     * état process-wide, au même titre que l'afficheur ci-dessus -- une
+     * seule inscription pour toute la durée de vie du binaire, jamais
+     * répétée par une suite individuelle. */
+    lv_lodepng_init();
 }
 
 int main(void)
@@ -392,6 +406,15 @@ int main(void)
      * libre de la console (json_util.h) -- fonction pure sans etat, aucune
      * contrainte d'ordre. */
     suite_json_util();
+
+    /* Feature "Miniatures gcode", tache B (integration ESP) : store dedie
+     * (miniature.h) + de-risking du chemin de decodage LVGL/LODEPNG reel --
+     * aucune contrainte d'ordre avec les autres suites (le store est remis a
+     * plat par miniature_effacer() en tete de chaque section de test, comme
+     * power_devices_definir()/console_log_effacer() ailleurs ; le decodeur
+     * LODEPNG est un etat process-wide DEJA enregistre par
+     * initialiser_affichage_test() ci-dessus, jamais reenregistre ici). */
+    suite_miniature();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;
