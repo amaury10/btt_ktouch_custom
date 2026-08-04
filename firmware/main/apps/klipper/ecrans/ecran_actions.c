@@ -28,10 +28,10 @@
 #include "cJSON.h"
 
 #include "backend.h"
+#include "ecran_console.h"      /* ECRAN_CONSOLE (feature "Console gcode", tache B) */
 #include "ecran_deplacer.h"     /* ECRAN_DEPLACER */
 #include "ecran_extruder.h"     /* ECRAN_EXTRUDER */
 #include "ecran_macros.h"       /* ECRAN_MACROS */
-#include "ecran_stub.h"         /* ECRAN_CONSOLE */
 #include "ecran_temperatures.h" /* ECRAN_TEMPERATURES */
 #include "ecran_ventilateurs.h" /* ECRAN_VENTILATEURS */
 #include "klipper_gcode.h"      /* klipper_gcode_niveau_lit()/KLIPPER_LIT_DISABLE */

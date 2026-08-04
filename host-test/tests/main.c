@@ -45,6 +45,7 @@ void suite_ecran_reglages_wifi(void);
 void suite_ecran_menu_reglages(void);
 void suite_ecran_actions(void);
 void suite_ecran_homing(void);
+void suite_ecran_console(void);
 void suite_klipper_gcode(void);
 void suite_klipper_paliers(void);
 void suite_selecteur_pas(void);
@@ -251,12 +252,14 @@ int main(void)
      * test_ecran_retraction.c. */
     suite_ecran_retraction();
 
-    /* Sous-projet "panneaux KlipperScreen", tache 7 : les cinq ecrans stub
-     * restants (Power/Bed Mesh/Input Shaper/Spoolman/Console, backend
-     * absent) -- AUCUNE contrainte d'ordonnancement, contrairement aux
-     * suites d'ecran ci-dessus : ces stubs n'envoient jamais de commande et
-     * ne lisent jamais l'etat backend (mettre_a_jour = NULL), voir le
-     * commentaire de tete de suite_ecran_stub() dans test_ecran_stub.c. */
+    /* Sous-projet "panneaux KlipperScreen", tache 7 : les trois ecrans stub
+     * restants (Bed Mesh/Input Shaper/Spoolman, backend absent) -- Power et
+     * Console sont partis chacun dans leur propre suite dediee depuis leurs
+     * taches B respectives. AUCUNE contrainte d'ordonnancement,
+     * contrairement aux suites d'ecran ci-dessus : ces stubs n'envoient
+     * jamais de commande et ne lisent jamais l'etat backend
+     * (mettre_a_jour = NULL), voir le commentaire de tete de
+     * suite_ecran_stub() dans test_ecran_stub.c. */
     suite_ecran_stub();
 
     /* Task 2 (jalon OTA firmware) : l'ecran Updater, ex-sixieme stub de la
@@ -311,6 +314,14 @@ int main(void)
      * construit + boucle simulee demarree) -- voir le commentaire de tete de
      * suite_ecran_homing() dans test_ecran_homing.c. */
     suite_ecran_homing();
+
+    /* Feature "Console gcode", tache B (integration ESP) : l'ecran Console
+     * (ECRAN_CONSOLE, ex-stub) -- scrollback du store dedie console_log.h +
+     * saisie clavier tactile + envoi echappe en JSON. Meme garde
+     * d'ordonnancement que les autres suites d'ecran ci-dessus (habillage
+     * construit + boucle simulee demarree) -- voir le commentaire de tete de
+     * suite_ecran_console() dans test_ecran_console.c. */
+    suite_ecran_console();
 
     /* Tache 6 (refonte accueil/deplacer) : integration du rail + bascule
      * accueil-hub. DOIT rester APRES suite_ecran_configuration() (habillage

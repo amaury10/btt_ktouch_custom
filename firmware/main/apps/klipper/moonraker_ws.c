@@ -44,6 +44,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "console_log.h"
 #include "journal.h"
 #include "klipper_fichiers.h"
 #include "moonraker_boite.h"
@@ -112,6 +113,28 @@ static bool   g_tampon_deborde = false;
  * seul canal de diagnostic d'un appareil sans port série) sous une ligne
  * par tentative pendant une panne prolongée. */
 #define MOONRAKER_WS_JOURNAL_INTERVALLE_US (60LL * 1000 * 1000)
+
+/* Dispatch par NOM DE METHODE des notifications qui tombent dans
+ * RPC_MSG_AUTRE (feature "Console gcode", tache B -- refactor, voir
+ * traiter_message_complet() plus bas) : tampon de rpc_lire_methode(),
+ * LARGEMENT au-dela de RPC_METHODE_COMMANDE_MAX (32, moonraker_rpc.h --
+ * dimensionne pour les methodes de COMMANDE, ex. "printer.emergency_stop").
+ * Les noms de NOTIFICATION Moonraker sont plus longs
+ * ("notify_gcode_response" = 22 caracteres, "notify_klippy_disconnected" =
+ * 27) et rpc_lire_methode() echoue STRICTEMENT sur troncature -- jamais un
+ * prefixe rendu comme un succes qui fausserait ce dispatch, voir son
+ * commentaire dans moonraker_rpc.h (piege documente par la tache A pour la
+ * tache B). 64 couvre large toute methode Moonraker connue de ce depot. */
+#define MOONRAKER_WS_METHODE_MAX 64
+
+/* Tampon d'echange pour rpc_lire_gcode_response() (feature "Console gcode",
+ * tache B) avant decoupage sur '\n' -- rpc_lire_gcode_response() tronque
+ * proprement (UTF-8-safe) au-dela, jamais un echec (voir moonraker_rpc.h) :
+ * une reponse Klipper multi-lignes exceptionnellement longue perd ses
+ * dernieres lignes plutot que de deborder ce tampon. 512 couvre large une
+ * reponse "normale" (quelques lignes de log/erreur) ; console_log_ajouter()
+ * tronque de toute facon chaque LIGNE individuelle a CONSOLE_LIGNE_MAX. */
+#define MOONRAKER_WS_GCODE_RESPONSE_MAX 512
 
 /* --- État process-wide (singleton de fichier, voir le commentaire de tête
  * de moonraker_ws.h -- un seul client WS à la fois dans le socle). --- */
@@ -605,35 +628,68 @@ static void traiter_message_complet(const char *json, size_t longueur)
         g_klippy_pret = false;
         break;
     case RPC_MSG_AUTRE: {
-        /* Feature "Power devices Moonraker", tache B : notify_power_changed
-         * n'a pas de classification RPC_MSG_* dediee -- rpc_classifier()
-         * (moonraker_rpc.c) ne distingue pas les notifications entre elles
-         * au-dela de status_update/klippy_ready/klippy_disconnected,
-         * notify_power_changed tombe ici comme notify_gcode_response (voir
-         * le commentaire plus bas). rpc_lire_power_changed() est une
-         * fonction PURE qui valide elle-meme la forme attendue (params[0]
-         * un TABLEAU d'objets {"device":...}, voir moonraker_rpc.h) et rend
-         * false sur toute AUTRE notification (notify_gcode_response, par
-         * exemple, a un params[0] qui est une CHAINE, pas un tableau --
-         * echoue deja ce test) : tenter l'appel inconditionnellement ici est
-         * donc sans risque de faux positif, meme discipline "essayer, la
-         * forme filtre" que le reste de ce fichier (rpc_fusionner_status,
-         * rpc_lire_reponse...). PAS `power_devices_definir()` (qui
-         * REMPLACERAIT tout le store par le seul sous-ensemble change, voir
-         * le rapport de la tache A) : une mise a jour CIBLEE par prise,
-         * `power_devices_maj_un()`, pour chacune des `pd.nb` prises
-         * changees. */
-        power_devices_t pd;
-        if (rpc_lire_power_changed(&pd, json, longueur)) {
-            for (uint8_t i = 0; i < pd.nb; i++) {
-                power_devices_maj_un(pd.devices[i].nom, pd.devices[i].allumee);
+        /* Feature "Console gcode", tache B : refactor du dispatch, PAR NOM
+         * DE METHODE plutot que par la FORME du payload -- jusqu'ici
+         * notify_power_changed (feature Power) et notify_gcode_response
+         * tombaient tous deux ici et etaient distingues par la forme de
+         * params[0] (tableau d'objets vs chaine), une distinction fragile
+         * qui devenait ambigue des qu'une TROISIEME notification a params[0]
+         * de meme forme apparaissait (exactement le cas de
+         * notify_gcode_response, cf. l'ancien commentaire ici). Desormais on
+         * lit "method" explicitement (rpc_lire_methode(), tache A) et on
+         * dispatche dessus -- plus robuste, plus lisible. */
+        char methode[MOONRAKER_WS_METHODE_MAX];
+        if (!rpc_lire_methode(methode, sizeof(methode), json, longueur)) {
+            /* method absente/illisible/trop longue pour ce tampon (voir le
+             * commentaire de MOONRAKER_WS_METHODE_MAX) : rien a dispatcher,
+             * meme discipline defensive que le reste de ce fichier. */
+            break;
+        }
+
+        if (strcmp(methode, "notify_power_changed") == 0) {
+            /* Feature "Power devices Moonraker", tache B : comportement
+             * PRESERVE a l'identique (voir le rapport de sa tache A) -- PAS
+             * `power_devices_definir()` (qui REMPLACERAIT tout le store par
+             * le seul sous-ensemble change) : une mise a jour CIBLEE par
+             * prise, `power_devices_maj_un()`, pour chacune des `pd.nb`
+             * prises changees. */
+            power_devices_t pd;
+            if (rpc_lire_power_changed(&pd, json, longueur)) {
+                for (uint8_t i = 0; i < pd.nb; i++) {
+                    power_devices_maj_un(pd.devices[i].nom, pd.devices[i].allumee);
+                }
+            }
+        } else if (strcmp(methode, "notify_gcode_response") == 0) {
+            /* Feature "Console gcode", tache B : le canal par lequel Klipper
+             * signale (entre autres) l'echec REEL d'une macro inconnue --
+             * voir le commentaire de RPC_MSG_AUTRE dans moonraker_rpc.h. Une
+             * reponse Klipper peut etre MULTI-LIGNES (separees par '\n') :
+             * DECOUPEE ici avant `console_log_ajouter()` (note de la tache
+             * A -- ce store n'accepte qu'UNE ligne par appel, voir
+             * console_log.h), une ligne a la fois ; les lignes VIDES sont
+             * sautees (un '\n' de tete/fin ou deux '\n' consecutifs ne
+             * doivent pas pousser une ligne vide dans le scrollback). */
+            char reponse[MOONRAKER_WS_GCODE_RESPONSE_MAX];
+            if (rpc_lire_gcode_response(reponse, sizeof(reponse), json, longueur)) {
+                char *debut = reponse;
+                for (;;) {
+                    char *saut = strchr(debut, '\n');
+                    if (saut != NULL) {
+                        *saut = '\0';
+                    }
+                    if (debut[0] != '\0') {
+                        console_log_ajouter(debut);
+                    }
+                    if (saut == NULL) {
+                        break;
+                    }
+                    debut = saut + 1;
+                }
             }
         }
-        /* Sinon (forme non reconnue) : couvre notamment notify_gcode_response,
-         * le canal par lequel Klipper signale l'echec REEL d'une macro
-         * inconnue (voir le commentaire de tete de moonraker_rpc.h) -- son
-         * interpretation est une decision de la tache 6 (ecran macros),
-         * volontairement PAS prise ici. */
+        /* Sinon (methode non reconnue, ex. notify_klippy_disconnected arrive
+         * deja classee RPC_MSG_KLIPPY_DECONNECTE plus haut) : notification
+         * ignoree, meme politique defensive que le reste de ce fichier. */
         break;
     }
     case RPC_MSG_INVALIDE:

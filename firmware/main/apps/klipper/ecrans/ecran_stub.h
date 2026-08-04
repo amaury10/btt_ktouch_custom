@@ -28,6 +28,15 @@
  * ici, pour ne jamais entrer en collision avec celui de ecran_power.h -- voir
  * ce fichier pour son contrat.
  *
+ * Console est parti de la meme facon (feature "Console gcode", tache B --
+ * integration ESP) : le backend existe desormais (store dedie console_log.h,
+ * tache A, cablage WS par notify_gcode_response dans moonraker_ws.c) --
+ * ECRAN_CONSOLE affiche donc un vrai scrollback + une saisie clavier au lieu
+ * du placeholder "Requires gcode_response capture - not yet available". Le
+ * symbole ECRAN_CONSOLE N'EST PLUS declare ici, pour ne jamais entrer en
+ * collision avec celui de ecran_console.h -- voir ce fichier pour son
+ * contrat.
+ *
  * `mettre_a_jour = NULL` et `detruire = NULL` pour les quatre restants --
  * rien de dynamique a rafraichir, rien a liberer au-dela du contexte (ici de
  * taille 0, voir ecran.h : "un ecran purement statique... peut laisser ce
@@ -46,4 +55,3 @@
 extern const ecran_desc_t ECRAN_BED_MESH;
 extern const ecran_desc_t ECRAN_INPUT_SHAPER;
 extern const ecran_desc_t ECRAN_SPOOLMAN;
-extern const ecran_desc_t ECRAN_CONSOLE;

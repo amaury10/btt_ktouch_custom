@@ -150,6 +150,7 @@ add_executable(tests
     tests/test_ecran_menu_reglages.c
     tests/test_ecran_actions.c
     tests/test_ecran_homing.c
+    tests/test_ecran_console.c
     tests/wifi_mock.c
     tests/test_klipper_gcode.c
     tests/test_klipper_paliers.c
@@ -206,6 +207,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_stub.c
     ${ECRANS_DIR}/ecran_updater.c
     ${ECRANS_DIR}/ecran_power.c
+    ${ECRANS_DIR}/ecran_console.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
     ${ECRANS_DIR}/ecran_fichiers.c

@@ -1,14 +1,16 @@
-/* Implementation : voir ecran_stub.h pour le contrat et pourquoi ces quatre
+/* Implementation : voir ecran_stub.h pour le contrat et pourquoi ces trois
  * panneaux se limitent a un titre + une ligne d'explication, sans aucune
- * donnee ni action -- et pourquoi les stubs d'origine Updater et Power ont
- * quitte ce fichier pour ecran_updater.c (Task 2, jalon OTA firmware) et
- * ecran_power.c (feature "Power devices Moonraker", tache B) respectivement.
+ * donnee ni action -- et pourquoi les stubs d'origine Updater, Power et
+ * Console ont quitte ce fichier pour ecran_updater.c (Task 2, jalon OTA
+ * firmware), ecran_power.c (feature "Power devices Moonraker", tache B) et
+ * ecran_console.c (feature "Console gcode", tache B) respectivement.
  *
- * STUBS(X) liste les quatre panneaux (symbole, id, titre, explication) ; X()
- * est instanciee deux fois plus bas -- une premiere pour generer les quatre
- * `<symbole>_construire()` (chacun ferme sur ses propres litteraux, brief
- * option (a)), une seconde pour generer les quatre `ecran_desc_t` eux-memes.
- * Ajouter un stub de plus se resume a une ligne de plus dans STUBS(). */
+ * STUBS(X) liste les trois panneaux restants (symbole, id, titre,
+ * explication) ; X() est instanciee deux fois plus bas -- une premiere pour
+ * generer les `<symbole>_construire()` (chacun ferme sur ses propres
+ * litteraux, brief option (a)), une seconde pour generer les `ecran_desc_t`
+ * eux-memes. Ajouter un stub de plus se resume a une ligne de plus dans
+ * STUBS(). */
 #include "ecran_stub.h"
 
 #include "lvgl.h"
@@ -50,17 +52,18 @@ static void ecran_stub_peindre(lv_obj_t *parent, const char *titre, const char *
     lv_obj_align_to(label_explication, label_titre, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
 }
 
-/* Table maitresse des quatre stubs restants -- symbole du descripteur, id
+/* Table maitresse des trois stubs restants -- symbole du descripteur, id
  * stable, titre KlipperScreen, ligne d'explication (valeurs EXACTES du brief
  * de la tache, verbatim). ECRAN_UPDATER n'y figure plus depuis Task 2 (jalon
  * OTA firmware) -- voir ecran_updater.c pour son remplacant reel. ECRAN_POWER
  * n'y figure plus depuis la feature "Power devices Moonraker" (tache B) --
- * voir ecran_power.c pour son remplacant reel. */
+ * voir ecran_power.c pour son remplacant reel. ECRAN_CONSOLE n'y figure plus
+ * depuis la feature "Console gcode" (tache B) -- voir ecran_console.c pour
+ * son remplacant reel. */
 #define STUBS(X)                                                                                                     \
     X(ECRAN_BED_MESH, "bed_mesh", "Bed Mesh", "Requires bed mesh data - not yet available")                          \
     X(ECRAN_INPUT_SHAPER, "input_shaper", "Input Shaper", "Requires resonance testing - not yet available")          \
-    X(ECRAN_SPOOLMAN, "spoolman", "Spoolman", "Requires a Spoolman server - not yet available")                     \
-    X(ECRAN_CONSOLE, "console", "Console", "Requires gcode_response capture - not yet available")
+    X(ECRAN_SPOOLMAN, "spoolman", "Spoolman", "Requires a Spoolman server - not yet available")
 
 /* Un `<symbole>_construire()` par stub -- signature imposee par
  * ecran_desc_t.construire (ecran.h), `contexte` ignore (taille_contexte = 0,
