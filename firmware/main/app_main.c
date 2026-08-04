@@ -192,7 +192,14 @@ static void usb_scan_tache(void *arg)
     uint8_t nb = 0;
     bool tronques = false;
     usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques);
-    usb_fichiers_definir(true, s_usb_scan_tampon, nb, tronques);
+    /* La cle a pu etre ejectee PENDANT le scan (cette tache dediee tourne des
+       centaines de ms) : usb_on_unmount_cb() a alors deja publie monte=false.
+       Ne pas ecraser cet etat par un "true" en dur -- relire l'etat reel du
+       montage. Si demontee, publier monte=false + liste vide plutot qu'une
+       liste perimee etiquetee "cle presente" (scenario ejection a chaud). */
+    bool encore_monte = pt_usb_is_mounted();
+    usb_fichiers_definir(encore_monte, encore_monte ? s_usb_scan_tampon : NULL,
+                         encore_monte ? nb : 0, encore_monte ? tronques : false);
     JOURNAL_INFO(TAG, "scan USB : %u fichier(s) .gcode trouve(s)%s", (unsigned)nb,
                  tronques ? " (liste tronquee)" : "");
     s_usb_scan_en_cours = false;
