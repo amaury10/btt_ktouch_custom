@@ -54,6 +54,7 @@ void suite_integration_rail(void);
 void suite_bascule_accueil(void);
 void suite_klipper_temp_historique(void);
 void suite_ota_image(void);
+void suite_power_devices(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -359,6 +360,14 @@ int main(void)
      * sans aucun etat process-wide -- aucune contrainte d'ordre avec les
      * autres suites. */
     suite_ota_image();
+
+    /* Tache A (feature "Power devices Moonraker") : store dedie
+     * (power_devices.h) + parseurs purs (rpc_lire_power_devices/
+     * rpc_lire_power_changed dans moonraker_rpc.c) -- aucune contrainte
+     * d'ordre avec les autres suites (le store est remis a plat par chaque
+     * power_devices_definir() de test, aucun etat partage avec une autre
+     * suite). */
+    suite_power_devices();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

@@ -913,6 +913,141 @@ bool rpc_lire_fichiers(klipper_fichiers_t *dest, const char *json, size_t longue
 }
 
 /* ------------------------------------------------------------------------
+ * Prises Moonraker (machine.device_power.*)
+ * ---------------------------------------------------------------------- */
+
+/* Traite un élément du tableau `devices` (réponse à
+ * machine.device_power.devices OU notify_power_changed) : l'ajoute à
+ * `p->devices` si c'est bien un objet portant un champ `.device` chaîne et
+ * que le nom tient dans le tampon fixe. Même structure que
+ * traiter_candidat_fichier() ci-dessus -- `.status == "on"` -> allumee,
+ * toute autre valeur (typiquement absente ou "off") -> pas allumee, mais
+ * `connue` passe true dans les deux cas puisqu'un état a bien été reçu. */
+static void traiter_candidat_power_device(power_devices_t *p, const cJSON *item)
+{
+    if (!cJSON_IsObject(item)) {
+        return;
+    }
+    const cJSON *nom_json = cJSON_GetObjectItemCaseSensitive(item, "device");
+    if (!cJSON_IsString(nom_json) || nom_json->valuestring == NULL) {
+        return;
+    }
+    const char *nom = nom_json->valuestring;
+    size_t len = strlen(nom);
+    if (len == 0) {
+        return;
+    }
+    if (len >= POWER_NOM_MAX) {
+        /* Trop long pour tenir avec le '\0' : IGNORE, jamais tronque -- même
+         * raisonnement que traiter_candidat_fichier() pour les chemins trop
+         * longs (un nom tronqué désignerait potentiellement une AUTRE
+         * prise). Ne positionne pas `tronque`, qui documente spécifiquement
+         * le dépassement du COMPTE, pas une longueur de nom. */
+        return;
+    }
+    if (p->nb >= POWER_DEVICES_MAX) {
+        p->tronque = true;
+        return;
+    }
+
+    const cJSON *statut = cJSON_GetObjectItemCaseSensitive(item, "status");
+    bool allumee = cJSON_IsString(statut) && statut->valuestring != NULL &&
+                   strcmp(statut->valuestring, "on") == 0;
+
+    power_device_t *d = &p->devices[p->nb];
+    memcpy(d->nom, nom, len + 1);
+    d->allumee = allumee;
+    d->connue = true;
+    p->nb++;
+}
+
+bool rpc_lire_power_devices(power_devices_t *dest, const char *json, size_t longueur)
+{
+    if (dest == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL) {
+        return false;
+    }
+
+    /* `result.devices` (forme nominale d'une vraie réponse Moonraker) ou,
+     * à défaut, `devices` directement à la racine (voir le commentaire de
+     * rpc_lire_power_devices dans moonraker_rpc.h) -- les deux désignent le
+     * même tableau, seule l'enveloppe diffère. */
+    const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    const cJSON *devices = NULL;
+    if (cJSON_IsObject(resultat)) {
+        devices = cJSON_GetObjectItemCaseSensitive(resultat, "devices");
+    }
+    if (!cJSON_IsArray(devices)) {
+        devices = cJSON_GetObjectItemCaseSensitive(racine, "devices");
+    }
+    if (!cJSON_IsArray(devices)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Instantane COMPLET (pas une fusion partielle) -- travaille sur une
+     * locale nulle, ecrite en bloc a la fin dans `*dest`, meme discipline que
+     * rpc_lire_fichiers ci-dessus. */
+    power_devices_t local;
+    memset(&local, 0, sizeof(local));
+
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, devices) {
+        traiter_candidat_power_device(&local, item);
+    }
+
+    *dest = local;
+    cJSON_Delete(racine);
+    return true;
+}
+
+bool rpc_lire_power_changed(power_devices_t *dest, const char *json, size_t longueur)
+{
+    if (dest == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL || !cJSON_IsObject(racine)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Piege propre a notify_power_changed (different de
+     * rpc_fusionner_status) : params[0] est lui-meme un TABLEAU de prises
+     * changees, pas un objet de statut unique -- voir le commentaire de
+     * rpc_lire_power_changed dans moonraker_rpc.h. Une enveloppe qui ne
+     * respecte pas cette forme est une anomalie D'ENVELOPPE : elle invalide
+     * le message ENTIER. */
+    const cJSON *params = cJSON_GetObjectItemCaseSensitive(racine, "params");
+    if (!cJSON_IsArray(params) || cJSON_GetArraySize(params) < 1) {
+        cJSON_Delete(racine);
+        return false;
+    }
+    const cJSON *changements = cJSON_GetArrayItem(params, 0);
+    if (!cJSON_IsArray(changements)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    power_devices_t local;
+    memset(&local, 0, sizeof(local));
+
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, changements) {
+        traiter_candidat_power_device(&local, item);
+    }
+
+    *dest = local;
+    cJSON_Delete(racine);
+    return true;
+}
+
+/* ------------------------------------------------------------------------
  * Correspondance action -> méthode JSON-RPC (transport WebSocket)
  * ---------------------------------------------------------------------- */
 

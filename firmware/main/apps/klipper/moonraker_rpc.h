@@ -37,6 +37,7 @@
 
 #include "etat_klipper.h"
 #include "klipper_fichiers.h"
+#include "power_devices.h"
 
 /* Construit une requête JSON-RPC 2.0 : `{"jsonrpc":"2.0","method":"...",
  * "params":<params_json>,"id":N}`. Si `params_json` est NULL, la clé
@@ -255,6 +256,64 @@ bool rpc_lire_macros(etat_klipper_t *etat, const char *json, size_t longueur);
  * reste de ce fichier) -- le reste de la liste continue d'être traité
  * normalement. */
 bool rpc_lire_fichiers(klipper_fichiers_t *dest, const char *json, size_t longueur);
+
+/* ------------------------------------------------------------------------
+ * Prises Moonraker (machine.device_power.*)
+ * ---------------------------------------------------------------------- */
+
+/* Extrait la liste des prises depuis une réponse à
+ * `machine.device_power.devices` : `result.devices`, tableau d'objets
+ * `{"device":"nom","status":"on|off",...}` (même forme d'objet que
+ * `traiter_candidat_fichier` pour `server.files.list`, un champ `.path` en
+ * moins et deux champs `.device`/`.status` en plus). Accepte AUSSI
+ * `result` étant DIRECTEMENT le tableau `{"devices":[...]}` sans
+ * l'enveloppe `result` (au cas où l'appelant recevrait un message déjà
+ * partiellement déballé) -- dans les deux cas c'est la clé `"devices"`,
+ * qu'elle soit sous `result` ou à la racine, qui porte le tableau.
+ *
+ * Remplace ENTIÈREMENT `dest->devices`/`dest->nb`/`dest->tronque` (même
+ * contrat que rpc_lire_fichiers/rpc_lire_macros : instantané complet, pas
+ * une fusion). Rend false et ne touche RIEN à `*dest` si le JSON est
+ * illisible ou si aucune des deux formes n'est reconnue.
+ *
+ * `status == "on"` -> `allumee = true` ; toute autre valeur (typiquement
+ * `"off"`) -> `allumee = false` -- dans les deux cas `connue = true`,
+ * puisqu'un état a bien été reçu pour cette prise. Un élément du tableau qui
+ * n'est pas un objet, ou dont `.device` n'est pas une chaîne, est ignoré
+ * (même défense poison-par-élément que traiter_candidat_fichier) -- le
+ * reste de la liste continue d'être traité normalement.
+ *
+ * Tronqué à POWER_DEVICES_MAX avec `tronque = true` au-delà. Un `.device`
+ * d'au moins POWER_NOM_MAX caractères est IGNORÉ (pas tronqué, même leçon
+ * que rpc_lire_fichiers sur les chemins trop longs -- un nom tronqué
+ * désignerait potentiellement une AUTRE prise existante) ; cette omission
+ * ne compte pas dans `nb` et ne positionne PAS `tronque`.
+ *
+ * Fonction PURE : n'importe quel appel de power_devices_definir() pour
+ * déposer le résultat dans le store partagé est à la charge de
+ * l'appelant (moonraker_ws.c), comme rpc_lire_fichiers/klipper_fichiers. */
+bool rpc_lire_power_devices(power_devices_t *dest, const char *json, size_t longueur);
+
+/* Extrait la liste des prises CHANGÉES depuis une notification
+ * `notify_power_changed` : `params[0]` est lui-même un TABLEAU d'objets
+ * `{"device":"nom","status":"on|off"}` -- piège différent de
+ * rpc_fusionner_status/rpc_fusionner_instantane, où `params[0]` est un OBJET
+ * de statut, pas un tableau. Rend false et ne touche RIEN à `*dest` si le
+ * JSON est illisible, ou si l'enveloppe est hostile (`params` absent/pas un
+ * tableau, `params[0]` absent ou pas lui-même un tableau) -- même politique
+ * d'anomalie d'ENVELOPPE que rpc_fusionner_status.
+ *
+ * `dest` reçoit SEULEMENT les prises présentes dans cette notification
+ * (pas une fusion avec un état antérieur : cette fonction est pure, elle ne
+ * connaît pas le store -- c'est à l'appelant d'en faire ce qu'il veut,
+ * typiquement une mise à jour ciblée par prise via
+ * power_devices_maj_un() pour chacune). Mêmes règles `status`/`allumee`/
+ * `connue`, mêmes défenses poison-par-élément, même troncature à
+ * POWER_DEVICES_MAX/ignoré-si-trop-long que rpc_lire_power_devices
+ * ci-dessus -- Moonraker peut en théorie regrouper plusieurs prises dans une
+ * seule notification, même si un vrai Moonraker n'en pousse généralement
+ * qu'une par message. */
+bool rpc_lire_power_changed(power_devices_t *dest, const char *json, size_t longueur);
 
 /* Taille de tampon suffisante pour toute méthode rendue par
  * rpc_methode_commande() ci-dessous : la plus longue
