@@ -59,6 +59,7 @@ void suite_power_devices(void);
 void suite_console_log(void);
 void suite_json_util(void);
 void suite_miniature(void);
+void suite_usb_upload(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -415,6 +416,11 @@ int main(void)
      * LODEPNG est un etat process-wide DEJA enregistre par
      * initialiser_affichage_test() ci-dessus, jamais reenregistre ici). */
     suite_miniature();
+
+    /* Tâche A (feature "Impression depuis USB") : cadrage multipart pur de
+     * l'upload vers Moonraker (usb_upload.h) -- fonctions pures sans état,
+     * aucune contrainte d'ordre avec les autres suites. */
+    suite_usb_upload();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;
