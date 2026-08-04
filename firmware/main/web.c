@@ -619,7 +619,7 @@ static esp_err_t gestion_ota_page(httpd_req_t *req)
         "<h2>Firmware</h2>"
         "<p>SHA-256 attendu (optionnel) :<br>"
         "<input type=\"text\" id=\"sha\" size=\"66\" placeholder=\"64 hex, optionnel\"></p>"
-        "<p>Fichier .bin : <input type=\"file\" id=\"fichier\"></p>"
+        "<p>Fichier .bin : <input type=\"file\" id=\"fichier\" accept=\".bin\"></p>"
         "<p><button type=\"button\" onclick=\"verifier()\">Verifier (dry-run)</button> "
         "<button type=\"button\" id=\"btnflash\" onclick=\"flasher()\" disabled>"
         "Flasher (ecriture reelle)</button></p>"
