@@ -94,6 +94,7 @@
 #include "liaison.h"
 #include "netlog.h"
 #include "ota.h"
+#include "pandatouch_display.h"
 #include "rescue.h"
 #include "web_macros.h"
 #include "wifi.h"
@@ -686,7 +687,18 @@ static esp_err_t gestion_ota_post(httpd_req_t *req)
        cela AVANT de revenir ici. Ce fichier ne fait toujours jamais lui-meme
        esp_ota_begin/write (voir le commentaire de tete de ce fichier). */
     char msg[256];
+    /* Ecran noir pendant l'ecriture : un erase/write flash desactive le cache
+       flash, ce qui affame le DMA de la dalle RGB (framebuffer en PSRAM) et
+       affiche du bruit. pt_backlight_set() ecrit un duty LEDC (registre, rapide,
+       maintenu par le peripherique pendant l'ecriture). Sur echec, on ne
+       redemarre pas -> restaurer. Sur succes, le chemin plus bas repond puis
+       esp_restart() et l'ecran revient au boot. */
+    uint32_t retro = pt_backlight_get();
+    pt_backlight_set(0);
     esp_err_t resultat = ota_appliquer_flux(req, msg, sizeof(msg));
+    if (resultat != ESP_OK) {
+        pt_backlight_set(retro);
+    }
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     if (resultat != ESP_OK) {
         /* 409 : la garde a refuse (sauvegarde BTT absente/invalide) -- le
@@ -777,7 +789,15 @@ static esp_err_t gestion_restore_btt(httpd_req_t *req)
        un semaphore, jamais en boucle d'E/S flash active sur CETTE pile-ci
        (celle de la tache httpd). */
     char msg[256];
+    /* Meme masquage que gestion_ota_post() : ecran noir pendant l'ecriture
+       flash de la restauration, restaure sur echec (pas de reboot), reste noir
+       sur succes (esp_restart plus bas). */
+    uint32_t retro = pt_backlight_get();
+    pt_backlight_set(0);
     esp_err_t resultat = ota_restaurer_btt(msg, sizeof(msg));
+    if (resultat != ESP_OK) {
+        pt_backlight_set(retro);
+    }
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     if (resultat != ESP_OK) {
         /* 409 : la garde a refuse (sauvegarde BTT absente/invalide, voir
