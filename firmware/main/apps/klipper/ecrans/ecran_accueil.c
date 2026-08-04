@@ -51,6 +51,18 @@
  * revendre). */
 #define MINIATURE_LARGEUR 120
 #define MINIATURE_HAUTEUR 120
+/* Feature "Miniatures gcode", tâche B -- garde FINDING 2 (revue opus) : borne
+ * de sûreté sur les dimensions RÉELLES décodées (header.w/h rendus par
+ * lv_image_decoder_get_info(), voir mettre_a_jour_miniature()), pas seulement
+ * celles, potentiellement optimistes, de la métadonnée Moonraker. Un petit
+ * fichier PNG peut déclarer un en-tête IHDR de plusieurs mégapixels -- le
+ * décodage pixel allouerait alors header.w*header.h*4 octets en PSRAM AU
+ * DESSIN, bien après ce contrôle. Au-delà de cette borne, l'image est masquée
+ * et lv_image_set_src() n'est JAMAIS appelé (état affiché = rien). 2x
+ * MINIATURE_LARGEUR_MAX_PX (la largeur demandée à Moonraker, voir miniature.h)
+ * laisse passer toute miniature légitime tout en plafonnant l'allocation du
+ * décodeur. */
+#define MINIATURE_BORNE_DIM_PX (2 * MINIATURE_LARGEUR_MAX_PX)
 #define TUILE_LARGEUR ((LARGEUR_CONTENU - 4 * MARGE - MINIATURE_LARGEUR) / 2)
 #define TUILE_HAUTEUR 140
 #define TUILE_Y        16
@@ -486,6 +498,7 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
     lv_obj_set_pos(ctx->miniature_image, MINIATURE_X, MINIATURE_Y);
     lv_obj_add_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
     ctx->miniature_generation = 0; /* jamais affichée -- 0 n'est jamais une generation reelle du store */
+    ctx->miniature_affichee = NULL; /* rien sur le widget -- voir miniature_purger() */
 }
 
 /* Feature "Miniatures gcode", tâche B : affiche/masque ctx->miniature_image
@@ -494,13 +507,16 @@ static void ecran_accueil_construire(lv_obj_t *parent, void *contexte)
  *
  * Ordre STRICT à l'intérieur de cette fonction, jamais à inverser (voir le
  * contrat détaillé de miniature_lire()/miniature_purger() dans miniature.h,
- * §"transfert différé") : 1) lire l'instantané, 2) si une NOUVELLE
- * génération PRÊTE est disponible, ré-orienter le widget vers son pointeur
- * (ou le masquer si l'état n'est pas PRÊT), 3) PURGER en tout dernier -- le
- * tampon qu'un dépôt producteur a pu retirer depuis le dernier appel n'est
- * JAMAIS celui que cette fonction vient elle-même de poser sur le widget
- * dans CE cycle (il a forcément été remplacé par un dépôt ANTÉRIEUR), donc
- * purger après avoir ré-orienté le widget est toujours sûr.
+ * §"transfert différé") : 1) lire l'instantané -- ce lire REVENDIQUE déjà le
+ * pointeur actif côté store, de sorte qu'un dépôt producteur survenant AVANT
+ * le set_src ci-dessous ne peut plus le libérer ; 2) si une NOUVELLE
+ * génération PRÊTE est décodable et bornée, ré-orienter le widget vers son
+ * pointeur et mémoriser ce pointeur dans `ctx->miniature_affichee` (sinon
+ * masquer l'image et remettre `miniature_affichee` à NULL) ; 3) PURGER en
+ * tout dernier en passant `ctx->miniature_affichee` -- le store refuse alors
+ * de libérer le tampon que le widget référence encore (le dessin est différé,
+ * lv_image_set_src() étant paresseux) et ne libère que ce qu'un dépôt
+ * producteur a retiré et que plus personne n'affiche.
  *
  * API LVGL 9.2 exacte pour une source PNG en mémoire (voir
  * simulateur/lvgl/src/libs/lodepng/lv_lodepng.c, decoder_info()/decoder_open()
@@ -545,7 +561,13 @@ static void mettre_a_jour_miniature(ecran_accueil_ctx_t *ctx)
          * taille réelle. */
         lv_image_header_t header;
         if (lv_image_decoder_get_info(&ctx->miniature_dsc, &header) == LV_RESULT_OK &&
-            header.w > 0 && header.h > 0) {
+            header.w > 0 && header.h > 0 &&
+            header.w <= MINIATURE_BORNE_DIM_PX && header.h <= MINIATURE_BORNE_DIM_PX) {
+            /* FINDING 2 (revue opus) : dimensions RÉELLES bornées ci-dessus --
+             * un IHDR aberrant (plusieurs mégapixels dans un petit PNG) tombe
+             * dans le `else` (masqué, jamais de lv_image_set_src()), ce qui
+             * empêche le décodeur d'allouer header.w*header.h*4 en PSRAM au
+             * dessin. */
             lv_image_set_src(ctx->miniature_image, &ctx->miniature_dsc);
 
             /* Zoom "contain" calculé à la main (pas de mode d'ajustement
@@ -580,8 +602,13 @@ static void mettre_a_jour_miniature(ecran_accueil_ctx_t *ctx)
                            MINIATURE_X + (MINIATURE_LARGEUR - largeur_dessinee) / 2,
                            MINIATURE_Y + (MINIATURE_HAUTEUR - hauteur_dessinee) / 2);
             lv_obj_clear_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+            /* Ce tampon est desormais REFERENCE par le widget et VISIBLE : le
+             * signaler a miniature_purger() (voir plus bas) pour que le store
+             * refuse de le liberer tant qu'un dessin peut encore le decoder. */
+            ctx->miniature_affichee = snap.donnees;
         } else {
             lv_obj_add_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+            ctx->miniature_affichee = NULL; /* rien d'affiche (decode en echec ou dimensions aberrantes) */
         }
         ctx->miniature_generation = snap.generation;
     } else if (snap.etat != MINIATURE_PRETE) {
@@ -589,14 +616,20 @@ static void mettre_a_jour_miniature(ecran_accueil_ctx_t *ctx)
          * fichier (bouton_macros, grisage...) : ABSENTE/EN_COURS/ECHEC
          * masque TOUJOURS, y compris apres plusieurs allers-retours. */
         lv_obj_add_flag(ctx->miniature_image, LV_OBJ_FLAG_HIDDEN);
+        ctx->miniature_affichee = NULL; /* plus rien sur le widget */
     }
     /* Sinon (PRETE mais generation deja affichee) : rien a refaire, le
      * widget reste tel quel -- pas de decodage/redimensionnement inutile a
-     * chaque cycle de rafraichissement pour une image qui n'a pas change. */
+     * chaque cycle de rafraichissement pour une image qui n'a pas change.
+     * ctx->miniature_affichee reste le tampon deja affiche (toujours sur le
+     * widget), toujours protege ci-dessous. */
 
-    /* TOUJOURS en dernier -- voir le commentaire de tete de cette fonction
-     * et miniature_purger() dans miniature.h. */
-    miniature_purger();
+    /* TOUJOURS en dernier -- voir le commentaire de tete de cette fonction et
+     * miniature_purger() dans miniature.h. On passe le pointeur REELLEMENT sur
+     * le widget (NULL si masque) : le store refuse de liberer ce tampon-la
+     * (lv_image_set_src() est paresseux, le dessin differe peut encore le
+     * decoder), et libere celui qu'un depot producteur a retire entre-temps. */
+    miniature_purger(ctx->miniature_affichee);
 }
 
 static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)

@@ -18,39 +18,49 @@
  *
  * --- Mécanisme de transfert différé (LE point délicat de ce fichier) ------
  *
- * Un tampon PSRAM affiché par l'écran (via un `lv_image_dsc_t` dont
- * `.data` pointe dedans) NE DOIT JAMAIS être libéré pendant que la tâche LVGL
- * pourrait encore le décoder/dessiner -- ces deux tâches (fetch/WS d'un côté,
- * LVGL de l'autre) tournent réellement en parallèle sur cet ESP32-S3 SMP.
- * Libérer depuis le PRODUCTEUR (la tâche qui dépose un nouveau résultat)
- * serait donc une fenêtre de use-after-free bien réelle si le consommateur
- * était au même instant en train d'utiliser l'ancien pointeur qu'il vient de
- * lire via miniature_lire().
+ * Un tampon PSRAM référencé par le widget image de l'écran (via un
+ * `lv_image_dsc_t` dont `.data` pointe dedans) NE DOIT JAMAIS être libéré tant
+ * que la tâche LVGL peut encore le décoder/dessiner. Point crucial :
+ * `lv_image_set_src()` est PARESSEUX -- il mémorise le pointeur et ne lit les
+ * octets qu'au DESSIN (lv_timer_handler), sur la tâche LVGL, en parallèle réel
+ * de la tâche fetch/WS qui produit les dépôts sur cet ESP32-S3 SMP. Le tampon
+ * doit donc rester vivant de set_src jusqu'au prochain rendu ; le libérer
+ * depuis le PRODUCTEUR serait un use-after-free bien réel.
  *
- * Solution : `g_a_liberer` est un SEUL slot de tampon "retiré, en attente
- * d'être libéré par le CONSOMMATEUR" (pas une file -- voir plus bas pour le
- * cas où il serait déjà occupé). Un dépôt producteur (poser_prete/_echec/
- * _en_cours/effacer) qui retire l'actif courant le déplace dans ce slot SANS
- * JAMAIS appeler heap_caps_free() dessus. Seul miniature_purger() (appelé
- * PAR LE CONSOMMATEUR, sur la tâche LVGL, en fin de cycle -- voir son
- * contrat) vide ce slot et libère réellement la mémoire. Par construction
- * (voir miniature.h), le tampon qui atterrit dans `g_a_liberer` a
- * NÉCESSAIREMENT déjà été remplacé côté widget par un dépôt PLUS RÉCENT
- * avant que purger() ne soit appelé dans le même cycle -- jamais celui que
- * l'écran vient de poser sur le widget À L'INSTANT.
+ * Règle unique et suffisante : on ne libère JAMAIS le tampon que le
+ * CONSOMMATEUR détient. Le consommateur publie ce pointeur dans `g_affiche`,
+ * toujours sous le verrou, de DEUX façons complémentaires :
+ *   - miniature_lire() pose `g_affiche = g_donnees` : dès l'instant où le
+ *     consommateur PREND le pointeur actif pour l'afficher, il est protégé.
+ *     C'est ce qui ferme le use-after-free du rapport de revue -- un dépôt
+ *     producteur survenant ENTRE le lire et le lv_image_set_src() de l'écran
+ *     ne peut plus libérer le tampon que l'écran est justement en train de
+ *     poser sur le widget.
+ *   - miniature_purger(encore_affiche) pose `g_affiche = encore_affiche` : le
+ *     pointeur RÉELLEMENT sur le widget (NULL si l'écran a masqué l'image),
+ *     vérité de terrain qui affine la revendication du lire -- un tampon lu
+ *     mais finalement NON affiché (dimensions aberrantes, get_info en échec)
+ *     redevient ainsi librement libérable.
  *
- * Cas résiduel documenté (comme la fenêtre assumée de moonraker_ws.c,
- * minuterie_reconnexion_cb()) : si un DEUXIÈME dépôt producteur survient
- * AVANT que le consommateur n'ait eu la moindre occasion de purger le
- * premier (`g_a_liberer` déjà occupé), ce fichier libère alors ce premier
- * tampon retiré ICI, sur la tâche productrice -- sûr car un tampon déjà
- * présent dans `g_a_liberer` n'a, par construction, JAMAIS été exposé à
- * miniature_lire() (qui ne rend jamais que `g_donnees`, l'actif COURANT,
- * jamais `g_a_liberer`) : aucun consommateur n'a donc pu en obtenir le
- * pointeur. Structurellement quasi impossible ici (un fetch n'arrive qu'une
- * fois par impression, l'écran se met à jour toutes les 250 ms-1 s -- voir
- * miniature.h) mais géré proprement plutôt que fuité en silence si jamais
- * rencontré. */
+ * Les DEUX voies de libération consultent `g_affiche` et refusent de free()
+ * tout tampon qui lui est égal :
+ *   - retirer_actif_verrouille() (tâche PRODUCTRICE) : quand il retire
+ *     l'actif, il le DIFFÈRE dans `g_a_liberer` s'il vaut `g_affiche` (détenu
+ *     par le consommateur) ; sinon il le rend à libérer HORS verrou (jamais
+ *     exposé au consommateur, ou déjà abandonné par lui -- sûr).
+ *   - miniature_purger() (tâche LVGL) : ne libère `g_a_liberer` que s'il ne
+ *     vaut PLUS `g_affiche`.
+ *
+ * Un SEUL tampon peut être « détenu » à un instant donné (`g_affiche` est un
+ * pointeur unique), donc `g_a_liberer` n'a jamais besoin de plus d'un slot :
+ * tout tampon retiré qui n'est PAS le tampon détenu est libéré immédiatement
+ * et sûrement (il n'est référencé par aucun widget), seul le tampon détenu
+ * transite par le slot en attendant que le consommateur s'en détourne. Ni
+ * fuite (le consommateur repasse à chaque cycle et finit par publier un autre
+ * `g_affiche`), ni double-free (un tampon quitte `g_a_liberer`/`g_donnees`
+ * exactement une fois), ni use-after-free (rien qui vaille `g_affiche` n'est
+ * jamais libéré) -- sur fin d'impression, changement de fichier en cours de
+ * fetch, deux dépôts rapprochés, ou destruction d'écran. */
 #include "miniature.h"
 
 #include <stdio.h>
@@ -79,28 +89,50 @@ static int32_t          g_largeur;
 static int32_t          g_hauteur;
 static uint32_t         g_generation;
 static uint8_t         *g_a_liberer; /* tampon retiré, en attente de miniature_purger() */
+static const uint8_t   *g_affiche;   /* tampon détenu par le consommateur (sur le widget, ou
+                                      * pris via miniature_lire() pour l'être) : JAMAIS libéré
+                                      * tant qu'un tampon lui est égal -- voir le commentaire de
+                                      * tête (fix use-after-free de la revue opus). */
 
 /* Retire l'actif courant (sous verrou -- appelée par les quatre fonctions de
- * dépôt ci-dessous, jamais directement). Déplace `g_donnees` vers
- * `g_a_liberer` -- si ce dernier était déjà occupé, voir le commentaire de
- * tête pour pourquoi le libérer ICI (hors verrou, juste après) est sûr dans
- * ce cas précis. Ne touche PAS `g_fichier`/`g_etat`/dimensions : c'est à
- * l'appelant de les poser après ce retrait. */
-static void retirer_actif_verrouille(uint8_t **a_liberer_supplementaire_sortie)
+ * dépôt ci-dessous, jamais directement). NE libère jamais rien sous le verrou
+ * (aucun heap_caps_free() en section critique portMUX) : le tampon éventuel à
+ * libérer est rendu à l'appelant via `*extra_a_liberer`, pour un free() HORS
+ * verrou. Ne touche PAS `g_fichier`/`g_etat`/dimensions : c'est à l'appelant
+ * de les poser après ce retrait.
+ *
+ * Voie de libération PRODUCTRICE (voir le commentaire de tête) : l'actif
+ * retiré n'est libérable QUE s'il n'est pas le tampon détenu par le
+ * consommateur (`g_affiche`). S'il l'est, on le DIFFÈRE dans l'unique slot
+ * `g_a_liberer` (la tâche LVGL peut encore le décoder) ; sinon il est rendu à
+ * libérer tout de suite. Comme un seul tampon peut être détenu à la fois, si
+ * le slot portait déjà un AUTRE tampon, celui-là n'est plus détenu -- sûr de
+ * le rendre à libérer lui aussi (au plus UN free par appel : soit l'actif,
+ * soit l'ancien occupant du slot, jamais les deux). */
+static void retirer_actif_verrouille(uint8_t **extra_a_liberer)
 {
-    *a_liberer_supplementaire_sortie = NULL;
-    if (g_a_liberer != NULL) {
-        /* Cas résiduel documenté en tête de fichier : deux dépôts sans purge
-         * consommateur entre les deux. Rendu à l'appelant pour libération
-         * HORS verrou (jamais d'appel bloquant/allocateur sous une section
-         * critique portMUX). */
-        *a_liberer_supplementaire_sortie = g_a_liberer;
-    }
-    g_a_liberer = g_donnees;
+    *extra_a_liberer = NULL;
+    uint8_t *actif = g_donnees;
     g_donnees = NULL;
     g_taille = 0;
     g_largeur = 0;
     g_hauteur = 0;
+    if (actif == NULL) {
+        return;
+    }
+    if ((const uint8_t *)actif == g_affiche) {
+        /* Détenu par le consommateur : INTERDIT de libérer ici. Différer dans
+         * le slot ; si le slot portait un autre tampon (plus détenu), le
+         * rendre à libérer hors verrou. */
+        if (g_a_liberer != NULL && g_a_liberer != actif) {
+            *extra_a_liberer = g_a_liberer;
+        }
+        g_a_liberer = actif;
+    } else {
+        /* Jamais détenu par le consommateur (jamais lu, ou déjà abandonné) :
+         * sûr de le libérer directement (hors verrou). */
+        *extra_a_liberer = actif;
+    }
 }
 
 /* Défense en profondeur (pas la voie de rapport d'échec principale -- voir
@@ -247,16 +279,30 @@ void miniature_lire(miniature_instantane_t *dest)
     dest->largeur = g_largeur;
     dest->hauteur = g_hauteur;
     dest->generation = g_generation;
+    /* Revendication (voir le commentaire de tête, fix use-after-free) : dès que
+     * le consommateur PREND le pointeur actif pour l'afficher, on le marque
+     * détenu -- aucune voie de libération ne le touchera tant qu'il vaut
+     * `g_affiche`. Ferme la fenêtre où un dépôt producteur survenant entre ce
+     * lire et le lv_image_set_src() de l'écran libérerait ce même tampon. */
+    g_affiche = g_donnees;
     VERROU_RENDRE();
 }
 
-void miniature_purger(void)
+void miniature_purger(const uint8_t *encore_affiche)
 {
-    uint8_t *a_liberer;
+    uint8_t *a_liberer = NULL;
 
     VERROU_PRENDRE();
-    a_liberer = g_a_liberer;
-    g_a_liberer = NULL;
+    /* Vérité de terrain : le pointeur RÉELLEMENT référencé par le widget à cet
+     * instant (NULL si l'écran vient de masquer l'image) -- affine la
+     * revendication posée par miniature_lire(). */
+    g_affiche = encore_affiche;
+    /* Ne libère le tampon différé que s'il n'est PLUS détenu par le
+     * consommateur (sinon la tâche LVGL peut encore le décoder au dessin). */
+    if (g_a_liberer != NULL && (const uint8_t *)g_a_liberer != g_affiche) {
+        a_liberer = g_a_liberer;
+        g_a_liberer = NULL;
+    }
     VERROU_RENDRE();
 
     if (a_liberer != NULL) {

@@ -81,7 +81,7 @@ static void section_store_cycle_nominal(void)
     VERIFIER(snap.generation != gen1);
 
     /* purger() sans rien en attente : sans effet, ne doit pas planter. */
-    miniature_purger();
+    miniature_purger(NULL);
     miniature_lire(&snap);
     VERIFIER(snap.etat == MINIATURE_PRETE); /* toujours la, purger() n'efface pas l'actif */
 
@@ -94,7 +94,7 @@ static void section_store_cycle_nominal(void)
     VERIFIER(snap.etat == MINIATURE_ABSENTE);
     VERIFIER(snap.donnees == NULL);
     VERIFIER_TEXTE(snap.fichier, "");
-    miniature_purger();
+    miniature_purger(NULL);
 }
 
 /* --- store : garde de pertinence (fichier perime) ------------------------ */
@@ -137,10 +137,10 @@ static void section_store_garde_pertinence(void)
     miniature_lire(&snap);
     VERIFIER(snap.etat == MINIATURE_ECHEC);
     VERIFIER(snap.donnees == NULL);
-    miniature_purger();
+    miniature_purger(NULL);
 
     miniature_effacer();
-    miniature_purger();
+    miniature_purger(NULL);
 }
 
 /* --- store : entrees degenerees (jamais de crash, jamais de fuite) ------- */
@@ -188,45 +188,150 @@ static void section_store_entrees_degenerees(void)
     miniature_lire(NULL); /* ne doit pas crasher */
 
     miniature_effacer();
-    miniature_purger();
+    miniature_purger(NULL);
 }
 
-/* --- store : deux depots sans purge entre les deux (cas residuel documente,
- * voir miniature.c) -- doit rester sans fuite ni crash. -------------------- */
+/* --- store : voie residuelle du producteur (slot deja occupe) -- doit rester
+ * sans fuite, sans crash, sans double-free. --------------------------------
+ *
+ * Depuis le fix use-after-free (revue opus) un tampon n'est DIFFERE dans le
+ * slot g_a_liberer que s'il est celui que le consommateur DETIENT (revendique
+ * par miniature_lire()) ; tout autre tampon retire est libere immediatement et
+ * surement (jamais reference par un widget). Pour atteindre la voie residuelle
+ * (retirer un tampon DETENU alors que le slot porte deja un AUTRE tampon
+ * detenu anterieurement), il faut donc revendiquer (lire) entre chaque depot,
+ * en simulant un consommateur qui affiche puis se detourne. */
 
-static void section_store_double_depot_sans_purge(void)
+static void section_store_voie_residuelle_producteur(void)
 {
     miniature_effacer();
+    miniature_purger(NULL); /* repart d'un g_affiche/slot propres */
     miniature_poser_en_cours("x.gcode");
 
-    uint8_t *buf1 = (uint8_t *)malloc(24);
-    construire_faux_png_24_octets(buf1);
-    miniature_poser_prete("x.gcode", buf1, 24, 1, 1);
+    miniature_instantane_t snap;
 
-    /* Re-declenche pour le MEME fichier (jamais fait par le vrai
-     * moonraker_ws.c, qui ne redemande que sur un CHANGEMENT -- exerce quand
-     * meme ce chemin ici) : retire buf1 (transfert differe, PAS libere
-     * encore) sans qu'aucune purge n'ait eu lieu entre les deux. */
-    miniature_poser_en_cours("x.gcode");
+    uint8_t *bufA = (uint8_t *)malloc(24);
+    construire_faux_png_24_octets(bufA);
+    miniature_poser_prete("x.gcode", bufA, 24, 1, 1);
+    miniature_lire(&snap); /* le consommateur PREND bufA (g_affiche = bufA) */
+    VERIFIER(snap.donnees == bufA);
 
-    uint8_t *buf2 = (uint8_t *)malloc(24);
-    construire_faux_png_24_octets(buf2);
-    /* CE depot trouve g_a_liberer deja occupe par buf1 (voir le commentaire
-     * de tete de miniature.c, "Cas residuel documente") -- buf1 est alors
-     * libere ICI, sur cette meme "tache" (ce test), jamais expose a un
-     * consommateur entre-temps (aucun miniature_lire() n'a ete appele depuis
-     * son depot). ASan confirmera l'absence de fuite. */
-    miniature_poser_prete("x.gcode", buf2, 24, 1, 1);
+    /* Nouveau depot pour le MEME fichier : retire bufA. bufA est DETENU
+     * (== g_affiche) -> DIFFERE dans le slot, jamais libere ici. */
+    uint8_t *bufB = (uint8_t *)malloc(24);
+    construire_faux_png_24_octets(bufB);
+    miniature_poser_prete("x.gcode", bufB, 24, 1, 1);
+    miniature_lire(&snap); /* le consommateur se detourne de bufA et PREND bufB */
+    VERIFIER(snap.donnees == bufB);
 
+    /* 3e depot : retire bufB (DETENU) alors que le slot porte encore bufA.
+     * Voie residuelle : bufA n'est PLUS detenu (g_affiche vaut bufB) -> libere
+     * ICI, sur la tache productrice ; bufB prend sa place dans le slot. ASan
+     * confirmera l'absence de fuite comme de double-free. */
+    uint8_t *bufC = (uint8_t *)malloc(24);
+    construire_faux_png_24_octets(bufC);
+    miniature_poser_prete("x.gcode", bufC, 24, 1, 1);
+
+    miniature_lire(&snap);
+    VERIFIER(snap.etat == MINIATURE_PRETE);
+    VERIFIER(snap.donnees == bufC);
+
+    /* Le consommateur affiche bufC : la purge libere le slot (bufB, plus
+     * detenu) mais protege bufC (encore_affiche == bufC). */
+    miniature_purger(bufC);
+
+    /* Le consommateur se detourne (plus rien affiche) puis fin d'impression :
+     * bufC, retire et plus detenu, est libere par la derniere purge. */
+    miniature_effacer();
+    miniature_lire(&snap);
+    VERIFIER(snap.etat == MINIATURE_ABSENTE);
+    miniature_purger(NULL);
+}
+
+/* --- store : REPRODUCTION du use-after-free de la revue (scenario a) -------
+ *
+ * Un depot producteur survient ENTRE le miniature_lire() du consommateur et sa
+ * miniature_purger() -- exactement la fenetre du rapport de revue. Le tampon
+ * que le consommateur vient de poser sur le widget (et que le dessin DIFFERE
+ * de LVGL decodera plus tard) ne doit PAS etre libere par cette purge. On le
+ * prouve en DECODANT reellement les octets (lv_image_decoder_get_info lit le
+ * tampon) APRES la purge : si le fix etait absent (purge liberant le slot sans
+ * regarder encore_affiche), ASan signalerait un heap-use-after-free ici. */
+
+static void section_store_uaf_depot_entre_lire_et_purger(void)
+{
+    miniature_effacer();
+    miniature_purger(NULL); /* g_affiche/slot propres */
+
+    /* Vrai PNG (encode par lodepng) copie dans un tampon "PSRAM" (malloc,
+     * possede par le store -- MINIATURE_FREE retombe sur free() hors ESP). */
+    uint8_t pixels[2 * 2 * 4] = {
+        255, 0,   0,   255,
+        0,   255, 0,   255,
+        0,   0,   255, 255,
+        0,   0,   0,   0,
+    };
+    uint8_t *png = NULL;
+    size_t   png_taille = 0;
+    unsigned erreur = lodepng_encode32(&png, &png_taille, pixels, 2, 2);
+    VERIFIER(erreur == 0);
+    VERIFIER(png != NULL);
+    if (erreur != 0 || png == NULL) {
+        return;
+    }
+    VERIFIER(png_taille >= 24);
+    uint8_t *P = (uint8_t *)malloc(png_taille);
+    memcpy(P, png, png_taille);
+    lv_free(png); /* lodepng vendorise = lv_malloc, voir section_decodage_lvgl_reel */
+
+    miniature_poser_en_cours("f.gcode");
+    miniature_poser_prete("f.gcode", P, png_taille, 2, 2);
+
+    /* Le consommateur LIT l'instantane : fige snap.donnees == P et le
+     * REVENDIQUE (g_affiche = P, sous le meme verrou). */
     miniature_instantane_t snap;
     miniature_lire(&snap);
     VERIFIER(snap.etat == MINIATURE_PRETE);
-    VERIFIER(snap.donnees == buf2);
+    VERIFIER(snap.donnees == P);
 
-    miniature_purger(); /* sans effet ici (g_a_liberer deja vide -- buf1 dej deja libere ci-dessus) */
+    /* Depot producteur GLISSE entre le lire et le purger (fin d'impression sur
+     * la tache WS, parallele reel sur l'ESP) : retire P. P etant DETENU, il est
+     * seulement differe -- jamais libere. */
+    miniature_effacer();
+
+    /* Le consommateur pose P sur le widget puis DESSINE : on decode reellement
+     * P ici (equivaut au dessin differe de LVGL). Doit reussir -- P vivant. */
+    lv_image_dsc_t dsc;
+    memset(&dsc, 0, sizeof(dsc));
+    dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc.header.cf = LV_COLOR_FORMAT_RAW;
+    dsc.data = P;
+    dsc.data_size = (uint32_t)png_taille;
+    lv_image_header_t header;
+    memset(&header, 0, sizeof(header));
+    VERIFIER(lv_image_decoder_get_info(&dsc, &header) == LV_RESULT_OK);
+    VERIFIER(header.w == 2 && header.h == 2);
+
+    /* Purge en confirmant que P est ENCORE sur le widget (encore_affiche == P) :
+     * le store DOIT refuser de le liberer. */
+    miniature_purger(P);
+
+    /* Preuve directe de l'absence d'UAF : re-decodage de P APRES la purge.
+     * Sous l'ancien code (purge liberant le slot inconditionnellement), cette
+     * lecture porterait sur de la memoire liberee -> ASan aborterait. */
+    memset(&header, 0, sizeof(header));
+    VERIFIER(lv_image_decoder_get_info(&dsc, &header) == LV_RESULT_OK);
+    VERIFIER(header.w == 2 && header.h == 2);
+
+    /* Cycle suivant : etat ABSENTE, le consommateur masque le widget et
+     * n'affiche plus P (encore_affiche = NULL) -> P devient liberable et est
+     * libere par cette purge. Aucune fuite (ASan/LSan en fin de suite). */
+    miniature_lire(&snap);
+    VERIFIER(snap.etat == MINIATURE_ABSENTE);
+    miniature_purger(NULL);
 
     miniature_effacer();
-    miniature_purger();
+    miniature_purger(NULL);
 }
 
 /* --- de-risking recommande par le brief : PROUVER le chemin de decodage
@@ -363,6 +468,7 @@ void suite_miniature(void)
     section_store_cycle_nominal();
     section_store_garde_pertinence();
     section_store_entrees_degenerees();
-    section_store_double_depot_sans_purge();
+    section_store_voie_residuelle_producteur();
+    section_store_uaf_depot_entre_lire_et_purger();
     section_decodage_lvgl_reel();
 }

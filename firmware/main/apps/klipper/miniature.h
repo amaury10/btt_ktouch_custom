@@ -153,20 +153,32 @@ void miniature_effacer(void);
  * `lv_image_set_src()` avec le nouveau pointeur), il DOIT appeler
  * miniature_purger() pour permettre au store de libérer ce qu'un dépôt
  * producteur a entre-temps retiré (voir son commentaire pour l'ordre exact à
- * respecter). */
+ * respecter).
+ *
+ * Effet de bord VOULU : cet appel REVENDIQUE le pointeur actif rendu
+ * (`g_affiche = donnees`, voir miniature.c) -- à partir d'ici et jusqu'à ce
+ * que le consommateur publie un autre pointeur (via miniature_purger() ou un
+ * miniature_lire() ultérieur), aucune voie de libération ne touchera ce
+ * tampon. C'est ce qui rend sûr de le poser paresseusement sur le widget même
+ * si un dépôt producteur survient dans l'intervalle. */
 void miniature_lire(miniature_instantane_t *dest);
 
-/* Libère tout tampon PSRAM retiré par un dépôt producteur (poser_prete/
- * poser_echec/poser_en_cours/effacer) depuis le dernier appel -- à appeler
+/* Libère le tampon PSRAM qu'un dépôt producteur (poser_prete/poser_echec/
+ * poser_en_cours/effacer) a retiré depuis le dernier appel -- à appeler
  * SYSTÉMATIQUEMENT par le consommateur (ecran_accueil.c) en FIN de chaque
- * cycle de mise à jour, APRÈS avoir déjà ré-orienté le widget LVGL vers le
- * pointeur ACTUEL rendu par miniature_lire() (ou masqué le widget si l'état
- * n'est pas PRÊT) -- JAMAIS avant. Sûr dans cet ordre précis : le tampon
- * libéré ici n'a JAMAIS pu être celui que `lv_image_set_src()` vient de poser
- * sur le widget dans ce même cycle (il a été retiré par un dépôt PRÉCÉDENT,
- * donc déjà remplacé côté widget avant même cet appel) -- voir le commentaire
- * de tête de miniature.h et celui de miniature.c pour le détail complet du
- * mécanisme de transfert différé producteur -> consommateur. Sans effet s'il
- * n'y a rien à libérer (cas le plus fréquent, appel bon marché : un verrou
- * court puis rien). */
-void miniature_purger(void);
+ * cycle de mise à jour, APRÈS avoir ré-orienté le widget LVGL (ou masqué
+ * l'image si l'état n'est pas PRÊT).
+ *
+ * `encore_affiche` DOIT être le pointeur RÉELLEMENT référencé par le widget à
+ * cet instant : `ctx->miniature_dsc.data` si l'image est visible, NULL si
+ * l'écran vient de la masquer. `lv_image_set_src()` étant PARESSEUX (il ne
+ * décode `data` qu'au dessin, plus tard, sur la tâche LVGL), le store REFUSE
+ * de libérer tout tampon égal à `encore_affiche` -- sans quoi un dépôt
+ * producteur glissé entre miniature_lire() et cet appel ferait libérer sous
+ * les pieds du widget le tampon qu'il va décoder (use-after-free de la revue).
+ * Le tampon retiré depuis le dernier cycle n'est donc libéré ici QUE s'il ne
+ * vaut plus ni ce que le consommateur détenait (revendiqué par miniature_lire)
+ * ni `encore_affiche` -- voir le mécanisme `g_affiche` dans miniature.c. Sans
+ * effet s'il n'y a rien à libérer (cas le plus fréquent, appel bon marché : un
+ * verrou court puis rien). */
+void miniature_purger(const uint8_t *encore_affiche);

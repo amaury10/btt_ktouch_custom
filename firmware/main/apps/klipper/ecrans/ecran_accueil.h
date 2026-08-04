@@ -82,6 +82,12 @@ typedef struct {
     lv_obj_t       *miniature_image;
     lv_image_dsc_t  miniature_dsc;
     uint32_t        miniature_generation;
+    /* Pointeur RÉELLEMENT posé sur `miniature_image` et visible (NULL si
+     * l'image est masquée) -- passé à miniature_purger() en fin de cycle pour
+     * que le store refuse de libérer un tampon que le widget peut encore
+     * décoder au dessin (lv_image_set_src() est paresseux). Voir
+     * ecran_accueil.c, mettre_a_jour_miniature(), et miniature.h. */
+    const uint8_t  *miniature_affichee;
 } ecran_accueil_ctx_t;
 
 extern const ecran_desc_t ECRAN_ACCUEIL;
