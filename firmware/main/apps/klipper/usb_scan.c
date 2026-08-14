@@ -7,7 +7,10 @@
 #include "usb_scan.h"
 
 #ifdef ESP_PLATFORM
+#include <dirent.h>
+#include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -88,46 +91,54 @@ static bool usb_nom_a_octet_controle(const char *nom)
 
 /* Scanne recursivement `chemin` (sous /usb) et accumule dans
  * s_usb_scan_tampon les .gcode trouves -- filtre extension (usb_est_gcode(),
- * tache A) + noms sans octet de controle (ci-dessus). Copie de
- * scan_dir_recursive() (PandaTouch_IDF/examples/display_slideshow.c, meme
- * usage de pt_usb_list_dir()/pt_usb_dir_list_free()), adaptee au filtre
- * gcode et a la taille des fichiers (pt_usb_dir_entry_t.size, propagee dans
- * le store -- voir usb_fichiers.h). `nb`/`tronques` sont des accumulateurs
- * partages entre tous les niveaux de recursion (passes par pointeur). */
+ * tache A) + noms sans octet de controle (ci-dessus). `nb`/`tronques` sont
+ * des accumulateurs partages entre tous les niveaux de recursion (passes par
+ * pointeur).
+ *
+ * En opendir()/readdir() DIRECT depuis le fix lenteur du 2026-08-14 (55 s
+ * mesurees pour 14 .gcode sur une cle de 29 Go bien remplie) : l'ancienne
+ * version passait par pt_usb_list_dir() (BSP), qui stat() CHAQUE entree de
+ * CHAQUE dossier (type + taille) -- or un stat() sur FAT via USB-MSC coute
+ * plusieurs lectures SCSI (re-parcours du repertoire), multiplie par des
+ * milliers de fichiers non-gcode. readdir() du VFS FAT d'ESP-IDF fournit
+ * deja d_type (DT_DIR/DT_REG) gratuitement dans le flux du repertoire ; le
+ * stat() n'est plus fait QUE pour les .gcode retenus (taille requise par
+ * l'upload, <= USB_FICHIERS_MAX au total). Bonus RAM interne : plus aucun
+ * strdup()/realloc() par entree (pt_usb_list_dir allouait nom+chemin de
+ * TOUTES les entrees en tas interne avant de filtrer). */
 static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
 {
-    int erreur = 0;
-    pt_usb_dir_list_t *liste = pt_usb_list_dir(chemin, &erreur);
-    if (liste == NULL) {
-        if (erreur != 0) {
-            JOURNAL_ALERTE(TAG, "pt_usb_list_dir(%s) a echoue (%d)", chemin ? chemin : "?", erreur);
-        }
+    DIR *dossier = opendir(chemin);
+    if (dossier == NULL) {
+        JOURNAL_ALERTE(TAG, "opendir(%s) a echoue (errno %d)", chemin ? chemin : "?", errno);
         return;
     }
 
-    for (size_t i = 0; i < liste->count; i++) {
-        pt_usb_dir_entry_t *e = &liste->entries[i];
-        if (e->is_hidden) {
+    struct dirent *e;
+    while ((e = readdir(dossier)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) {
+            continue;
+        }
+        if (e->d_name[0] == '.') {
+            continue; /* caches -- meme regle que l'is_hidden du BSP */
+        }
+
+        char chemin_entree[USB_FICHIER_CHEMIN_MAX];
+        int ecrit = snprintf(chemin_entree, sizeof(chemin_entree), "%s/%s", chemin, e->d_name);
+        if (ecrit < 0 || (size_t)ecrit >= sizeof(chemin_entree)) {
+            /* Chemin plus long que le store : IGNORE plutot que tronque --
+               un chemin tronque serait introuvable au moment de l'upload
+               (l'ancienne version tronquait silencieusement, publiant une
+               entree cliquable mais morte). */
             continue;
         }
 
-        const char *chemin_entree = (e->path != NULL && e->path[0] != '\0') ? e->path : NULL;
-        char tampon_local[USB_FICHIER_CHEMIN_MAX];
-        if (chemin_entree == NULL) {
-            if (chemin != NULL && chemin[0] != '\0' && chemin[strlen(chemin) - 1] == '/') {
-                snprintf(tampon_local, sizeof(tampon_local), "%s%s", chemin, e->name ? e->name : "");
-            } else {
-                snprintf(tampon_local, sizeof(tampon_local), "%s/%s", chemin ? chemin : "", e->name ? e->name : "");
-            }
-            chemin_entree = tampon_local;
-        }
-
-        if (e->is_dir) {
+        if (e->d_type == DT_DIR) {
             usb_scan_recursif(chemin_entree, nb, tronques);
             continue;
         }
 
-        if (usb_nom_a_octet_controle(e->name) || !usb_est_gcode(e->name)) {
+        if (usb_nom_a_octet_controle(e->d_name) || !usb_est_gcode(e->d_name)) {
             continue;
         }
 
@@ -136,18 +147,19 @@ static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
             continue;
         }
 
+        /* Seul stat() du parcours : la taille d'un .gcode RETENU (requise
+           pour le Content-Length de l'upload, voir usb_fichiers.h). Echec ->
+           taille 0, l'entree reste listable (l'upload relira le fichier). */
+        struct stat infos;
+        size_t taille = (stat(chemin_entree, &infos) == 0) ? (size_t)infos.st_size : 0;
+
         usb_fichier_t *dest = &s_usb_scan_tampon[*nb];
-        size_t longueur = strlen(chemin_entree);
-        if (longueur >= sizeof(dest->chemin)) {
-            longueur = sizeof(dest->chemin) - 1;
-        }
-        memcpy(dest->chemin, chemin_entree, longueur);
-        dest->chemin[longueur] = '\0';
-        dest->taille = e->size;
+        memcpy(dest->chemin, chemin_entree, (size_t)ecrit + 1);
+        dest->taille = taille;
         (*nb)++;
     }
 
-    pt_usb_dir_list_free(liste);
+    closedir(dossier);
 }
 
 static void usb_scan_tache(void *arg)

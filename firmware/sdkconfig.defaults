@@ -118,3 +118,13 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
 CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
 CONFIG_ESP_COREDUMP_CHECK_BOOT=y
+
+# --- Noms longs FAT32 sur la cle USB (retour utilisateur 2026-08-14 : la
+# liste des .gcode s'affichait en noms courts 8.3 "BENCHY~1.GCO"). LFN sur le
+# TAS (jamais _STACK : les piles de ce firmware sont comptees, et le tampon
+# LFN fait ~512 o par acces) + API en UTF-8 pour les noms accentues (LVGL
+# affiche de l'UTF-8). Meme piege que plus haut : sdkconfig est genere, il a
+# ete edite en meme temps que cet ajout.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
