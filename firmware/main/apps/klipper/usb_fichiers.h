@@ -80,6 +80,15 @@ void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb,
  * avec "lecture en cours"). */
 void usb_fichiers_scan_demarre(void);
 
+/* Publication PARTIELLE pendant un scan (fix lenteur perçue du 2026-08-14 :
+ * un parcours complet de clé bien remplie prend des dizaines de secondes ;
+ * les .gcode déjà trouvés doivent s'afficher au fil de l'eau, pas à la fin).
+ * Même copie sous verrou que usb_fichiers_definir() avec monte=true, MAIS
+ * `scan_en_cours` reste levé : seul definir() (publication finale, ou
+ * unmount) clôt le scan. À n'appeler QUE depuis la tâche de scan, clé
+ * montée. */
+void usb_fichiers_publier_partiel(const usb_fichier_t *fichiers, uint8_t nb, bool tronques);
+
 /* Copie le contenu courant du store dans `*dest` (fourni par l'appelant,
  * sous verrou). `dest` NULL = no-op. */
 void usb_fichiers_lire(usb_fichiers_t *dest);

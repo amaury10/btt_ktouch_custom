@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <string.h>
+#include <strings.h> /* strcasecmp -- meme usage que usb_upload.c */
 #include <sys/stat.h>
 
 #include "esp_heap_caps.h"
@@ -105,8 +106,20 @@ static bool usb_nom_a_octet_controle(const char *nom)
  * stat() n'est plus fait QUE pour les .gcode retenus (taille requise par
  * l'upload, <= USB_FICHIERS_MAX au total). Bonus RAM interne : plus aucun
  * strdup()/realloc() par entree (pt_usb_list_dir allouait nom+chemin de
- * TOUTES les entrees en tas interne avant de filtrer). */
-static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
+ * TOUTES les entrees en tas interne avant de filtrer).
+ *
+ * `mode` (fix latence percue, meme date) : la racine est parcourue en DEUX
+ * passes -- fichiers d'abord (les .gcode poses a la racine s'affichent en
+ * ~1 s), sous-dossiers ensuite -- au prix d'une seule re-enumeration de la
+ * racine (petite). Les niveaux inferieurs restent en une passe (TOUT) : les
+ * re-enumerer doublerait le cout du parcours, qui est LE poste dominant. */
+typedef enum {
+    USB_SCAN_TOUT,            /* fichiers + recursion, une passe (sous-dossiers) */
+    USB_SCAN_FICHIERS_SEULS,  /* racine, passe 1 : jamais de recursion */
+    USB_SCAN_DOSSIERS_SEULS,  /* racine, passe 2 : recursion seule, fichiers ignores */
+} usb_scan_mode_t;
+
+static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques, usb_scan_mode_t mode)
 {
     DIR *dossier = opendir(chemin);
     if (dossier == NULL) {
@@ -134,8 +147,18 @@ static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
         }
 
         if (e->d_type == DT_DIR) {
-            usb_scan_recursif(chemin_entree, nb, tronques);
+            if (mode == USB_SCAN_FICHIERS_SEULS) {
+                continue; /* racine passe 1 : les sous-dossiers attendront la passe 2 */
+            }
+            if (strcasecmp(e->d_name, "System Volume Information") == 0) {
+                continue; /* dossier d'indexation Windows : jamais de .gcode utilisateur */
+            }
+            usb_scan_recursif(chemin_entree, nb, tronques, USB_SCAN_TOUT);
             continue;
+        }
+
+        if (mode == USB_SCAN_DOSSIERS_SEULS) {
+            continue; /* racine passe 2 : ses fichiers sont deja publies par la passe 1 */
         }
 
         if (usb_nom_a_octet_controle(e->d_name) || !usb_est_gcode(e->d_name)) {
@@ -157,6 +180,17 @@ static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
         memcpy(dest->chemin, chemin_entree, (size_t)ecrit + 1);
         dest->taille = taille;
         (*nb)++;
+
+        /* Publication AU FIL DE L'EAU (fix latence percue) : chaque .gcode
+           trouve apparait a l'ecran immediatement, sans attendre la fin du
+           parcours (34-55 s mesurees sur une cle de 29 Go). Au plus
+           USB_FICHIERS_MAX publications par scan. Garde montage : jamais un
+           partiel "cle presente" apres une ejection en cours de scan --
+           l'etat final reste arbitre par la publication de fin de
+           usb_scan_tache(). */
+        if (pt_usb_is_mounted()) {
+            usb_fichiers_publier_partiel(s_usb_scan_tampon, *nb, *tronques);
+        }
     }
 
     closedir(dossier);
@@ -174,7 +208,9 @@ static void usb_scan_tache(void *arg)
         }
         uint8_t nb = 0;
         bool tronques = false;
-        usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques);
+        /* Racine en deux passes (fichiers d'abord), voir usb_scan_mode_t. */
+        usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques, USB_SCAN_FICHIERS_SEULS);
+        usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques, USB_SCAN_DOSSIERS_SEULS);
         /* La cle a pu etre ejectee PENDANT le scan (ce tour de boucle dure des
            centaines de ms) : usb_on_unmount_cb() a alors deja publie monte=false.
            Ne pas ecraser cet etat par un "true" en dur -- relire l'etat reel du

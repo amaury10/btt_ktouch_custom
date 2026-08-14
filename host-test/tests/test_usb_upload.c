@@ -204,6 +204,50 @@ static void section_store_scan_en_cours(void)
     VERIFIER(lu.nb == 0);
 }
 
+/* --- publication PARTIELLE pendant le scan (latence perçue) --------------- */
+
+/* Fix lenteur perçue (2026-08-14, scan complet mesuré à 34-55 s sur une clé
+ * de 29 Go) : usb_fichiers_publier_partiel() pousse les .gcode déjà trouvés
+ * SANS clore le scan -- l'écran affiche les premiers fichiers en ~1 s
+ * pendant que le parcours continue. Contrat : monte passe à vrai, la liste
+ * est remplacée, la génération avance, mais scan_en_cours RESTE levé ; seul
+ * usb_fichiers_definir() (publication finale, ou unmount) le fait retomber. */
+static void section_store_publication_partielle(void)
+{
+    usb_fichiers_t lu;
+
+    usb_fichiers_definir(false, NULL, 0, false);
+    usb_fichiers_scan_demarre();
+
+    usb_fichier_t premier;
+    memset(&premier, 0, sizeof(premier));
+    strcpy(premier.chemin, "/usb/racine.gcode");
+    premier.taille = 100;
+
+    uint32_t generation_avant = usb_fichiers_generation();
+    usb_fichiers_publier_partiel(&premier, 1, false);
+    usb_fichiers_lire(&lu);
+    VERIFIER(lu.monte);                 /* la clé est là, les fichiers sont réels */
+    VERIFIER(lu.scan_en_cours);         /* ... mais le parcours n'est PAS fini */
+    VERIFIER(lu.nb == 1);
+    VERIFIER_TEXTE(lu.fichiers[0].chemin, "/usb/racine.gcode");
+    VERIFIER(usb_fichiers_generation() == generation_avant + 1);
+
+    /* Publication finale : liste complète, drapeau retombé. */
+    usb_fichier_t deux[2];
+    memset(deux, 0, sizeof(deux));
+    strcpy(deux[0].chemin, "/usb/racine.gcode");
+    deux[0].taille = 100;
+    strcpy(deux[1].chemin, "/usb/dossier/fond.gcode");
+    deux[1].taille = 200;
+    usb_fichiers_definir(true, deux, 2, false);
+    usb_fichiers_lire(&lu);
+    VERIFIER(lu.monte);
+    VERIFIER(!lu.scan_en_cours);
+    VERIFIER(lu.nb == 2);
+    VERIFIER_TEXTE(lu.fichiers[1].chemin, "/usb/dossier/fond.gcode");
+}
+
 void suite_usb_upload(void)
 {
     printf("suite : usb_upload (cadrage multipart upload USB->Moonraker)\n");
@@ -216,4 +260,5 @@ void suite_usb_upload(void)
     section_trailer();
     section_content_length();
     section_store_scan_en_cours();
+    section_store_publication_partielle();
 }
