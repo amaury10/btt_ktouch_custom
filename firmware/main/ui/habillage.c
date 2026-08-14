@@ -58,6 +58,11 @@ static const ecran_desc_t *g_ecran_reglages;
  * intégration dans habillage_pomper(). */
 static const ecran_desc_t *(*g_choix_accueil)(const void *etat, void *ctx);
 static void *g_choix_accueil_ctx;
+
+/* Génération externe (stores indépendants de l'imprimante, ex. fichiers USB)
+ * -- voir habillage_definir_generation_externe() dans habillage.h. */
+static uint32_t (*g_generation_externe)(void);
+static uint32_t g_derniere_generation_externe;
 static lv_obj_t *g_titre;
 static lv_obj_t *g_pastille_liaison;
 static lv_obj_t *g_texte_liaison;
@@ -191,6 +196,11 @@ void habillage_definir_choix_accueil(const ecran_desc_t *(*choisir)(const void *
 {
     g_choix_accueil = choisir;
     g_choix_accueil_ctx = ctx;
+}
+
+void habillage_definir_generation_externe(uint32_t (*compteur)(void))
+{
+    g_generation_externe = compteur;
 }
 
 /* Dispatch générique des clics du rail (passé à rail_creer()) : transmet à
@@ -536,7 +546,24 @@ void habillage_pomper(void)
         g_derniere_sequence_rail = sequence_rail;
     }
 
+    /* Génération externe relevée AVANT la garde `disponible` (revue du
+     * 2026-08-14, L2) : un store indépendant de l'imprimante (fichiers USB)
+     * peut changer alors que Moonraker est injoignable -- sans ce canal, un
+     * écran branché sur ce store restait figé tant que l'état Klipper ne
+     * bougeait pas, ce qui peut ne jamais arriver imprimante éteinte. */
+    uint32_t generation_externe =
+        (g_generation_externe != NULL) ? g_generation_externe() : 0;
+
     if (!disponible) {
+        if (generation_externe != g_derniere_generation_externe) {
+            /* g_etat n'a pas été rafraîchi (ui_etat_instantane() a rendu
+             * faux) : propager quand même, données marquées périmées -- le
+             * contrat donnees_perimees (ecran.h) couvre exactement ce cas,
+             * et l'écran destinataire du canal externe (ecran_usb) ignore de
+             * toute façon l'état Klipper. */
+            navigation_mettre_a_jour(&g_etat, habillage_donnees_perimees(liaison));
+            g_derniere_generation_externe = generation_externe;
+        }
         return;
     }
 
@@ -580,7 +607,8 @@ void habillage_pomper(void)
      * transmet bien l'état courant réel -- jamais périmé. */
     uint32_t sequence = navigation_sequence();
     if (generation != g_derniere_generation || liaison != g_derniere_liaison ||
-        sequence != g_derniere_sequence) {
+        sequence != g_derniere_sequence ||
+        generation_externe != g_derniere_generation_externe) {
         /* Calculé une seule fois ici, à partir de la SEULE liaison (jamais
          * du contenu de g_etat) : c'est le seul appel réel de
          * habillage_donnees_perimees() de tout le module, et le seul point
@@ -593,6 +621,7 @@ void habillage_pomper(void)
         navigation_mettre_a_jour(&g_etat, perimees);
         g_derniere_generation = generation;
         g_derniere_liaison = liaison;
+        g_derniere_generation_externe = generation_externe;
         g_derniere_sequence = sequence;
     }
 }

@@ -33,6 +33,7 @@
 #include "pandatouch_display.h"
 
 #include "accueil_choix.h"
+#include "usb_fichiers.h" /* usb_fichiers_generation -- canal de génération externe de l'habillage */
 #include "backend.h"
 #include "backend_factice.h"
 #include "backend_moonraker.h"
@@ -657,6 +658,14 @@ void app_main(void)
              * -- voir le commentaire de l'empilement) ; la bascule prend le
              * relais dès le premier état reçu de la boucle applicative. */
             habillage_definir_choix_accueil(choix_accueil_klipper, NULL);
+            /* Canal de génération EXTERNE : le store des fichiers USB évolue
+             * SANS l'imprimante (scan au montage d'une clé) -- sans cet
+             * enregistrement, l'écran USB restait figé sur "Insert a USB
+             * key" Moonraker injoignable, y compris après la fin du scan
+             * (revue du 2026-08-14, L2 ; voir habillage.h). Même motif
+             * d'injection que les hooks ci-dessus : l'habillage ne connaît
+             * pas usb_fichiers.h, l'application branche. */
+            habillage_definir_generation_externe(usb_fichiers_generation);
             esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_HUB);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",

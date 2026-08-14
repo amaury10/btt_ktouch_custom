@@ -132,6 +132,13 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/moonraker_rpc.c
     ${KLIPPER_DIR}/klipper_fichiers.c
     ${KLIPPER_DIR}/usb_fichiers.c
+    ${KLIPPER_DIR}/usb_scan.c
+    ${KLIPPER_DIR}/miniature.c
+    ${KLIPPER_DIR}/power_devices.c
+    ${KLIPPER_DIR}/console_log.c
+    ${KLIPPER_DIR}/json_util.c
+    ${ECRANS_DIR}/ecran_power.c
+    ${ECRANS_DIR}/ecran_console.c
     ${KLIPPER_DIR}/klipper_temp_historique.c
     ${KLIPPER_DIR}/klipper_gcode.c
     ${KLIPPER_DIR}/klipper_paliers.c

@@ -146,7 +146,14 @@ static void afficher_page(ecran_usb_ctx_t *ctx, bool en_cours)
 
     bool vide = (!ctx->monte) || (ctx->nb_fichiers == 0);
     if (vide) {
-        lv_label_set_text(ctx->vide, ctx->monte ? "No .gcode files on this USB key" : "Insert a USB key");
+        /* Pendant le scan (jusqu'a 45 s sur une cle bien remplie), le store
+           dit encore monte=false : sans le cas scan_en_cours, cet ecran
+           affichait "Insert a USB key" cle branchee et montee -- l'illusion
+           qui a coute deux sessions de debogage (2026-08-14), voir
+           usb_fichiers.h. */
+        lv_label_set_text(ctx->vide, ctx->scan_en_cours ? "Reading USB key..."
+                                     : ctx->monte       ? "No .gcode files on this USB key"
+                                                        : "Insert a USB key");
         lv_obj_clear_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN);
@@ -394,6 +401,7 @@ static void ecran_usb_construire(lv_obj_t *parent, void *contexte)
     ctx->nb_fichiers = 0;
     ctx->tronques = false;
     ctx->monte = false;
+    ctx->scan_en_cours = false;
     ctx->page = 0;
     ctx->derniere_generation = 0;
     ctx->chemin_attente[0] = '\0';
@@ -461,6 +469,7 @@ static void ecran_usb_mettre_a_jour(const void *etat, bool donnees_perimees, voi
         }
         ctx->tronques = fics.tronques;
         ctx->monte = fics.monte;
+        ctx->scan_en_cours = fics.scan_en_cours;
         ctx->derniere_generation = generation;
     }
 

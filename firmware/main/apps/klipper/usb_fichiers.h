@@ -51,6 +51,14 @@ typedef struct {
     usb_fichier_t fichiers[USB_FICHIERS_MAX];
     uint8_t       nb;                            /* fichiers valides dans fichiers[0..nb-1] */
     bool          tronques;                      /* vrai si la clé en contenait davantage */
+    /* Vrai entre usb_fichiers_scan_demarre() (callback de montage) et le
+     * usb_fichiers_definir() qui publie le résultat du scan. POURQUOI (fix
+     * "Insert a USB key" mensonger, diagnostic du 2026-08-14) : pendant tout
+     * le scan (45 s observées sur une clé réelle bien remplie), `monte`
+     * reste faux -- le résultat n'est publié qu'à la fin -- et l'écran
+     * affichait "Insert a USB key" clé branchée et montée. Ce drapeau donne
+     * à l'écran l'état intermédiaire honnête ("lecture de la clé..."). */
+    bool          scan_en_cours;
 } usb_fichiers_t;
 
 /* Remplace ENTIÈREMENT le contenu du store (copie sous verrou). `fichiers`
@@ -63,6 +71,14 @@ typedef struct {
  * une raison de le faire (un nouveau scan a tourné), l'écran doit pouvoir le
  * détecter même si le résultat est identique au précédent. */
 void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb, bool tronques);
+
+/* Lève `scan_en_cours` (et incrémente la génération, pour que l'écran le
+ * voie) -- à appeler quand un scan démarre RÉELLEMENT (clé montée, tâche de
+ * scan réveillée), jamais en simple intention. Retombe au prochain
+ * usb_fichiers_definir(), qu'il vienne du scan (résultat publié) ou du
+ * unmount (éjection pendant le scan : "clé absente" ne doit jamais cohabiter
+ * avec "lecture en cours"). */
+void usb_fichiers_scan_demarre(void);
 
 /* Copie le contenu courant du store dans `*dest` (fourni par l'appelant,
  * sous verrou). `dest` NULL = no-op. */

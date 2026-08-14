@@ -484,9 +484,19 @@ static esp_err_t gestion_state(httpd_req_t *req)
 
 static esp_err_t gestion_log(httpd_req_t *req)
 {
-    /* Statique : 16 Kio sur la pile de la tâche httpd serait excessif. */
-    static char instantane[16 * 1024];
-    size_t longueur = netlog_snapshot(instantane, sizeof(instantane));
+    /* Jamais sur la pile de la tâche httpd (16 Kio), et EN PSRAM plutôt
+     * qu'en .bss RAM interne depuis le fix RAM interne du 2026-08-14 (même
+     * raison que le tampon de netlog.c, voir son commentaire). Allocation
+     * paresseuse au premier /log, conservée ensuite ; une seule requête à la
+     * fois sur ce serveur mono-tâche, pas de verrou nécessaire. */
+    static char *instantane;
+    if (instantane == NULL) {
+        instantane = (char *)heap_caps_malloc(NETLOG_TAILLE, MALLOC_CAP_SPIRAM);
+        if (instantane == NULL) {
+            return httpd_resp_send_500(req);
+        }
+    }
+    size_t longueur = netlog_snapshot(instantane, NETLOG_TAILLE);
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     return httpd_resp_send(req, instantane, longueur);
 }

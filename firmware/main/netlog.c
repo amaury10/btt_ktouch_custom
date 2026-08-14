@@ -16,13 +16,23 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
-#define NETLOG_TAILLE (16 * 1024)
+/* NETLOG_TAILLE vit dans netlog.h (partagée avec le tampon de /log, web.c). */
 
-static char tampon[NETLOG_TAILLE];
+/* EN PSRAM depuis le fix RAM interne du 2026-08-14 : ces 16 Kio vivaient en
+ * .bss RAM interne alors que la machine tourne à ~13-54 Kio de marge interne
+ * (mesuré via /status.heap_interne pendant le diagnostic USB) -- le tampon
+ * d'un journal de CONFORT ne doit jamais concurrencer les piles de tâches et
+ * les allocations DMA/WiFi qui, elles, n'ont pas le choix. Alloué une fois
+ * dans netlog_init() ; NULL si la PSRAM manque, et tout netlog devient no-op
+ * (mêmes gardes que le mutex juste en dessous). L'écriture depuis n'importe
+ * quelle tâche reste valable : la PSRAM est adressable partout hors contexte
+ * cache-flash-désactivé, où ESP_LOG* est de toute façon déjà interdit. */
+static char *tampon;
 static size_t position;       /* prochain octet libre, modulo NETLOG_TAILLE */
 static bool a_bien_bouclee;    /* vrai dès que le tampon a fait un tour complet */
 static SemaphoreHandle_t mutex;
@@ -30,7 +40,7 @@ static vprintf_like_t vprintf_original;
 
 static void ecrire_dans_tampon(const char *donnees, size_t longueur)
 {
-    if (mutex == NULL) {
+    if (mutex == NULL || tampon == NULL) {
         return;
     }
     /* Délai nul : on abandonne l'écriture plutôt que d'attendre. */
@@ -72,8 +82,20 @@ static int relais_vprintf(const char *format, va_list args)
 
 esp_err_t netlog_init(void)
 {
+    /* Tampon d'abord, relais en dernier : le relais ne doit jamais être posé
+     * tant que tout ce qu'il touche n'existe pas (il est appelé depuis
+     * n'importe quelle tâche dès l'instant où il est posé). */
+    tampon = (char *)heap_caps_malloc(NETLOG_TAILLE, MALLOC_CAP_SPIRAM);
+    if (tampon == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
     mutex = xSemaphoreCreateMutex();
     if (mutex == NULL) {
+        /* Sans mutex, aucun consommateur ne touchera jamais ce tampon : le
+         * rendre plutôt que de laisser 16 Kio orphelins (personne ne
+         * rappelle netlog_init()). */
+        heap_caps_free(tampon);
+        tampon = NULL;
         return ESP_ERR_NO_MEM;
     }
     vprintf_original = esp_log_set_vprintf(relais_vprintf);
@@ -85,7 +107,7 @@ size_t netlog_snapshot(char *out, size_t len)
     if (out == NULL || len == 0) {
         return 0;
     }
-    if (mutex == NULL || xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+    if (mutex == NULL || tampon == NULL || xSemaphoreTake(mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
         out[0] = '\0';
         return 0;
     }

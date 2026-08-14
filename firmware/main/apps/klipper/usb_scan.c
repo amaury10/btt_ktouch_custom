@@ -11,6 +11,8 @@
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h" /* xTaskCreateWithCaps -- pile de scan en PSRAM */
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "pandatouch_msc.h"
 
@@ -34,19 +36,35 @@ static const char *TAG = "usb_scan";
  * usb_scan_demarrage_paresseux() reussi (voir plus bas), jamais en .bss RAM
  * interne comme avant ce fix. Rempli par usb_scan_recursif() puis recopie EN
  * UNE FOIS dans le store verrouille (usb_fichiers_definir()) une fois le
- * scan complet termine. Partage entre scans successifs (un seul a la fois,
- * voir s_usb_scan_en_cours ci-dessous) : pas de risque de lecture partielle
- * par le store, qui ne voit jamais ce tampon directement. */
+ * scan complet termine. Partage entre scans successifs (un seul a la fois :
+ * l'unique tache perenne de scan, voir s_scan_reveil ci-dessous, est la
+ * seule a y ecrire) : pas de risque de lecture partielle par le store, qui
+ * ne voit jamais ce tampon directement. */
 static usb_fichier_t *s_usb_scan_tampon;
 
-/* Garde contre un second scan concurrent (remontage rapide, ou callback de
- * montage rappelee alors qu'un scan precedent tourne encore) -- lu/ecrit
- * uniquement depuis usb_on_mount_cb() (tache "msc_inst_w" du BSP) et
- * usb_scan_tache() (sa propre tache dediee) : un seul ecrivain a la fois de
- * chaque cote, une simple variable volatile suffit (pas de portMUX -- meme
- * esprit que s_mounted dans pandatouch_msc.c, un flag booleen a ecriture
- * quasi-atomique sur cette architecture). */
-static volatile bool s_usb_scan_en_cours = false;
+/* Tâche de scan PÉRENNE + sémaphore de réveil (fix "memoire epuisee" du
+ * 2026-08-14) : la version précédente créait la tâche À CHAQUE montage,
+ * c'est-à-dire au pire moment possible -- l'hôte USB venait de consommer
+ * ~40 Kio de RAM interne (54 Kio libres au repos -> 13 Kio clé montée,
+ * mesuré via /status.heap_interne) et xTaskCreate(8 Kio de pile d'un seul
+ * tenant) échouait : "creation de la tache de scan USB echouee (memoire
+ * epuisee)", scan jamais lancé, écran figé sur "Insert a USB key" clé
+ * pourtant montée. Créés UNE SEULE FOIS ici, dans
+ * usb_scan_demarrage_paresseux(), AVANT pt_usb_start() -- donc avant que
+ * l'hôte USB ne mange la marge -- puis la tâche dort sur le sémaphore et
+ * chaque montage ne fait que la réveiller (aucune allocation au montage).
+ *
+ * Le sémaphore BINAIRE sert aussi de coalescence (revue du 2026-08-14, L1) :
+ * un montage qui survient PENDANT un scan (éjection + réinsertion rapide,
+ * l'ancienne garde "scan deja en cours" jetait ce montage et la nouvelle clé
+ * n'était JAMAIS scannée -- pire, le scan en vol finissait sa récursion sur
+ * la nouvelle clé et publiait une liste MÉLANGÉE étiquetée valide) laisse
+ * simplement le sémaphore levé : le tour de boucle suivant rescanne la clé
+ * réellement présente et écrase toute publication bâtarde. Plusieurs
+ * montages pendant un même scan coalescent en UN rescan -- exactement ce
+ * qu'il faut, la liste finale reflète l'état final. */
+static SemaphoreHandle_t s_scan_reveil;
+static TaskHandle_t      s_scan_tache;
 
 /* Vrai si `nom` contient un octet de controle 0x00-0x1F -- prudence
  * demandee par la tache B, au-dela du seul filtre d'extension deja fait par
@@ -135,42 +153,63 @@ static void usb_scan_recursif(const char *chemin, uint8_t *nb, bool *tronques)
 static void usb_scan_tache(void *arg)
 {
     (void)arg;
-    uint8_t nb = 0;
-    bool tronques = false;
-    usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques);
-    /* La cle a pu etre ejectee PENDANT le scan (cette tache dediee tourne des
-       centaines de ms) : usb_on_unmount_cb() a alors deja publie monte=false.
-       Ne pas ecraser cet etat par un "true" en dur -- relire l'etat reel du
-       montage. Si demontee, publier monte=false + liste vide plutot qu'une
-       liste perimee etiquetee "cle presente" (scenario ejection a chaud). */
-    bool encore_monte = pt_usb_is_mounted();
-    usb_fichiers_definir(encore_monte, encore_monte ? s_usb_scan_tampon : NULL,
-                         encore_monte ? nb : 0, encore_monte ? tronques : false);
-    JOURNAL_INFO(TAG, "scan USB : %u fichier(s) .gcode trouve(s)%s", (unsigned)nb,
-                 tronques ? " (liste tronquee)" : "");
-    s_usb_scan_en_cours = false;
-    vTaskDelete(NULL);
+    /* Tâche pérenne (voir s_scan_reveil plus haut) : dort sur le sémaphore,
+       un tour de boucle par montage -- plus jamais de vTaskDelete(NULL) ni
+       de re-création. */
+    for (;;) {
+        if (xSemaphoreTake(s_scan_reveil, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        uint8_t nb = 0;
+        bool tronques = false;
+        usb_scan_recursif(PT_USB_MOUNT_PATH, &nb, &tronques);
+        /* La cle a pu etre ejectee PENDANT le scan (ce tour de boucle dure des
+           centaines de ms) : usb_on_unmount_cb() a alors deja publie monte=false.
+           Ne pas ecraser cet etat par un "true" en dur -- relire l'etat reel du
+           montage. Si demontee, publier monte=false + liste vide plutot qu'une
+           liste perimee etiquetee "cle presente" (scenario ejection a chaud). */
+        bool encore_monte = pt_usb_is_mounted();
+        usb_fichiers_definir(encore_monte, encore_monte ? s_usb_scan_tampon : NULL,
+                             encore_monte ? nb : 0, encore_monte ? tronques : false);
+        /* Fenetre lecture->publication (revue du 2026-08-14, L6) : une
+           ejection qui tombe entre le pt_usb_is_mounted() ci-dessus et le
+           definir() peut faire atterrir NOTRE publication "monte=true" APRES
+           celle du callback d'unmount -- liste fantome persistante, rien ne
+           republierait jamais. Relire une seconde fois et corriger ferme la
+           fenetre a l'epaisseur d'une lecture (le cas résiduel est rattrapé
+           par le rescan du prochain montage, sémaphore coalescent). */
+        if (encore_monte && !pt_usb_is_mounted()) {
+            usb_fichiers_definir(false, NULL, 0, false);
+        }
+        JOURNAL_INFO(TAG, "scan USB : %u fichier(s) .gcode trouve(s)%s", (unsigned)nb,
+                     tronques ? " (liste tronquee)" : "");
+    }
 }
 
 /* Callback pt_usb_on_mount() -- tourne sur "msc_inst_w", une tache du BSP a
  * SEULEMENT 4096 o de pile (voir pandatouch_msc.c, pt_usb_install_device_task()) :
  * jamais de scan direct ici (la recursion + les tampons locaux de
  * usb_scan_recursif() y depasseraient vite ce budget -- la spec de cette
- * tache demande explicitement de ne pas gonfler les piles USB du BSP). Une
- * tache DEDIEE (8 Kio, voir USB_SCAN_TASK_STACK) fait le travail reel ; ce
- * callback ne fait que la creer et revenir immediatement. */
+ * tache demande explicitement de ne pas gonfler les piles USB du BSP). La
+ * tache PERENNE (8 Kio en PSRAM, voir USB_SCAN_TASK_STACK et s_scan_reveil)
+ * fait le travail reel ; ce callback ne fait que la reveiller et revenir
+ * immediatement. */
 static void usb_on_mount_cb(void)
 {
-    if (s_usb_scan_en_cours) {
-        JOURNAL_ALERTE(TAG, "scan USB deja en cours, montage ignore");
+    if (s_scan_reveil == NULL || s_scan_tache == NULL) {
+        /* Ne devrait jamais arriver : usb_scan_demarrage_paresseux() refuse
+           de demarrer l'USB tant que la tache/le semaphore n'existent pas. */
+        JOURNAL_ERREUR(TAG, "tache de scan absente, montage ignore");
         return;
     }
-    s_usb_scan_en_cours = true;
-    BaseType_t cree = xTaskCreate(usb_scan_tache, "usb_scan", USB_SCAN_TASK_STACK, NULL, USB_SCAN_TASK_PRIO, NULL);
-    if (cree != pdPASS) {
-        s_usb_scan_en_cours = false;
-        JOURNAL_ERREUR(TAG, "creation de la tache de scan USB echouee (memoire epuisee)");
-    }
+    /* JAMAIS de garde "scan deja en cours" ici (revue du 2026-08-14, L1) :
+       un montage pendant un scan en vol DOIT redéclencher un scan, sinon la
+       nouvelle clé reste invisible -- voir le commentaire de s_scan_reveil
+       sur la coalescence du sémaphore binaire. L'ecran doit voir "lecture de
+       la cle en cours" pendant toute la duree du scan (45 s observees sur
+       une cle bien remplie), voir usb_fichiers.h. */
+    usb_fichiers_scan_demarre();
+    xSemaphoreGive(s_scan_reveil);
 }
 
 static void usb_on_unmount_cb(void)
@@ -201,6 +240,38 @@ void usb_scan_demarrage_paresseux(void)
         if (s_usb_scan_tampon == NULL) {
             JOURNAL_ERREUR(TAG, "heap_caps_malloc(PSRAM) a echoue pour le tampon de scan USB (%u octets) ; "
                            "USB non demarre", (unsigned)((size_t)USB_FICHIERS_MAX * sizeof(usb_fichier_t)));
+            return;
+        }
+    }
+
+    /* Semaphore + tache de scan crees ICI, une seule fois, AVANT
+       pt_usb_start() : c'est le moment ou la RAM interne est la plus saine
+       (~54 Kio libres mesures) -- l'hote USB en mange ~40 des qu'il demarre,
+       et la creation au montage echouait (voir le commentaire de
+       s_scan_reveil). Echec ici : on renonce a demarrer l'USB (s_demarre
+       reste faux, retente a la prochaine ouverture de l'ecran), meme
+       politique que le tampon PSRAM ci-dessus -- jamais un USB "demarre"
+       dont les montages ne seraient jamais scannes. */
+    if (s_scan_reveil == NULL) {
+        s_scan_reveil = xSemaphoreCreateBinary();
+        if (s_scan_reveil == NULL) {
+            JOURNAL_ERREUR(TAG, "creation du semaphore de scan USB echouee ; USB non demarre");
+            return;
+        }
+    }
+    if (s_scan_tache == NULL) {
+        /* Pile EN PSRAM (revue du 2026-08-14, L7) : 8 Kio pérennes en RAM
+           interne seraient ~60 % de la marge mesurée clé montée (13 Kio).
+           CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY et
+           CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM sont déjà actifs, et
+           cette tâche ne touche jamais un chemin cache-flash-désactivé
+           (parcours VFS USB + store PSRAM + journal uniquement). */
+        BaseType_t cree = xTaskCreateWithCaps(usb_scan_tache, "usb_scan", USB_SCAN_TASK_STACK, NULL,
+                                              USB_SCAN_TASK_PRIO, &s_scan_tache,
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (cree != pdPASS) {
+            s_scan_tache = NULL;
+            JOURNAL_ERREUR(TAG, "creation de la tache de scan USB echouee (memoire epuisee) ; USB non demarre");
             return;
         }
     }

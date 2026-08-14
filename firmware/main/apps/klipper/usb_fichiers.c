@@ -84,6 +84,7 @@ void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb,
     store->monte = monte;
     store->nb = nb;
     store->tronques = tronques;
+    store->scan_en_cours = false; /* toute publication clôt le scan, voir usb_fichiers.h */
     if (nb > 0 && fichiers != NULL) {
         memcpy(store->fichiers, fichiers, (size_t)nb * sizeof(usb_fichier_t));
     }
@@ -94,6 +95,18 @@ void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb,
            reste de ce dépôt. */
         memset(&store->fichiers[nb], 0, (size_t)(USB_FICHIERS_MAX - nb) * sizeof(usb_fichier_t));
     }
+    g_generation++;
+    VERROU_RENDRE();
+}
+
+void usb_fichiers_scan_demarre(void)
+{
+    usb_fichiers_t *store = store_obtenir();
+    if (store == NULL) {
+        return; /* PSRAM indisponible (deja journalise par store_obtenir()) : no-op */
+    }
+    VERROU_PRENDRE();
+    store->scan_en_cours = true;
     g_generation++;
     VERROU_RENDRE();
 }

@@ -74,6 +74,23 @@ void habillage_definir_action_rail(void (*handler)(rail_action_t, void *), void 
 void habillage_definir_choix_accueil(const ecran_desc_t *(*choisir)(const void *etat, void *ctx),
                                      void *ctx);
 
+/* Compteur de génération EXTERNE à l'état applicatif -- pour les stores qui
+ * évoluent SANS l'imprimante (revue du 2026-08-14, L2 : la liste des
+ * fichiers d'une clé USB change pendant que Moonraker est injoignable, or la
+ * propagation de habillage_pomper() ne regardait que la génération de l'état
+ * Klipper, DERRIÈRE la garde `disponible` -- l'écran USB restait figé sur
+ * "Insert a USB key" imprimante éteinte, y compris après la fin du scan).
+ * L'application enregistre ici une fonction rendant un compteur monotone
+ * (ex. usb_fichiers_generation()) ; tout changement déclenche une
+ * propagation, MÊME imprimante hors ligne (les écrans reçoivent alors des
+ * données Klipper marquées périmées, contrat qu'ils honorent déjà -- voir
+ * donnees_perimees dans ecran.h). `compteur` doit rester valide tant que
+ * l'habillage vit ; NULL (défaut, et cas des tests du seul socle) désactive
+ * ce canal. Plusieurs stores : additionner leurs compteurs dans la fonction
+ * enregistrée (des compteurs monotones dont la somme change dès que l'un
+ * bouge). */
+void habillage_definir_generation_externe(uint32_t (*compteur)(void));
+
 /* Le rail persistant du shell (état de fichier, comme la barre d'état) : un
  * accesseur générique, exposé pour le surlignage applicatif et les tests
  * (parcours de `->racine`/`->boutons[]`). Toujours non-NULL ; ses champs ne

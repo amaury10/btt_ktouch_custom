@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "petit_test.h"
+#include "usb_fichiers.h"
 #include "usb_upload.h"
 
 /* --- usb_est_gcode ------------------------------------------------------ */
@@ -150,6 +151,59 @@ static void section_content_length(void)
               == strlen(PREAMBULE_ATTENDU) + 1000000 + strlen("\r\n--TESTBOUND--\r\n"));
 }
 
+/* --- store usb_fichiers : drapeau "scan en cours" ------------------------ */
+
+/* Fix "Insert a USB key" mensonger (diagnostic du 2026-08-14) : pendant tout
+ * le scan (45 s observées sur une clé réelle), le store disait encore "clé
+ * absente" et l'écran affichait "Insert a USB key" clé branchée -- deux
+ * sessions de débogage perdues sur cette illusion. Le drapeau scan_en_cours
+ * (usb_fichiers_scan_demarre(), levé par le callback de montage AVANT le
+ * scan, retombé par usb_fichiers_definir() qui publie le résultat) donne à
+ * l'écran l'état intermédiaire honnête. */
+static void section_store_scan_en_cours(void)
+{
+    usb_fichiers_t lu;
+
+    /* État de départ propre (le store est process-wide). */
+    usb_fichiers_definir(false, NULL, 0, false);
+    usb_fichiers_lire(&lu);
+    VERIFIER(!lu.scan_en_cours);
+    VERIFIER(!lu.monte);
+
+    /* Le démarrage du scan lève le drapeau ET incrémente la génération
+     * (l'écran ne relit le store QUE sur changement de génération). */
+    uint32_t generation_avant = usb_fichiers_generation();
+    usb_fichiers_scan_demarre();
+    usb_fichiers_lire(&lu);
+    VERIFIER(lu.scan_en_cours);
+    VERIFIER(usb_fichiers_generation() == generation_avant + 1);
+    /* Le drapeau ne préjuge de rien d'autre : liste/monte inchangés. */
+    VERIFIER(!lu.monte);
+    VERIFIER(lu.nb == 0);
+
+    /* La publication du résultat fait retomber le drapeau. */
+    usb_fichier_t fichier;
+    memset(&fichier, 0, sizeof(fichier));
+    strcpy(fichier.chemin, "/usb/piece.gcode");
+    fichier.taille = 1234;
+    usb_fichiers_definir(true, &fichier, 1, false);
+    usb_fichiers_lire(&lu);
+    VERIFIER(!lu.scan_en_cours);
+    VERIFIER(lu.monte);
+    VERIFIER(lu.nb == 1);
+    VERIFIER_TEXTE(lu.fichiers[0].chemin, "/usb/piece.gcode");
+
+    /* Éjection pendant un scan (cas réel du fix 946ae53) : le unmount publie
+     * "clé absente" et le drapeau retombe aussi -- jamais un "Scanning..."
+     * fantôme après retrait de la clé. */
+    usb_fichiers_scan_demarre();
+    usb_fichiers_definir(false, NULL, 0, false);
+    usb_fichiers_lire(&lu);
+    VERIFIER(!lu.scan_en_cours);
+    VERIFIER(!lu.monte);
+    VERIFIER(lu.nb == 0);
+}
+
 void suite_usb_upload(void)
 {
     printf("suite : usb_upload (cadrage multipart upload USB->Moonraker)\n");
@@ -161,4 +215,5 @@ void suite_usb_upload(void)
     section_preambule_null_defaults();
     section_trailer();
     section_content_length();
+    section_store_scan_en_cours();
 }

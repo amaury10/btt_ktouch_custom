@@ -76,6 +76,7 @@ typedef struct ecran_usb_ctx_s {
     uint8_t  nb_fichiers;
     bool     tronques;
     bool     monte;
+    bool     scan_en_cours; /* copie de usb_fichiers_t.scan_en_cours, voir usb_fichiers.h */
     uint8_t  page; /* 0-indexé */
 
     /* Génération du store USB vue au dernier mettre_a_jour() -- évite de
