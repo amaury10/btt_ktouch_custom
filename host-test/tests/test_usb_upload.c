@@ -151,101 +151,118 @@ static void section_content_length(void)
               == strlen(PREAMBULE_ATTENDU) + 1000000 + strlen("\r\n--TESTBOUND--\r\n"));
 }
 
-/* --- store usb_fichiers : drapeau "scan en cours" ------------------------ */
+/* --- store usb_fichiers : repertoire courant (explorateur) ---------------- */
 
-/* Fix "Insert a USB key" mensonger (diagnostic du 2026-08-14) : pendant tout
- * le scan (45 s observées sur une clé réelle), le store disait encore "clé
- * absente" et l'écran affichait "Insert a USB key" clé branchée -- deux
- * sessions de débogage perdues sur cette illusion. Le drapeau scan_en_cours
- * (usb_fichiers_scan_demarre(), levé par le callback de montage AVANT le
- * scan, retombé par usb_fichiers_definir() qui publie le résultat) donne à
- * l'écran l'état intermédiaire honnête. */
-static void section_store_scan_en_cours(void)
+/* Explorateur de fichiers USB (spec 2026-08-14-usb-explorateur-design.md) :
+ * le store ne porte plus le resultat d'un scan complet mais l'etat du
+ * REPERTOIRE COURANT -- chemin + entrees (dossiers et .gcode). Contrat :
+ * scan_demarre() leve le drapeau de listage (+1 generation) ; definir()
+ * publie chemin + entrees et clot le listage (unmount compris). */
+static void section_store_repertoire(void)
 {
     usb_fichiers_t lu;
 
-    /* État de départ propre (le store est process-wide). */
-    usb_fichiers_definir(false, NULL, 0, false);
+    usb_fichiers_definir(false, "", NULL, 0, false);
     usb_fichiers_lire(&lu);
-    VERIFIER(!lu.scan_en_cours);
     VERIFIER(!lu.monte);
+    VERIFIER(lu.chemin_courant[0] == '\0');
 
-    /* Le démarrage du scan lève le drapeau ET incrémente la génération
-     * (l'écran ne relit le store QUE sur changement de génération). */
     uint32_t generation_avant = usb_fichiers_generation();
     usb_fichiers_scan_demarre();
     usb_fichiers_lire(&lu);
     VERIFIER(lu.scan_en_cours);
     VERIFIER(usb_fichiers_generation() == generation_avant + 1);
-    /* Le drapeau ne préjuge de rien d'autre : liste/monte inchangés. */
-    VERIFIER(!lu.monte);
-    VERIFIER(lu.nb == 0);
 
-    /* La publication du résultat fait retomber le drapeau. */
-    usb_fichier_t fichier;
-    memset(&fichier, 0, sizeof(fichier));
-    strcpy(fichier.chemin, "/usb/piece.gcode");
-    fichier.taille = 1234;
-    usb_fichiers_definir(true, &fichier, 1, false);
+    usb_fichier_t entrees[2];
+    memset(entrees, 0, sizeof(entrees));
+    strcpy(entrees[0].chemin, "/usb/dossier");
+    entrees[0].est_dossier = true;
+    strcpy(entrees[1].chemin, "/usb/piece.gcode");
+    entrees[1].taille = 1234;
+    usb_fichiers_definir(true, "/usb", entrees, 2, false);
     usb_fichiers_lire(&lu);
-    VERIFIER(!lu.scan_en_cours);
     VERIFIER(lu.monte);
-    VERIFIER(lu.nb == 1);
-    VERIFIER_TEXTE(lu.fichiers[0].chemin, "/usb/piece.gcode");
+    VERIFIER(!lu.scan_en_cours);
+    VERIFIER_TEXTE(lu.chemin_courant, "/usb");
+    VERIFIER(lu.nb == 2);
+    VERIFIER(lu.fichiers[0].est_dossier);
+    VERIFIER(!lu.fichiers[1].est_dossier);
+    VERIFIER(lu.fichiers[1].taille == 1234);
 
-    /* Éjection pendant un scan (cas réel du fix 946ae53) : le unmount publie
-     * "clé absente" et le drapeau retombe aussi -- jamais un "Scanning..."
-     * fantôme après retrait de la clé. */
+    /* Invariant PORTANT (revue du 2026-08-15, L7) : scan_demarre() ne touche
+       QUE le drapeau + la generation -- monte/nb/chemin restent intacts.
+       C'est ce qui permet a l'ecran de continuer d'afficher le repertoire
+       courant pendant qu'une navigation se liste ; un scan_demarre() qui
+       viderait le store blanchirait la grille a chaque tap. */
     usb_fichiers_scan_demarre();
-    usb_fichiers_definir(false, NULL, 0, false);
+    usb_fichiers_lire(&lu);
+    VERIFIER(lu.scan_en_cours);
+    VERIFIER(lu.monte);
+    VERIFIER(lu.nb == 2);
+    VERIFIER_TEXTE(lu.chemin_courant, "/usb");
+    VERIFIER_TEXTE(lu.fichiers[1].chemin, "/usb/piece.gcode");
+
+    /* Ejection : tout retombe, chemin compris -- jamais un chemin fantome
+     * d'une cle retiree. */
+    usb_fichiers_scan_demarre();
+    usb_fichiers_definir(false, "", NULL, 0, false);
     usb_fichiers_lire(&lu);
     VERIFIER(!lu.scan_en_cours);
     VERIFIER(!lu.monte);
     VERIFIER(lu.nb == 0);
+    VERIFIER(lu.chemin_courant[0] == '\0');
 }
 
-/* --- publication PARTIELLE pendant le scan (latence perçue) --------------- */
+/* --- tri du listing (dossiers d'abord, alphabetique) ---------------------- */
 
-/* Fix lenteur perçue (2026-08-14, scan complet mesuré à 34-55 s sur une clé
- * de 29 Go) : usb_fichiers_publier_partiel() pousse les .gcode déjà trouvés
- * SANS clore le scan -- l'écran affiche les premiers fichiers en ~1 s
- * pendant que le parcours continue. Contrat : monte passe à vrai, la liste
- * est remplacée, la génération avance, mais scan_en_cours RESTE levé ; seul
- * usb_fichiers_definir() (publication finale, ou unmount) le fait retomber. */
-static void section_store_publication_partielle(void)
+static void section_listing_tri(void)
 {
-    usb_fichiers_t lu;
+    VERIFIER_TEXTE(usb_chemin_nom("/usb/dossier/piece.gcode"), "piece.gcode");
+    VERIFIER_TEXTE(usb_chemin_nom("sans-slash"), "sans-slash");
+    VERIFIER_TEXTE(usb_chemin_nom(NULL), "");
 
-    usb_fichiers_definir(false, NULL, 0, false);
-    usb_fichiers_scan_demarre();
+    usb_fichier_t e[4];
+    memset(e, 0, sizeof(e));
+    strcpy(e[0].chemin, "/usb/zeta.gcode");
+    strcpy(e[1].chemin, "/usb/Beta");
+    e[1].est_dossier = true;
+    strcpy(e[2].chemin, "/usb/alpha.gcode");
+    strcpy(e[3].chemin, "/usb/gamma");
+    e[3].est_dossier = true;
+    usb_listing_trier(e, 4);
+    /* dossiers d'abord (alpha, insensible a la casse), puis fichiers alpha */
+    VERIFIER_TEXTE(usb_chemin_nom(e[0].chemin), "Beta");
+    VERIFIER_TEXTE(usb_chemin_nom(e[1].chemin), "gamma");
+    VERIFIER_TEXTE(usb_chemin_nom(e[2].chemin), "alpha.gcode");
+    VERIFIER_TEXTE(usb_chemin_nom(e[3].chemin), "zeta.gcode");
 
-    usb_fichier_t premier;
-    memset(&premier, 0, sizeof(premier));
-    strcpy(premier.chemin, "/usb/racine.gcode");
-    premier.taille = 100;
+    usb_listing_trier(NULL, 0); /* garde NULL : ne crashe pas */
+}
 
-    uint32_t generation_avant = usb_fichiers_generation();
-    usb_fichiers_publier_partiel(&premier, 1, false);
-    usb_fichiers_lire(&lu);
-    VERIFIER(lu.monte);                 /* la clé est là, les fichiers sont réels */
-    VERIFIER(lu.scan_en_cours);         /* ... mais le parcours n'est PAS fini */
-    VERIFIER(lu.nb == 1);
-    VERIFIER_TEXTE(lu.fichiers[0].chemin, "/usb/racine.gcode");
-    VERIFIER(usb_fichiers_generation() == generation_avant + 1);
+/* --- chemin parent (entree "..") ------------------------------------------ */
 
-    /* Publication finale : liste complète, drapeau retombé. */
-    usb_fichier_t deux[2];
-    memset(deux, 0, sizeof(deux));
-    strcpy(deux[0].chemin, "/usb/racine.gcode");
-    deux[0].taille = 100;
-    strcpy(deux[1].chemin, "/usb/dossier/fond.gcode");
-    deux[1].taille = 200;
-    usb_fichiers_definir(true, deux, 2, false);
-    usb_fichiers_lire(&lu);
-    VERIFIER(lu.monte);
-    VERIFIER(!lu.scan_en_cours);
-    VERIFIER(lu.nb == 2);
-    VERIFIER_TEXTE(lu.fichiers[1].chemin, "/usb/dossier/fond.gcode");
+static void section_chemin_parent(void)
+{
+    char parent[USB_FICHIER_CHEMIN_MAX];
+
+    usb_chemin_parent(parent, sizeof(parent), "/usb/a/b");
+    VERIFIER_TEXTE(parent, "/usb/a");
+    usb_chemin_parent(parent, sizeof(parent), "/usb/a");
+    VERIFIER_TEXTE(parent, "/usb");
+    /* Deja a la racine, chemin invalide ou hors racine : plancher /usb. */
+    usb_chemin_parent(parent, sizeof(parent), "/usb");
+    VERIFIER_TEXTE(parent, "/usb");
+    usb_chemin_parent(parent, sizeof(parent), NULL);
+    VERIFIER_TEXTE(parent, "/usb");
+    usb_chemin_parent(parent, sizeof(parent), "/ailleurs/x");
+    VERIFIER_TEXTE(parent, "/usb");
+    usb_chemin_parent(parent, sizeof(parent), "");
+    VERIFIER_TEXTE(parent, "/usb");
+    /* dest minuscule : toujours NUL-terminé, jamais de débordement. */
+    char mini[3];
+    usb_chemin_parent(mini, sizeof(mini), "/usb/a/b");
+    VERIFIER(strlen(mini) == 2);
+    usb_chemin_parent(NULL, 0, "/usb/a"); /* gardes : ne crashe pas */
 }
 
 void suite_usb_upload(void)
@@ -259,6 +276,7 @@ void suite_usb_upload(void)
     section_preambule_null_defaults();
     section_trailer();
     section_content_length();
-    section_store_scan_en_cours();
-    section_store_publication_partielle();
+    section_store_repertoire();
+    section_listing_tri();
+    section_chemin_parent();
 }

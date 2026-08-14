@@ -5,6 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
+
 #include "journal.h"
 
 static const char *TAG = "navigation";
@@ -93,7 +97,21 @@ static esp_err_t empiler_construit(const ecran_desc_t *desc)
      * free()), et un écran sans état ne doit dépendre d'aucun des deux. */
     void *contexte = NULL;
     if (desc->taille_contexte > 0) {
+#ifdef ESP_PLATFORM
+        /* EN PSRAM d'abord (revue du 2026-08-15, L2) : un contexte d'écran
+         * est de l'état d'interface touché par la seule tâche LVGL -- rien
+         * n'y exige la RAM interne, et le plus gros (ecran_usb, ~9 Ko avec
+         * la borne à 64 entrées) consommerait sinon ~70 % de la marge
+         * interne mesurée clé USB montée. Repli calloc interne si la PSRAM
+         * manque (petits contextes, dalle déjà à l'agonie) ; free() libère
+         * les deux, même tas sous-jacent. */
+        contexte = heap_caps_calloc(1, desc->taille_contexte, MALLOC_CAP_SPIRAM);
+        if (contexte == NULL) {
+            contexte = calloc(1, desc->taille_contexte);
+        }
+#else
         contexte = calloc(1, desc->taille_contexte);
+#endif
         if (contexte == NULL) {
             return ESP_ERR_NO_MEM;
         }

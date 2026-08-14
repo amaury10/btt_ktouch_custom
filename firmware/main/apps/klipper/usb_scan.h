@@ -1,6 +1,8 @@
 /* Démarrage paresseux du sous-système USB (feature "Impression depuis USB",
- * tâche B) : montage MSC (pandatouch_msc.h) + callbacks mount/unmount + scan
- * récursif initial, qui remplit le store dédié usb_fichiers.h.
+ * tâche B, devenue explorateur -- spec 2026-08-14-usb-explorateur-design.md) :
+ * montage MSC (pandatouch_msc.h) + callbacks mount/unmount + tâche de
+ * LISTAGE à la demande, qui remplit le store dédié usb_fichiers.h avec le
+ * contenu d'UN répertoire (plus jamais de scan récursif complet).
  *
  * POURQUOI paresseux (fix RAM interne, voir la mémoire du projet) : ce code
  * vivait dans app_main.c et démarrait AU BOOT, juste après web_set_boot_count().
@@ -28,3 +30,12 @@
 #pragma once
 
 void usb_scan_demarrage_paresseux(void);
+
+/* Demande le listage du répertoire `chemin` (chemin complet sous /usb ;
+ * NULL ou vide => racine "/usb"). Asynchrone : la tâche de listage publie le
+ * résultat dans le store usb_fichiers.h (génération incrémentée) dès que
+ * possible. Deux demandes rapprochées : la DERNIÈRE gagne (tampon écrasé,
+ * sémaphore coalescent) -- c'est le comportement voulu pour des taps de
+ * navigation successifs. No-op hors ESP_PLATFORM (même politique que
+ * usb_scan_demarrage_paresseux() ci-dessus). */
+void usb_scan_demander(const char *chemin);

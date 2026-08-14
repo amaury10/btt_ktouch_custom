@@ -17,6 +17,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
+
 #include "confirmation.h"
 #include "habillage.h" /* habillage_notifier() -- refus tardif d'un second upload */
 #include "usb_fichiers.h"
@@ -146,13 +150,13 @@ static void afficher_page(ecran_usb_ctx_t *ctx, bool en_cours)
 
     bool vide = (!ctx->monte) || (ctx->nb_fichiers == 0);
     if (vide) {
-        /* Pendant le scan (jusqu'a 45 s sur une cle bien remplie), le store
-           dit encore monte=false : sans le cas scan_en_cours, cet ecran
+        /* Pendant un listage (1-2 s possibles sur un gros dossier), le store
+           n'a pas encore publie : sans le cas scan_en_cours, cet ecran
            affichait "Insert a USB key" cle branchee et montee -- l'illusion
            qui a coute deux sessions de debogage (2026-08-14), voir
            usb_fichiers.h. */
         lv_label_set_text(ctx->vide, ctx->scan_en_cours ? "Reading USB key..."
-                                     : ctx->monte       ? "No .gcode files on this USB key"
+                                     : ctx->monte       ? "Empty folder (no .gcode)"
                                                         : "Insert a USB key");
         lv_obj_clear_flag(ctx->vide, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -162,7 +166,22 @@ static void afficher_page(ecran_usb_ctx_t *ctx, bool en_cours)
     for (uint8_t emplacement = 0; emplacement < ECRAN_USB_PAGE_TAILLE; emplacement++) {
         uint16_t indice = (uint16_t)ctx->page * ECRAN_USB_PAGE_TAILLE + emplacement;
         if (!vide && indice < ctx->nb_fichiers) {
-            lv_label_set_text(ctx->labels[emplacement], ctx->chemins_copie[indice]);
+            /* Libelle = NOM seul (le chemin courant vit dans la rangee de
+               statut) ; dossiers prefixes du symbole LVGL. L'entree ".."
+               porte le chemin du PARENT : son "nom" serait celui du parent,
+               d'ou le libelle special -- decide par ctx->a_remontee, pose a
+               l'injection (jamais re-derive ici, revue 2026-08-15 L9). */
+            bool est_remontee = (indice == 0 && ctx->a_remontee);
+            char libelle[USB_FICHIER_CHEMIN_MAX + 8];
+            if (est_remontee) {
+                snprintf(libelle, sizeof(libelle), LV_SYMBOL_DIRECTORY " ..");
+            } else if (ctx->dossiers_copie[indice]) {
+                snprintf(libelle, sizeof(libelle), LV_SYMBOL_DIRECTORY " %s",
+                         usb_chemin_nom(ctx->chemins_copie[indice]));
+            } else {
+                snprintf(libelle, sizeof(libelle), "%s", usb_chemin_nom(ctx->chemins_copie[indice]));
+            }
+            lv_label_set_text(ctx->labels[emplacement], libelle);
             lv_obj_clear_flag(ctx->boutons[emplacement], LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_add_flag(ctx->boutons[emplacement], LV_OBJ_FLAG_HIDDEN);
@@ -220,13 +239,27 @@ static bool mettre_a_jour_statut(ecran_usb_ctx_t *ctx)
     } else if (prog.etat == USB_UPLOAD_HTTP_ECHEC) {
         snprintf(texte, sizeof(texte), "Upload failed: %s", prog.message);
         couleur = COULEUR_ECHEC;
-    } else if (ctx->tronques) {
-        /* INACTIF (jamais uploade depuis l'ouverture de cet ecran, ou
-           redemarrage) : la rangee de statut, sinon vide, porte
-           l'avertissement de troncature du store -- pas de rangee dediee,
-           voir le commentaire de tete du fichier sur le budget vertical. */
-        snprintf(texte, sizeof(texte), "Some files are not shown (list truncated)");
-        couleur = COULEUR_AVERTISSEMENT;
+    } else if (ctx->scan_en_cours) {
+        /* Listage en cours avec une liste encore affichee (navigation depuis
+           un dossier non vide -- revue 2026-08-15 L4) : le libelle central
+           "Reading..." de la grille ne s'affiche que liste vide, la rangee
+           de statut porte donc l'etat occupe ici. */
+        snprintf(texte, sizeof(texte), "Reading...");
+        couleur = COULEUR_TEXTE_SECONDAIRE;
+    } else if (ctx->monte && ctx->chemin_courant[0] != '\0') {
+        /* Explorateur : la rangee de statut situe TOUJOURS l'utilisateur
+           (repertoire courant) -- les libelles de la grille ne portent que
+           le nom seul. La troncature s'y COMPOSE au lieu de masquer le
+           chemin (revue 2026-08-15 L5 : c'est dans les dossiers bondes que
+           savoir ou l'on est compte le plus). %.100s : borne dure sous la
+           taille du tampon, un chemin profond est coupe net. */
+        if (ctx->tronques) {
+            snprintf(texte, sizeof(texte), "%.100s (folder truncated)", ctx->chemin_courant);
+            couleur = COULEUR_AVERTISSEMENT;
+        } else {
+            snprintf(texte, sizeof(texte), "%.120s", ctx->chemin_courant);
+            couleur = COULEUR_GRISE;
+        }
     } else {
         texte[0] = '\0';
     }
@@ -277,6 +310,16 @@ static void bouton_fichier_cb(lv_event_t *e)
         return; /* bouton cache/vide sur cette page ; ne devrait jamais arriver via un vrai doigt */
     }
 
+    /* Dossier (".." comprise) : NAVIGUER -- demande asynchrone, le store
+       publiera le nouveau repertoire (generation) et mettre_a_jour() suivra.
+       Jamais de confirmation pour une navigation, et la grille n'est PAS
+       desactivee pendant un listage : deux taps rapprochés = derniere
+       demande gagne (contrat usb_scan_demander()). */
+    if (ctx->dossiers_copie[indice]) {
+        usb_scan_demander(ctx->chemins_copie[indice]);
+        return;
+    }
+
     /* Copie bornee manuelle, meme piege/correctif que la boucle de
      * mettre_a_jour() plus bas (chemin_attente et chemins_copie[indice] font
      * la meme taille fixe USB_FICHIER_CHEMIN_MAX). */
@@ -291,8 +334,10 @@ static void bouton_fichier_cb(lv_event_t *e)
     }
     ctx->taille_attente = ctx->tailles_copie[indice];
 
-    const char *nom = strrchr(ctx->chemin_attente, '/');
-    nom = (nom != NULL) ? nom + 1 : ctx->chemin_attente;
+    /* Meme helper que les libelles de la grille (revue 2026-08-15, L10) :
+       une seule regle de nom, le dialogue affiche EXACTEMENT ce que la
+       rangee tapee affichait. */
+    const char *nom = usb_chemin_nom(ctx->chemin_attente);
 
     confirmation_ouvrir("Send and print?", nom, "Send", /*destructif=*/false, rappel_confirmer_envoi, ctx);
 }
@@ -402,6 +447,8 @@ static void ecran_usb_construire(lv_obj_t *parent, void *contexte)
     ctx->tronques = false;
     ctx->monte = false;
     ctx->scan_en_cours = false;
+    ctx->chemin_courant[0] = '\0';
+    ctx->a_remontee = false;
     ctx->page = 0;
     ctx->derniere_generation = 0;
     ctx->chemin_attente[0] = '\0';
@@ -435,17 +482,64 @@ static void ecran_usb_mettre_a_jour(const void *etat, bool donnees_perimees, voi
 
     uint32_t generation = usb_fichiers_generation();
     if (generation != ctx->derniere_generation) {
-        usb_fichiers_t fics;
-        usb_fichiers_lire(&fics);
+        /* JAMAIS un usb_fichiers_t local (revue du 2026-08-15, L1) : ~8,8 Ko
+           depuis la borne a 64 entrees, sur la pile LVGL de 12 Ko deja
+           chargee de plusieurs cadres -- la classe exacte du bug historique
+           etat_klipper_t vs piles (voir la memoire du projet), invisible en
+           host-test. Scratch PSRAM persistant : cet ecran ne tourne que sur
+           la tache LVGL, une seule instance a la fois, pas de concurrence.
+           PSRAM epuisee : on saute la mise a jour (retente au prochain
+           pompage), jamais un repli pile/RAM interne. */
+#ifdef ESP_PLATFORM
+        static usb_fichiers_t *instantane;
+        if (instantane == NULL) {
+            instantane = (usb_fichiers_t *)heap_caps_malloc(sizeof(*instantane), MALLOC_CAP_SPIRAM);
+            if (instantane == NULL) {
+                return;
+            }
+        }
+#else
+        static usb_fichiers_t instantane_hote;
+        usb_fichiers_t *const instantane = &instantane_hote;
+#endif
+        usb_fichiers_t *fics = instantane;
+        usb_fichiers_lire(fics);
+        fics->chemin_courant[USB_FICHIER_CHEMIN_MAX - 1] = '\0'; /* defensif : POD a champs fixes */
 
-        uint8_t nb_source = fics.nb;
+        /* Changement de repertoire : repartir en page 0 -- l'utilisateur
+           vient de naviguer, la pagination de l'ancien dossier n'a plus de
+           sens. */
+        if (strcmp(fics->chemin_courant, ctx->chemin_courant) != 0) {
+            ctx->page = 0;
+            memcpy(ctx->chemin_courant, fics->chemin_courant, USB_FICHIER_CHEMIN_MAX);
+        }
+
+        ctx->nb_fichiers = 0;
+        ctx->a_remontee = false;
+
+        /* Entree ".." en tete, HORS racine : remonter est une entree de la
+           grille comme une autre (choix utilisateur valide, voir la spec).
+           Son chemin est le PARENT du repertoire courant (usb_chemin_parent(),
+           pur et teste host -- revue 2026-08-15 L9, la version inline n'etait
+           exercee qu'au tap reel). `a_remontee` est LA source de verite de
+           cette injection, relue par l'affichage. */
+        if (fics->monte && strcmp(fics->chemin_courant, USB_RACINE) != 0 &&
+            fics->chemin_courant[0] != '\0') {
+            usb_chemin_parent(ctx->chemins_copie[0], sizeof(ctx->chemins_copie[0]),
+                              fics->chemin_courant);
+            ctx->tailles_copie[0] = 0;
+            ctx->dossiers_copie[0] = true;
+            ctx->a_remontee = true;
+            ctx->nb_fichiers = 1;
+        }
+
+        uint8_t nb_source = fics->nb;
         if (nb_source > USB_FICHIERS_MAX) {
             nb_source = USB_FICHIERS_MAX; /* garde defensive, ne devrait jamais arriver */
         }
-        ctx->nb_fichiers = 0;
         for (uint8_t i = 0; i < nb_source; i++) {
             char chemin_borne[USB_FICHIER_CHEMIN_MAX];
-            memcpy(chemin_borne, fics.fichiers[i].chemin, USB_FICHIER_CHEMIN_MAX);
+            memcpy(chemin_borne, fics->fichiers[i].chemin, USB_FICHIER_CHEMIN_MAX);
             chemin_borne[USB_FICHIER_CHEMIN_MAX - 1] = '\0'; /* defensif : POD a champs fixes, voir klipper_fichiers.h */
             if (chemin_borne[0] == '\0') {
                 continue; /* emplacement vide */
@@ -464,12 +558,13 @@ static void ecran_usb_mettre_a_jour(const void *etat, bool donnees_perimees, voi
                 memcpy(ctx->chemins_copie[ctx->nb_fichiers], chemin_borne, longueur_copie);
                 ctx->chemins_copie[ctx->nb_fichiers][longueur_copie] = '\0';
             }
-            ctx->tailles_copie[ctx->nb_fichiers] = fics.fichiers[i].taille;
+            ctx->tailles_copie[ctx->nb_fichiers] = fics->fichiers[i].taille;
+            ctx->dossiers_copie[ctx->nb_fichiers] = fics->fichiers[i].est_dossier;
             ctx->nb_fichiers++;
         }
-        ctx->tronques = fics.tronques;
-        ctx->monte = fics.monte;
-        ctx->scan_en_cours = fics.scan_en_cours;
+        ctx->tronques = fics->tronques;
+        ctx->monte = fics->monte;
+        ctx->scan_en_cours = fics->scan_en_cours;
         ctx->derniere_generation = generation;
     }
 

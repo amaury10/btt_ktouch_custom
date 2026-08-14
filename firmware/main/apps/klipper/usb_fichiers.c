@@ -15,7 +15,9 @@
  * (pas d'ESP_PLATFORM), une simple instance statique suffit. */
 #include "usb_fichiers.h"
 
+#include <stdlib.h>  /* qsort -- usb_listing_trier() */
 #include <string.h>
+#include <strings.h> /* strcasecmp -- même usage que usb_upload.c */
 
 #include "journal.h"
 
@@ -69,7 +71,8 @@ static usb_fichiers_t *store_obtenir(void)
 
 static uint32_t g_generation;
 
-void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb, bool tronques)
+void usb_fichiers_definir(bool monte, const char *chemin_courant,
+                          const usb_fichier_t *fichiers, uint8_t nb, bool tronques)
 {
     if (nb > USB_FICHIERS_MAX) {
         nb = USB_FICHIERS_MAX; /* garde défensive, ne devrait jamais arriver depuis usb_scan.c */
@@ -80,47 +83,88 @@ void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb,
         return; /* PSRAM indisponible (deja journalise par store_obtenir()) : no-op */
     }
 
+    /* Copie bornée du chemin AVANT le verrou (strlen hors section critique) ;
+       clé absente => "" quoi qu'en dise l'appelant : jamais un chemin
+       fantôme d'une clé retirée. */
+    const char *source_chemin = (monte && chemin_courant != NULL) ? chemin_courant : "";
+    size_t longueur_chemin = strlen(source_chemin);
+    if (longueur_chemin >= USB_FICHIER_CHEMIN_MAX) {
+        longueur_chemin = USB_FICHIER_CHEMIN_MAX - 1;
+    }
+
     VERROU_PRENDRE();
     store->monte = monte;
+    memcpy(store->chemin_courant, source_chemin, longueur_chemin);
+    store->chemin_courant[longueur_chemin] = '\0';
     store->nb = nb;
     store->tronques = tronques;
-    store->scan_en_cours = false; /* toute publication clôt le scan, voir usb_fichiers.h */
+    store->scan_en_cours = false; /* toute publication clôt le listage, voir usb_fichiers.h */
     if (nb > 0 && fichiers != NULL) {
         memcpy(store->fichiers, fichiers, (size_t)nb * sizeof(usb_fichier_t));
     }
-    if (nb < USB_FICHIERS_MAX) {
-        /* Emplacements au-delà de nb remis à zéro -- jamais un débris du
-           scan précédent (un chemin plus long, ex.) laissé visible si un
-           futur lecteur bornait mal `nb`, même discipline défensive que le
-           reste de ce dépôt. */
-        memset(&store->fichiers[nb], 0, (size_t)(USB_FICHIERS_MAX - nb) * sizeof(usb_fichier_t));
-    }
+    /* PAS de remise à zéro de la queue du tableau (revue du 2026-08-15,
+       L8) : à 64 entrées, ce memset sous portMUX (interruptions masquées)
+       pouvait couvrir ~8,6 Ko -- la section critique doit rester COURTE
+       (contrat en tête de fichier). Contrepartie assumée : les emplacements
+       au-delà de `nb` peuvent porter des débris d'un listage précédent, tout
+       lecteur ne doit regarder que [0..nb) -- ce que usb_fichiers_lire()
+       garantit en aval en zéro-remplissant la copie du LECTEUR, hors
+       verrou. */
     g_generation++;
     VERROU_RENDRE();
 }
 
-void usb_fichiers_publier_partiel(const usb_fichier_t *fichiers, uint8_t nb, bool tronques)
+const char *usb_chemin_nom(const char *chemin)
 {
-    if (nb > USB_FICHIERS_MAX) {
-        nb = USB_FICHIERS_MAX; /* même garde défensive que usb_fichiers_definir() */
+    if (chemin == NULL) {
+        return "";
     }
-    usb_fichiers_t *store = store_obtenir();
-    if (store == NULL) {
-        return; /* PSRAM indisponible (deja journalise par store_obtenir()) : no-op */
+    const char *slash = strrchr(chemin, '/');
+    return (slash != NULL) ? slash + 1 : chemin;
+}
+
+void usb_chemin_parent(char *dest, size_t n, const char *chemin)
+{
+    if (dest == NULL || n == 0) {
+        return;
     }
-    VERROU_PRENDRE();
-    store->monte = true;
-    store->nb = nb;
-    store->tronques = tronques;
-    /* scan_en_cours volontairement INTOUCHÉ (voir usb_fichiers.h). */
-    if (nb > 0 && fichiers != NULL) {
-        memcpy(store->fichiers, fichiers, (size_t)nb * sizeof(usb_fichier_t));
+    /* Plancher par défaut : la racine. Tout chemin invalide, hors racine ou
+       déjà à la racine y retombe -- jamais un parent au-dessus de /usb. */
+    size_t longueur_racine = strlen(USB_RACINE);
+    if (chemin == NULL || strncmp(chemin, USB_RACINE, longueur_racine) != 0) {
+        snprintf(dest, n, "%s", USB_RACINE);
+        return;
     }
-    if (nb < USB_FICHIERS_MAX) {
-        memset(&store->fichiers[nb], 0, (size_t)(USB_FICHIERS_MAX - nb) * sizeof(usb_fichier_t));
+    const char *slash = strrchr(chemin, '/');
+    size_t longueur_parent = (slash != NULL) ? (size_t)(slash - chemin) : 0;
+    if (longueur_parent < longueur_racine) {
+        snprintf(dest, n, "%s", USB_RACINE);
+        return;
     }
-    g_generation++;
-    VERROU_RENDRE();
+    if (longueur_parent >= n) {
+        longueur_parent = n - 1;
+    }
+    memcpy(dest, chemin, longueur_parent);
+    dest[longueur_parent] = '\0';
+}
+
+/* Comparateur qsort de usb_listing_trier() -- contrat dans usb_fichiers.h. */
+static int usb_listing_comparer(const void *a, const void *b)
+{
+    const usb_fichier_t *fa = (const usb_fichier_t *)a;
+    const usb_fichier_t *fb = (const usb_fichier_t *)b;
+    if (fa->est_dossier != fb->est_dossier) {
+        return fa->est_dossier ? -1 : 1;
+    }
+    return strcasecmp(usb_chemin_nom(fa->chemin), usb_chemin_nom(fb->chemin));
+}
+
+void usb_listing_trier(usb_fichier_t *entrees, uint8_t nb)
+{
+    if (entrees == NULL || nb < 2) {
+        return;
+    }
+    qsort(entrees, nb, sizeof(*entrees), usb_listing_comparer);
 }
 
 void usb_fichiers_scan_demarre(void)
@@ -147,9 +191,31 @@ void usb_fichiers_lire(usb_fichiers_t *dest)
         memset(dest, 0, sizeof(*dest));
         return;
     }
+    /* Copie sous verrou limitée à l'UTILE (revue du 2026-08-15, L8 : la
+       copie du struct entier -- ~8,8 Ko depuis le passage à 64 entrées --
+       masquait les interruptions trop longtemps) : en-tête + les `nb`
+       entrées réelles. La queue de `dest` est zéro-remplie HORS verrou :
+       le lecteur garde l'invariant "au-delà de nb, tout est à zéro" sans
+       que le store n'ait à le payer en section critique. */
+    uint8_t nb_copie;
     VERROU_PRENDRE();
-    *dest = *store;
+    dest->monte = store->monte;
+    memcpy(dest->chemin_courant, store->chemin_courant, sizeof(dest->chemin_courant));
+    dest->tronques = store->tronques;
+    dest->scan_en_cours = store->scan_en_cours;
+    nb_copie = store->nb;
+    if (nb_copie > USB_FICHIERS_MAX) {
+        nb_copie = USB_FICHIERS_MAX; /* garde défensive */
+    }
+    dest->nb = nb_copie;
+    if (nb_copie > 0) {
+        memcpy(dest->fichiers, store->fichiers, (size_t)nb_copie * sizeof(usb_fichier_t));
+    }
     VERROU_RENDRE();
+    if (nb_copie < USB_FICHIERS_MAX) {
+        memset(&dest->fichiers[nb_copie], 0,
+               (size_t)(USB_FICHIERS_MAX - nb_copie) * sizeof(usb_fichier_t));
+    }
 }
 
 uint32_t usb_fichiers_generation(void)

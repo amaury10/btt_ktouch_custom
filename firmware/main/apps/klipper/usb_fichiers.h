@@ -25,12 +25,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Nombre maximal de fichiers .gcode retenus par le scan -- même borne que
- * KLIPPER_FICHIERS_MAX (etat_klipper.h), pas réutilisée directement : ce
- * store est délibérément indépendant de tout ce qui vient de Moonraker
- * (source, contrat de nommage différents -- des chemins USB, pas des noms
- * connus de Moonraker). Au-delà, `tronques` (voir plus bas) le signale. */
-#define USB_FICHIERS_MAX 32
+/* Nombre maximal d'entrées retenues PAR RÉPERTOIRE (explorateur, spec
+ * 2026-08-14-usb-explorateur-design.md : le store ne porte plus un scan
+ * complet de la clé mais le contenu du répertoire courant -- sous-dossiers
+ * + .gcode). 64 entrées x ~136 o ≈ 9 Ko, en PSRAM (voir usb_fichiers.c).
+ * Au-delà, `tronques` (voir plus bas) le signale. */
+#define USB_FICHIERS_MAX 64
+
+/* Racine du montage USB. Côté ESP : ALIAS de PT_USB_MOUNT_PATH (BSP) -- une
+ * divergence est structurellement impossible (revue du 2026-08-15, L6 :
+ * la version précédente dupliquait la chaîne avec des gardes, dont l'échec
+ * aurait silencieusement désactivé l'USB). Côté host/simulateur, où le BSP
+ * n'existe pas : la valeur en dur, même politique d'#ifdef que journal.h. */
+#ifdef ESP_PLATFORM
+#include "pandatouch_msc.h"
+#define USB_RACINE PT_USB_MOUNT_PATH
+#else
+#define USB_RACINE "/usb"
+#endif
 
 /* Longueur max d'un chemin complet SOUS /usb (ex. "/usb/sous-dossier/
  * piece.gcode"), NUL compris. Plus large que KLIPPER_FICHIER_MAX (64, un nom
@@ -43,34 +55,42 @@
 
 typedef struct {
     char   chemin[USB_FICHIER_CHEMIN_MAX]; /* chemin complet, ex "/usb/piece.gcode" */
-    size_t taille;                         /* octets, depuis pt_usb_dir_entry_t.size */
+    size_t taille;                         /* octets (0 pour un dossier) */
+    bool   est_dossier;                    /* vrai = navigable, faux = .gcode imprimable */
 } usb_fichier_t;
 
 typedef struct {
     bool          monte;                        /* clé USB actuellement montée ? */
+    /* Répertoire dont `fichiers` est le contenu ("" clé absente) -- affiché
+     * par l'écran dans sa rangée de statut, et base des chemins parents
+     * (entrée ".." injectée par l'écran, jamais par ce store). */
+    char          chemin_courant[USB_FICHIER_CHEMIN_MAX];
     usb_fichier_t fichiers[USB_FICHIERS_MAX];
-    uint8_t       nb;                            /* fichiers valides dans fichiers[0..nb-1] */
-    bool          tronques;                      /* vrai si la clé en contenait davantage */
-    /* Vrai entre usb_fichiers_scan_demarre() (callback de montage) et le
-     * usb_fichiers_definir() qui publie le résultat du scan. POURQUOI (fix
-     * "Insert a USB key" mensonger, diagnostic du 2026-08-14) : pendant tout
-     * le scan (45 s observées sur une clé réelle bien remplie), `monte`
-     * reste faux -- le résultat n'est publié qu'à la fin -- et l'écran
-     * affichait "Insert a USB key" clé branchée et montée. Ce drapeau donne
-     * à l'écran l'état intermédiaire honnête ("lecture de la clé..."). */
+    uint8_t       nb;                            /* entrées valides dans fichiers[0..nb-1] */
+    bool          tronques;                      /* vrai si le répertoire en contenait davantage */
+    /* Vrai entre usb_fichiers_scan_demarre() (demande de listage, voir
+     * usb_scan_demander()) et le usb_fichiers_definir() qui publie le
+     * résultat. POURQUOI (héritée du fix "Insert a USB key" mensonger,
+     * diagnostic du 2026-08-14) : sans état intermédiaire, l'écran mentait
+     * pendant la lecture de la clé. Un listage d'UN répertoire est court
+     * (contrairement au scan complet d'alors), mais un gros dossier sur une
+     * clé lente peut prendre 1-2 s : l'état honnête reste requis. */
     bool          scan_en_cours;
 } usb_fichiers_t;
 
-/* Remplace ENTIÈREMENT le contenu du store (copie sous verrou). `fichiers`
- * peut être NULL si `nb` vaut 0 (cas du unmount : usb_fichiers_definir(false,
- * NULL, 0, false)). `nb` est borné défensivement à USB_FICHIERS_MAX ici même
- * si l'appelant a déjà normalement respecté cette borne (même discipline que
- * klipper_fichiers_definir()). Incrémente le compteur de génération interne
- * (voir usb_fichiers_generation() ci-dessous) -- TOUJOURS, même si `monte`
- * et le contenu n'ont pas changé : un appelant qui rappelle cette fonction a
- * une raison de le faire (un nouveau scan a tourné), l'écran doit pouvoir le
- * détecter même si le résultat est identique au précédent. */
-void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb, bool tronques);
+/* Remplace ENTIÈREMENT le contenu du store (copie sous verrou).
+ * `chemin_courant` est le répertoire listé (copié borné ; NULL ou clé
+ * absente => ""). `fichiers` peut être NULL si `nb` vaut 0 (cas du unmount :
+ * usb_fichiers_definir(false, "", NULL, 0, false)). `nb` est borné
+ * défensivement à USB_FICHIERS_MAX ici même si l'appelant a déjà normalement
+ * respecté cette borne (même discipline que klipper_fichiers_definir()).
+ * Incrémente le compteur de génération interne (voir
+ * usb_fichiers_generation() ci-dessous) -- TOUJOURS, même si rien n'a
+ * changé : un appelant qui rappelle cette fonction a une raison de le faire
+ * (un nouveau listage a tourné), l'écran doit pouvoir le détecter. Clôt
+ * aussi `scan_en_cours` (toute publication termine le listage). */
+void usb_fichiers_definir(bool monte, const char *chemin_courant,
+                          const usb_fichier_t *fichiers, uint8_t nb, bool tronques);
 
 /* Lève `scan_en_cours` (et incrémente la génération, pour que l'écran le
  * voie) -- à appeler quand un scan démarre RÉELLEMENT (clé montée, tâche de
@@ -80,14 +100,24 @@ void usb_fichiers_definir(bool monte, const usb_fichier_t *fichiers, uint8_t nb,
  * avec "lecture en cours"). */
 void usb_fichiers_scan_demarre(void);
 
-/* Publication PARTIELLE pendant un scan (fix lenteur perçue du 2026-08-14 :
- * un parcours complet de clé bien remplie prend des dizaines de secondes ;
- * les .gcode déjà trouvés doivent s'afficher au fil de l'eau, pas à la fin).
- * Même copie sous verrou que usb_fichiers_definir() avec monte=true, MAIS
- * `scan_en_cours` reste levé : seul definir() (publication finale, ou
- * unmount) clôt le scan. À n'appeler QUE depuis la tâche de scan, clé
- * montée. */
-void usb_fichiers_publier_partiel(const usb_fichier_t *fichiers, uint8_t nb, bool tronques);
+/* Dernier segment d'un chemin ("/usb/dossier/piece.gcode" -> "piece.gcode" ;
+ * pas de '/' -> le chemin entier ; NULL -> ""). Fonction PURE, exposée pour
+ * l'écran (libellés = nom seul) et les tests host. */
+const char *usb_chemin_nom(const char *chemin);
+
+/* Chemin PARENT de `chemin`, borné, plancher USB_RACINE ("/usb/a/b" ->
+ * "/usb/a" ; "/usb/a" -> "/usb" ; "/usb", NULL, chemin hors racine ou trop
+ * court -> USB_RACINE). Fonction PURE, testée host -- c'est elle que l'écran
+ * met derrière l'entrée ".." (revue du 2026-08-15, L9 : la version inline
+ * n'était exercée qu'au tap réel sur la dalle). `dest`/`n` façon strlcpy :
+ * toujours NUL-terminé si n > 0. */
+void usb_chemin_parent(char *dest, size_t n, const char *chemin);
+
+/* Trie `entrees[0..nb-1]` en place : dossiers d'abord, puis ordre
+ * alphabétique du NOM (dernier segment), insensible à la casse
+ * (strcasecmp) -- l'ordre FAT brut est arbitraire, inutilisable tel quel
+ * pour naviguer. Fonction PURE (qsort), testée host ; NULL/nb<2 = no-op. */
+void usb_listing_trier(usb_fichier_t *entrees, uint8_t nb);
 
 /* Copie le contenu courant du store dans `*dest` (fourni par l'appelant,
  * sous verrou). `dest` NULL = no-op. */

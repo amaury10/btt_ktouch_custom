@@ -44,7 +44,8 @@
 
 /* Une page à la fois, une colonne de boutons pleine largeur -- même taille de
  * page que ecran_fichiers.c (5 boutons de 52 px, voir le calcul complet en
- * tête de ecran_usb.c). USB_FICHIERS_MAX (32) / 5 = 7 pages au pire cas. */
+ * tête de ecran_usb.c). (USB_FICHIERS_MAX (64) + l'entrée "..") / 5 = 13
+ * pages au pire cas. */
 #define ECRAN_USB_PAGE_TAILLE 5
 
 typedef struct {
@@ -69,14 +70,22 @@ typedef struct ecran_usb_ctx_s {
     /* Copie bornée (défensivement NUL-terminée) du store, mémorisée pour les
      * rappels de clic/pagination -- même raison que ctx->fichiers_copie dans
      * ecran_fichiers_ctx_t. `chemins_copie[i]` porte le chemin COMPLET
-     * ("/usb/..."), affiché tel quel comme libellé (pas de nom raccourci --
-     * le chemin sous /usb EST le nom le plus lisible pour cette source). */
-    char     chemins_copie[USB_FICHIERS_MAX][USB_FICHIER_CHEMIN_MAX];
-    size_t   tailles_copie[USB_FICHIERS_MAX];
-    uint8_t  nb_fichiers;
+     * ("/usb/...", requis par l'upload ET la navigation) ; le libellé
+     * affiché est le NOM seul (usb_chemin_nom()). Taille +1 : hors racine,
+     * l'emplacement 0 porte l'entrée ".." (remonter), injectée par CET écran
+     * -- jamais par le store, qui reste un miroir brut du répertoire (voir
+     * la spec 2026-08-14-usb-explorateur-design.md). */
+    char     chemins_copie[USB_FICHIERS_MAX + 1][USB_FICHIER_CHEMIN_MAX];
+    size_t   tailles_copie[USB_FICHIERS_MAX + 1];
+    bool     dossiers_copie[USB_FICHIERS_MAX + 1]; /* vrai = navigable (".." comprise) */
+    bool     a_remontee;  /* vrai = l'emplacement 0 EST l'entrée ".." (posé à
+                             l'injection, seule source de vérité -- jamais
+                             re-dérivé à l'affichage, revue 2026-08-15 L9) */
+    uint8_t  nb_fichiers; /* entrées affichables, ".." comprise */
     bool     tronques;
     bool     monte;
     bool     scan_en_cours; /* copie de usb_fichiers_t.scan_en_cours, voir usb_fichiers.h */
+    char     chemin_courant[USB_FICHIER_CHEMIN_MAX]; /* répertoire affiché ("" clé absente) */
     uint8_t  page; /* 0-indexé */
 
     /* Génération du store USB vue au dernier mettre_a_jour() -- évite de
