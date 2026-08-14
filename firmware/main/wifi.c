@@ -426,6 +426,27 @@ esp_err_t wifi_start(void)
         }
     }
 
+    /* JAMAIS de modem-sleep sur cette dalle (coredump du 2026-08-14, panic
+     * étiqueté) : à chaque réveil de veille (chaque balise, ~300 ms), le
+     * pilote ré-active la PHY radio et phy_track_pll_init() (esp_phy,
+     * phy_common.c:118) refait un esp_timer_create() -- une allocation en
+     * RAM INTERNE sous ESP_ERROR_CHECK. Sur cette machine à faible marge
+     * interne (voir /status.heap_interne), un pic de consommation (démarrage
+     * de l'hôte USB, rafale de reconnexions WS) la fait échouer en
+     * ESP_ERR_NO_MEM -> abort() -> redémarrage : c'était LA cause des
+     * reboots en boucle clé USB branchée. WIFI_PS_NONE supprime le cycle
+     * veille/réveil : cette init ne tourne plus qu'une fois, au démarrage du
+     * WiFi, quand le tas est abondant. La dalle est alimentée par
+     * l'imprimante, la consommation supplémentaire est sans objet, et la
+     * latence réseau y gagne. Posé AVANT esp_wifi_start() : le réglage est
+     * accepté dès l'init et vaut pour toute la vie de la connexion ; échec
+     * journalisé mais non fatal (le défaut PS_MIN_MODEM reste fonctionnel,
+     * juste exposé au défaut ci-dessus). */
+    esp_err_t erreur_ps = esp_wifi_set_ps(WIFI_PS_NONE);
+    if (erreur_ps != ESP_OK) {
+        ESP_LOGW(TAG, "esp_wifi_set_ps(WIFI_PS_NONE) a echoue : %s", esp_err_to_name(erreur_ps));
+    }
+
     /* esp_wifi_start() est asynchrone : il ne fait que poster
      * WIFI_EVENT_STA_START. C'est ce gestionnaire, plus haut, qui appelle
      * esp_wifi_connect() — pas cette fonction. Rendre directement le
