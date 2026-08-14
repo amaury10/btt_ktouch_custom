@@ -13,10 +13,19 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+/* DATA_FORMAT_ELF requis en plus de ENABLE_TO_FLASH (revue du 2026-08-14,
+ * L5) : esp_core_dump_summary_t et esp_core_dump_get_summary() n'existent
+ * que sous les DEUX options (vérifié dans esp_core_dump.h d'IDF 5.5.5) --
+ * un passage au format BIN casserait la compilation avec la garde simple. */
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+#include "esp_core_dump.h"
+#define KTOUCH_COREDUMP_RESUME 1
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
@@ -52,6 +61,30 @@ static const char *TAG = "preuve_de_vie";
  * ne crée le label qui les affiche. */
 static char partition_label_globale[17] = "?";
 static uint32_t compteur_demarrages_global;
+
+/* Nom court de la raison du reset précédent -- diagnostic des reboots en
+ * boucle (épisode clé USB, 2026-08-14) : sans port série, le texte de panique
+ * est invisible (il ne part que sur l'UART, jamais par netlog dont le tampon
+ * RAM meurt avec le redémarrage) ; cette raison-là, elle, SURVIT au reboot et
+ * discrimine à elle seule un défaut d'alimentation (BROWNOUT) d'un crash
+ * logiciel (PANIC, TASK_WDT, INT_WDT). Chaînes statiques : web.c les garde
+ * par pointeur (voir web_set_reset_reason()). */
+static const char *raison_reset_nom(esp_reset_reason_t raison)
+{
+    switch (raison) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT";
+    case ESP_RST_SW:        return "SW";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "INCONNUE";
+    }
+}
 
 /* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,
  * ou avant que build_test_pattern() ne s'exécute) : rafraichir_etat_ecran()
@@ -291,6 +324,55 @@ void app_main(void)
     ESP_LOGI(TAG, "partition d'execution : %s (offset 0x%06" PRIx32 ")",
              partition_courante != NULL ? partition_courante->label : "?",
              partition_courante != NULL ? (uint32_t)partition_courante->address : 0);
+
+    /* Raison du reset précédent : LA ligne qui discrimine un crash logiciel
+     * d'un défaut d'alimentation quand la dalle reboote en boucle (voir
+     * raison_reset_nom() plus haut). Journalisée à CHAQUE boot, même sain
+     * (SW après un /revert, POWERON après une coupure) : une raison attendue
+     * qui manque est aussi un indice. */
+    esp_reset_reason_t raison_reset = esp_reset_reason();
+    const char *raison_reset_texte = raison_reset_nom(raison_reset);
+    ESP_LOGW(TAG, "raison du reset precedent : %s (%d)", raison_reset_texte, (int)raison_reset);
+    web_set_reset_reason(raison_reset_texte);
+
+    /* Empreinte ELF (SHA-256 tronqué) : deux builds peuvent porter la MÊME
+     * version git (constaté : un binaire par slot, tous deux estampillés
+     * "4d22d1e" -- l'un construit juste avant le commit du même nom, l'autre
+     * juste après) ; cette empreinte-ci est unique par binaire, c'est elle
+     * qui dit LEQUEL tourne. Exposée aussi dans /status (web.c). */
+    char empreinte_elf[17];
+    esp_app_get_elf_sha256(empreinte_elf, sizeof(empreinte_elf));
+    ESP_LOGW(TAG, "empreinte ELF : %s", empreinte_elf);
+
+#ifdef KTOUCH_COREDUMP_RESUME
+    /* Un coredump présent en flash = un crash antérieur pas encore écrasé
+     * par un plus récent. Le résumé journalisé ici situe la faute (tâche +
+     * PC + pile d'appels en adresses brutes, à résoudre sur PC avec
+     * xtensa-esp32s3-elf-addr2line contre l'ELF du build fautif -- d'où
+     * l'empreinte ELF juste au-dessus) ; le dump complet se rapatrie par
+     * GET /coredump (web.c). Structure sur la pile d'app_main (~150 octets),
+     * jamais de malloc si tôt dans le boot. */
+    esp_core_dump_summary_t resume_coredump;
+    if (esp_core_dump_get_summary(&resume_coredump) == ESP_OK) {
+        ESP_LOGW(TAG, "coredump present : tache '%s', PC 0x%08" PRIx32 ", %s",
+                 resume_coredump.exc_task, resume_coredump.exc_pc,
+                 resume_coredump.exc_bt_info.corrupted ? "pile corrompue" : "pile saine");
+        char pile_texte[16 * 11 + 1];
+        size_t pos = 0;
+        for (uint32_t i = 0; i < resume_coredump.exc_bt_info.depth &&
+                             i < sizeof(resume_coredump.exc_bt_info.bt) /
+                                 sizeof(resume_coredump.exc_bt_info.bt[0]); i++) {
+            int ecrit = snprintf(pile_texte + pos, sizeof(pile_texte) - pos, " %08" PRIx32,
+                                 resume_coredump.exc_bt_info.bt[i]);
+            if (ecrit <= 0 || (size_t)ecrit >= sizeof(pile_texte) - pos) {
+                break;
+            }
+            pos += (size_t)ecrit;
+        }
+        pile_texte[pos] = '\0';
+        ESP_LOGW(TAG, "coredump pile :%s", pile_texte);
+    }
+#endif
 
     /* Renseignés une fois pour la ligne d'état affichée à l'écran (voir
      * build_test_pattern()/rafraichir_etat_ecran()) : c'est le seul canal de

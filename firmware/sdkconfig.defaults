@@ -104,3 +104,17 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 # firmware/sdkconfig et de regenerer (ou d'editer les deux directement,
 # comme fait ici au moment d'ajouter cette ligne).
 CONFIG_LV_USE_LODEPNG=y
+
+# --- Diagnostic des reboots en boucle (cle USB, 2026-08-14) : coredump vers
+# la partition `coredump` (0xff0000, 64 Kio) DEJA presente dans la table
+# d'origine BTT (voir partitions.csv) -- aucune reprogrammation de la table
+# n'est necessaire. Sans port serie, c'est le SEUL moyen de savoir ou un
+# panic a eu lieu : le texte de panique ne part que sur l'UART, et le journal
+# RAM (netlog) meurt avec le redemarrage. Le resume est journalise au boot
+# suivant (app_main.c) et le dump complet se rapatrie par GET /coredump
+# (web.c). Meme piege que les polices Montserrat ci-dessus : sdkconfig est
+# genere, il a ete edite directement en meme temps que cet ajout.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_CHECK_BOOT=y

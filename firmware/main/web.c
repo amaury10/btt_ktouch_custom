@@ -77,11 +77,16 @@
 #include <string.h>
 
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+#include "esp_core_dump.h"
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -125,6 +130,16 @@ void web_set_boot_count(uint32_t compteur)
     compteur_demarrages = compteur;
 }
 
+/* Chaîne statique fournie par app_main (raison_reset_nom()) -- gardée par
+ * pointeur, jamais copiée, voir le contrat dans web.h. "?" tant qu'app_main
+ * n'a pas appelé le setter (fenêtre courte : web_start() tourne après). */
+static const char *raison_reset = "?";
+
+void web_set_reset_reason(const char *nom)
+{
+    raison_reset = (nom != NULL) ? nom : "?";
+}
+
 static esp_err_t gestion_racine(httpd_req_t *req)
 {
     static const char page[] =
@@ -139,6 +154,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
         "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (panneau : etat + verification a blanc + flash reel)</li>"
         "<li><a href=\"/restore-btt\">/restore-btt</a> — restauration du firmware BTT depuis la sauvegarde</li>"
+        "<li><a href=\"/coredump\">/coredump</a> — dump du dernier crash (404 si aucun)</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     return httpd_resp_send(req, page, HTTPD_RESP_USE_STRLEN);
@@ -172,23 +188,35 @@ static esp_err_t gestion_status(httpd_req_t *req)
        boucle serrée comme /state (voir son commentaire de tête). */
     const char *backup_btt = ota_backup_etat_nom(ota_backup_etat());
 
+    /* Empreinte ELF : la version git seule ne distingue PAS deux builds
+       construits autour du même commit (constaté : deux binaires "4d22d1e",
+       un par slot) -- voir le bloc correspondant d'app_main.c. */
+    char empreinte_elf[17];
+    esp_app_get_elf_sha256(empreinte_elf, sizeof(empreinte_elf));
+
     char reponse[512];
     int longueur = snprintf(reponse, sizeof(reponse),
         "{"
         "\"slot\":\"%s\","
         "\"version\":\"%s\","
+        "\"sha\":\"%s\","
+        "\"reset\":\"%s\","
         "\"ip\":\"%s\","
         "\"uptime_ms\":%" PRId64 ","
         "\"free_heap\":%" PRIu32 ","
+        "\"heap_interne\":%" PRIu32 ","
         "\"tactile\":%s,"
         "\"boot_count\":%" PRIu32 ","
         "\"backup_btt\":\"%s\""
         "}",
         courante != NULL ? courante->label : "?",
         description != NULL ? description->version : "?",
+        empreinte_elf,
+        raison_reset,
         adresse_ip,
         (int64_t)(esp_timer_get_time() / 1000),
         (uint32_t)esp_get_free_heap_size(),
+        (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
         tactile_disponible ? "true" : "false",
         compteur_demarrages,
         backup_btt);
@@ -462,6 +490,72 @@ static esp_err_t gestion_log(httpd_req_t *req)
     httpd_resp_set_type(req, "text/plain; charset=utf-8");
     return httpd_resp_send(req, instantane, longueur);
 }
+
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+/* GET /coredump : rapatrie le dump ELF brut du dernier crash (partition
+ * `coredump`, déjà présente dans la table BTT d'origine -- voir
+ * partitions.csv et le bloc coredump d'app_main.c). Analyse sur PC :
+ * `esp-coredump info_corefile -c coredump.bin -t raw build/ktouch-custom.elf`
+ * avec l'ELF du build dont l'empreinte (/status, champ "sha") correspond.
+ * Un GET est sûr ici (lecture seule, même principe que /log) ; le dump n'est
+ * jamais effacé par cette route, le prochain crash l'écrase de lui-même. */
+static esp_err_t gestion_coredump(httpd_req_t *req)
+{
+    size_t adresse = 0;
+    size_t taille = 0;
+    if (esp_core_dump_image_get(&adresse, &taille) != ESP_OK || taille == 0) {
+        httpd_resp_set_type(req, "text/plain; charset=utf-8");
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_send(req, "aucun coredump en flash\n", HTTPD_RESP_USE_STRLEN);
+    }
+
+    const esp_partition_t *partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_COREDUMP, NULL);
+    if (partition == NULL || adresse < partition->address ||
+        (adresse - partition->address) + taille > partition->size) {
+        /* Image annoncée hors de la partition : ne rien servir plutôt que de
+           lire de la flash arbitraire. */
+        return httpd_resp_send_500(req);
+    }
+
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=\"coredump.bin\"");
+
+    /* Statique, même raison que le tampon de gestion_log() ci-dessus : la
+       pile de la tâche httpd est comptée (voir s_marge_pile_min) ; une seule
+       requête à la fois sur ce serveur mono-tâche, pas de concurrence. */
+    static char morceau[1024];
+    size_t decalage = adresse - partition->address;
+    size_t restant = taille;
+    bool entame = false; /* au moins un chunk parti = les en-têtes 200 sont partis */
+    while (restant > 0) {
+        size_t a_lire = restant < sizeof(morceau) ? restant : sizeof(morceau);
+        esp_err_t lu = esp_partition_read(partition, decalage, morceau, a_lire);
+        if (lu != ESP_OK) {
+            /* JAMAIS silencieux (revue du 2026-08-14, L3) : un dump tronqué
+               fait échouer esp-coredump de façon inintelligible, autant que
+               /log dise pourquoi. Avant le premier chunk, les en-têtes ne
+               sont PAS encore partis (httpd ne les émet qu'au premier
+               send_chunk) : un vrai 500 est encore possible. Après, on ne
+               peut plus que tronquer. */
+            ESP_LOGE(TAG, "coredump : lecture flash echouee a l'offset %u : %s",
+                     (unsigned)decalage, esp_err_to_name(lu));
+            if (!entame) {
+                return httpd_resp_send_500(req);
+            }
+            break;
+        }
+        if (httpd_resp_send_chunk(req, morceau, a_lire) != ESP_OK) {
+            ESP_LOGE(TAG, "coredump : envoi interrompu (%u octets restants)", (unsigned)restant);
+            break;
+        }
+        entame = true;
+        decalage += a_lire;
+        restant -= a_lire;
+    }
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+#endif
 
 static esp_err_t gestion_revert_page(httpd_req_t *req)
 {
@@ -938,6 +1032,11 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_restore_btt = {
         .uri = "/restore-btt", .method = HTTP_POST, .handler = gestion_restore_btt, .user_ctx = NULL,
     };
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    static const httpd_uri_t route_coredump = {
+        .uri = "/coredump", .method = HTTP_GET, .handler = gestion_coredump, .user_ctx = NULL,
+    };
+#endif
 
     enregistrer_route(serveur, &route_racine);
     enregistrer_route(serveur, &route_status);
@@ -951,6 +1050,9 @@ esp_err_t web_start(void)
     enregistrer_route(serveur, &route_ota_post);
     enregistrer_route(serveur, &route_restore_btt_page);
     enregistrer_route(serveur, &route_restore_btt);
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    enregistrer_route(serveur, &route_coredump);
+#endif
 
     ESP_LOGI(TAG, "serveur HTTP demarre");
     return ESP_OK;

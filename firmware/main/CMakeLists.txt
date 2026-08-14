@@ -10,5 +10,5 @@ idf_component_register(
          "ui/navigation.c" "ui/habillage.c" "ui/source_etat_esp.c" "ui/source_reglages_esp.c"
          "ui/widgets/tuile.c" "ui/widgets/progression.c" "ui/widgets/clavier.c" "ui/widgets/confirmation.c" "ui/widgets/selecteur_pas.c" "ui/widgets/selecteur_choix.c" "ui/widgets/rail.c"
     INCLUDE_DIRS "." "core" "apps/klipper" "apps/klipper/ecrans" "ui" "ui/widgets"
-    PRIV_REQUIRES esp_wifi esp_event esp_netif nvs_flash esp_http_server esp_http_client esp_websocket_client json app_update esp_timer esp_partition mbedtls PandaTouch_IDF lvgl
+    PRIV_REQUIRES esp_wifi esp_event esp_netif nvs_flash esp_http_server esp_http_client esp_websocket_client json app_update esp_timer esp_partition mbedtls PandaTouch_IDF lvgl espcoredump
 )
