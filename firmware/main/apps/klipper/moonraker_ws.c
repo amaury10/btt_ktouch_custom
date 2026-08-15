@@ -37,6 +37,7 @@
 
 #include <string.h>
 
+#include "esp_heap_caps.h" /* tampon RX en PSRAM, voir tampon_rx_obtenir() */
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "esp_transport_ws.h"
@@ -53,6 +54,7 @@
 #include "miniature_fetch.h" /* feature "Miniatures gcode", tache B */
 #include "moonraker_boite.h"
 #include "moonraker_rpc.h"
+#include "bed_mesh_store.h" /* bed_mesh_profils_definir -- liste de profils */
 #include "power_devices.h"
 
 static const char *TAG = "moonraker_ws";
@@ -68,8 +70,27 @@ static const char *TAG = "moonraker_ws";
  * trop petit tronquait le JSON -> parse en echec -> macros/etat non appliques
  * (le debordement est detecte et journalise, jamais un crash, mais la donnee
  * reelle etait perdue). Statique (.bss), pas de risque de pile. */
-#define MOONRAKER_WS_TAMPON_OCTETS 16384
-static char   g_tampon_msg[MOONRAKER_WS_TAMPON_OCTETS];
+/* 16 -> 32 Ko ET .bss RAM interne -> PSRAM paresseuse (fix "mesh absent",
+ * round 2, 2026-08-15) : meme a abonnement bed_mesh cible, un instantane
+ * d'abonnement 8 extrudeurs + matrice 25x25, ou une reponse
+ * printer.objects.query portant les profils bed_mesh sauvegardes (matrices
+ * completes, non filtrables cote Moonraker), depasse 16 Ko. Le deplacement
+ * en PSRAM REND 16 Ko de RAM interne (voir la memoire heap_interne du
+ * projet) ; la tache WS n'y accede qu'en memcpy/parse, jamais sous section
+ * critique. Echec d'allocation : messages abandonnes (journalises par
+ * journaliser_debordement), jamais de repli RAM interne. */
+#define MOONRAKER_WS_TAMPON_OCTETS 32768
+static char *g_tampon_msg; /* PSRAM ; NULL tant que non allouee (voir tampon_rx_obtenir) */
+
+static char *tampon_rx_obtenir(void)
+{
+    if (g_tampon_msg == NULL) {
+        g_tampon_msg = (char *)heap_caps_malloc(MOONRAKER_WS_TAMPON_OCTETS, MALLOC_CAP_SPIRAM);
+        /* Un seul appelant (traiter_data, tache WS unique) : pas de course
+           de premiere allocation ici, contrairement aux stores partages. */
+    }
+    return g_tampon_msg;
+}
 static size_t g_tampon_len   = 0;
 static bool   g_tampon_texte = false; /* type de la trame en cours de reassemblage (fixe des le premier fragment) */
 static bool   g_tampon_deborde = false;
@@ -240,6 +261,16 @@ static uint32_t g_id_power = 0;
  * verrou par traiter_data(), juste apres celui de g_macros_a_demander. */
 static bool g_power_a_demander = false;
 
+/* Feature "liste de profils bed_mesh" (2026-08-15) : meme convention que
+ * g_id_power/g_power_a_demander juste au-dessus -- id de la requete
+ * `printer.objects.query {"objects":{"bed_mesh":["profiles"]}}` EN COURS,
+ * (re)demandee au connect ET a chaque notify_klippy_ready (un SAVE_CONFIG
+ * redemarre Klippy : c'est precisement la que la liste change). La reponse
+ * porte les matrices completes des profils (non filtrable plus finement
+ * cote Moonraker) -- d'ou le tampon RX de 32 Ko, voir son commentaire. */
+static uint32_t g_id_profils_bed_mesh = 0;
+static bool     g_profils_bed_mesh_a_demander = false;
+
 /* Réabonnement aux objets imprimante différé -- MÊME mécanisme que
  * g_macros_a_demander/g_power_a_demander (posé SOUS g_verrou par
  * RPC_MSG_KLIPPY_READY, consommé HORS verrou par traiter_data()) : voir
@@ -363,7 +394,7 @@ static void journaliser_debordement(void)
     if (premier || intervalle_ecoule) {
         g_dernier_journal_debordement_us = maintenant;
         JOURNAL_ALERTE(TAG, "message WS au-dela de %u octets ; ignore (occurrences cumulees : %u)",
-                       (unsigned)sizeof(g_tampon_msg) - 1u, (unsigned)g_compteur_debordements);
+                       (unsigned)MOONRAKER_WS_TAMPON_OCTETS - 1u, (unsigned)g_compteur_debordements);
     }
 }
 
@@ -451,6 +482,28 @@ static void envoyer_requete_macros(void)
         }
     } else {
         JOURNAL_ERREUR(TAG, "construction de printer.objects.list impossible");
+    }
+}
+
+/* Feature "liste de profils bed_mesh" (2026-08-15) : COPIE du patron
+ * envoyer_requete_macros() ci-dessus (memes controles d'envoi, jamais sous
+ * g_verrou). Ne demande QUE l'attribut `profiles` de bed_mesh -- une query
+ * ponctuelle, hors abonnement : les matrices que la reponse porte ne
+ * transitent qu'ici, jamais dans le flux continu. */
+static void envoyer_requete_profils_bed_mesh(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "printer.objects.query",
+                               "{\"objects\":{\"bed_mesh\":[\"profiles\"]}}")) {
+        g_id_profils_bed_mesh = id;
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de la query profils bed_mesh echoue (id=%u)", (unsigned)id);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de la query profils bed_mesh impossible");
     }
 }
 
@@ -626,6 +679,9 @@ static void envoyer_identify_et_abonnement(void)
      * meme endroit, meme absence de verrou -- voir le commentaire de
      * envoyer_requete_power() ci-dessus. */
     envoyer_requete_power();
+    /* Feature "liste de profils bed_mesh" : MEME endroit, meme absence de
+     * verrou -- voir le commentaire de envoyer_requete_profils_bed_mesh(). */
+    envoyer_requete_profils_bed_mesh();
 }
 
 /* Feature "Miniatures gcode", tâche B : détecte un `print_stats.filename`
@@ -744,6 +800,15 @@ static void traiter_message_complet(const char *json, size_t longueur)
             if (rpc_lire_fichiers(&f, json, longueur)) {
                 klipper_fichiers_definir(&f);
             }
+        } else if (id == g_id_profils_bed_mesh && g_id_profils_bed_mesh != 0) {
+            /* Feature "liste de profils bed_mesh" : reponse a la query
+             * ponctuelle -- store dedie hors etat_klipper_t (meme
+             * raisonnement que fichiers/power ci-dessous). ~230 o de pile,
+             * politique power_devices_t. */
+            bed_mesh_profils_t profils;
+            if (rpc_lire_profils_bed_mesh(&profils, json, longueur)) {
+                bed_mesh_profils_definir(&profils);
+            }
         } else if (id == g_id_power && g_id_power != 0) {
             /* Feature "Power devices Moonraker", tache B : reponse a
              * machine.device_power.devices -- meme raisonnement que le cas
@@ -856,6 +921,9 @@ static void traiter_message_complet(const char *json, size_t longueur)
          * différé que les deux drapeaux ci-dessus (jamais d'envoi sous
          * g_verrou), voir envoyer_abonnement(). */
         g_abonnement_a_demander = true;
+        /* Liste de profils bed_mesh : un redemarrage Klippy est justement le
+         * moment ou elle change (SAVE_CONFIG) -- meme mecanisme differe. */
+        g_profils_bed_mesh_a_demander = true;
         break;
     case RPC_MSG_KLIPPY_DECONNECTE:
         g_klippy_pret = false;
@@ -991,9 +1059,18 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         return;
     }
 
+    if (tampon_rx_obtenir() == NULL) {
+        /* PSRAM epuisee : message abandonne, compte avec les debordements
+           (meme visibilite /log), retente a la prochaine trame. */
+        g_tampon_deborde = true;
+        journaliser_debordement();
+        boite_noire_rabattre(BOITE_NOIRE_WS_RX);
+        return;
+    }
+
     size_t total_annonce = (size_t)data->payload_len;
-    if (total_annonce >= sizeof(g_tampon_msg) ||
-        g_tampon_len + (size_t)data->data_len >= sizeof(g_tampon_msg)) {
+    if (total_annonce >= MOONRAKER_WS_TAMPON_OCTETS ||
+        g_tampon_len + (size_t)data->data_len >= MOONRAKER_WS_TAMPON_OCTETS) {
         /* Depassement : message ENTIER abandonne, jamais un parse partiel
          * (meme politique que le tampon HTTP de backend_moonraker.c). */
         g_tampon_deborde = true;
@@ -1032,6 +1109,10 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         }
         /* Feature "Power devices Moonraker", tache B : meme mecanisme,
          * drapeau distinct -- voir g_power_a_demander. */
+        if (g_profils_bed_mesh_a_demander) {
+            g_profils_bed_mesh_a_demander = false;
+            envoyer_requete_profils_bed_mesh();
+        }
         if (g_power_a_demander) {
             g_power_a_demander = false;
             envoyer_requete_power();
@@ -1265,6 +1346,8 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_id_macros = 0;
     g_id_fichiers = 0;
     g_id_power = 0;
+    g_id_profils_bed_mesh = 0;
+    g_profils_bed_mesh_a_demander = false;
     g_id_miniature = 0;
     g_macros_a_demander = false;
     g_power_a_demander = false;

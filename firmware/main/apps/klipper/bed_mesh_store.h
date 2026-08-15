@@ -14,7 +14,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define BED_MESH_MAX 15 /* points max par axe retenus (troncature au-delà, signalée) */
+/* 15 -> 25 (retour matériel 2026-08-15) : la CR-10 S5 sonde en 21x21, le
+ * plafond de 15 tronquait sa carte réelle. 25 couvre les configs Klipper
+ * usuelles ; le struct passe à ~2,6 Ko -- toujours PSRAM-only, le contrat
+ * "jamais sur une pile" devient d'autant plus impératif. */
+#define BED_MESH_MAX 25 /* points max par axe retenus (troncature au-delà, signalée) */
 
 typedef struct {
     bool    present;                      /* une matrice valide est chargée */
@@ -36,7 +40,43 @@ void bed_mesh_definir(const bed_mesh_t *mesh);
  * tête). NULL = no-op ; store jamais alloué = zéros. */
 void bed_mesh_lire(bed_mesh_t *dest);
 
-/* Compteur monotone, +1 à chaque bed_mesh_definir() -- même idiome que
- * usb_fichiers_generation() (redessin sur changement seulement, et somme
- * des générations externes de l'habillage dans app_main). */
+/* Compteur monotone, +1 à chaque bed_mesh_definir() ET à chaque
+ * bed_mesh_profils_definir() -- même idiome que usb_fichiers_generation()
+ * (redessin sur changement seulement, et somme des générations externes de
+ * l'habillage dans app_main). Un seul compteur pour la carte ET la liste de
+ * profils : l'écran Bed Mesh consomme les deux, un compteur par source ne
+ * lui ferait rien redessiner de plus. */
 uint32_t bed_mesh_generation(void);
+
+/* ------------------------------------------------------------------------
+ * Liste des profils sauvegardés (feature "liste de profils", 2026-08-15)
+ * ------------------------------------------------------------------------
+ * Les NOMS seuls -- jamais les matrices : l'objet `profiles` de Moonraker
+ * porte chaque profil avec sa matrice complète, c'est précisément ce qu'on
+ * a exclu de l'abonnement (voir PARAMS dans moonraker_rpc.c). Rempli par la
+ * tâche WS depuis une requête ponctuelle printer.objects.query, lu par
+ * l'écran Bed Mesh. ~230 octets : une copie de pile ponctuelle est
+ * acceptable (même politique que power_devices_t). */
+#define BED_MESH_PROFILS_MAX    8
+#define BED_MESH_PROFIL_NOM_MAX 24 /* même taille que bed_mesh_t.profil */
+
+typedef struct {
+    uint8_t nb;                                                /* <= BED_MESH_PROFILS_MAX */
+    bool    tronques;                                          /* la source en portait plus */
+    char    noms[BED_MESH_PROFILS_MAX][BED_MESH_PROFIL_NOM_MAX];
+} bed_mesh_profils_t;
+
+/* Remplace la liste (copie sous verrou, +1 génération -- le MÊME compteur
+ * que bed_mesh_definir(), voir bed_mesh_generation()). NULL = no-op. */
+void bed_mesh_profils_definir(const bed_mesh_profils_t *profils);
+
+/* Copie la liste dans `dest` (~230 o : la pile est acceptable ici,
+ * contrairement à bed_mesh_lire()). NULL = no-op ; jamais définie = zéros. */
+void bed_mesh_profils_lire(bed_mesh_profils_t *dest);
+
+/* Position machine [x, y] du point [ligne][colonne] de la matrice retenue :
+ * interpolation linéaire entre mesh_min et mesh_max (la grille de sondage
+ * Klipper est régulière). Axe à un seul point : la borne min. Rend false
+ * (sans toucher x/y) si mesh est NULL, absent, ou l'indice hors [0..nb). */
+bool bed_mesh_position_point(const bed_mesh_t *mesh, uint8_t ligne, uint8_t colonne,
+                             float *x, float *y);

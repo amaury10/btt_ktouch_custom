@@ -76,14 +76,15 @@ static void section_parse_partiel_et_invalide(void)
 
 static void section_parse_troncature(void)
 {
-    /* Matrice 20 colonnes x 2 lignes : colonnes tronquées à BED_MESH_MAX,
-     * drapeau levé. */
+    /* Matrice 30 colonnes x 2 lignes : colonnes tronquées à BED_MESH_MAX
+     * (25 depuis le retour matériel 21x21 du 2026-08-15 -- 20 colonnes ne
+     * tronquent PLUS), drapeau levé. */
     char json[1024];
     size_t pos = 0;
     pos += (size_t)snprintf(json + pos, sizeof(json) - pos, "{\"probed_matrix\":[");
     for (int ligne = 0; ligne < 2; ligne++) {
         pos += (size_t)snprintf(json + pos, sizeof(json) - pos, "%s[", ligne ? "," : "");
-        for (int colonne = 0; colonne < 20; colonne++) {
+        for (int colonne = 0; colonne < 30; colonne++) {
             pos += (size_t)snprintf(json + pos, sizeof(json) - pos, "%s0.%02d",
                                     colonne ? "," : "", colonne);
         }
@@ -131,6 +132,77 @@ static void section_store(void)
     bed_mesh_lire(NULL);
 }
 
+static void section_position_point(void)
+{
+    bed_mesh_t mesh;
+    memset(&mesh, 0, sizeof(mesh));
+    mesh.present = true;
+    mesh.nb_x = 21;
+    mesh.nb_y = 21;
+    mesh.mesh_min_x = 10.0f;
+    mesh.mesh_min_y = 20.0f;
+    mesh.mesh_max_x = 410.0f;
+    mesh.mesh_max_y = 420.0f;
+
+    float x = -1.0f, y = -1.0f;
+    /* Coins : bornes exactes. */
+    VERIFIER(bed_mesh_position_point(&mesh, 0, 0, &x, &y));
+    VERIFIER(x > 9.9f && x < 10.1f);
+    VERIFIER(y > 19.9f && y < 20.1f);
+    VERIFIER(bed_mesh_position_point(&mesh, 20, 20, &x, &y));
+    VERIFIER(x > 409.9f && x < 410.1f);
+    VERIFIER(y > 419.9f && y < 420.1f);
+    /* Milieu : interpolation lineaire (colonne 10 sur 0..20 = 210.0). */
+    VERIFIER(bed_mesh_position_point(&mesh, 10, 10, &x, &y));
+    VERIFIER(x > 209.9f && x < 210.1f);
+    VERIFIER(y > 219.9f && y < 220.1f);
+    /* Axe a un point : la borne min. */
+    mesh.nb_x = 1;
+    VERIFIER(bed_mesh_position_point(&mesh, 5, 0, &x, &y));
+    VERIFIER(x > 9.9f && x < 10.1f);
+    /* Refus : indice hors bornes, mesh absent, NULL -- x/y intacts. */
+    x = -99.0f;
+    VERIFIER(!bed_mesh_position_point(&mesh, 5, 1, &x, &y));
+    VERIFIER(!bed_mesh_position_point(&mesh, 21, 0, &x, &y));
+    mesh.present = false;
+    VERIFIER(!bed_mesh_position_point(&mesh, 0, 0, &x, &y));
+    VERIFIER(!bed_mesh_position_point(NULL, 0, 0, &x, &y));
+    VERIFIER(x < -98.0f);
+}
+
+static void section_profils_store(void)
+{
+    bed_mesh_profils_t profils;
+    memset(&profils, 0, sizeof(profils));
+    profils.nb = 2;
+    strcpy(profils.noms[0], "default");
+    strcpy(profils.noms[1], "textured_pei");
+
+    uint32_t generation_avant = bed_mesh_generation();
+    bed_mesh_profils_definir(&profils);
+    VERIFIER(bed_mesh_generation() == generation_avant + 1); /* MEME compteur que la carte */
+
+    bed_mesh_profils_t lus;
+    memset(&lus, 0xFF, sizeof(lus));
+    bed_mesh_profils_lire(&lus);
+    VERIFIER(lus.nb == 2);
+    VERIFIER(!lus.tronques);
+    VERIFIER_TEXTE(lus.noms[0], "default");
+    VERIFIER_TEXTE(lus.noms[1], "textured_pei");
+
+    /* Garde defensive : nb au-dela du plafond est ramene au plafond. */
+    profils.nb = BED_MESH_PROFILS_MAX + 3;
+    bed_mesh_profils_definir(&profils);
+    bed_mesh_profils_lire(&lus);
+    VERIFIER(lus.nb == BED_MESH_PROFILS_MAX);
+
+    /* NULL : jamais de crash, pas de generation fantome. */
+    generation_avant = bed_mesh_generation();
+    bed_mesh_profils_definir(NULL);
+    VERIFIER(bed_mesh_generation() == generation_avant);
+    bed_mesh_profils_lire(NULL);
+}
+
 void suite_bed_mesh(void)
 {
     printf("suite : bed mesh (store + parseur du sous-objet Moonraker)\n");
@@ -138,4 +210,6 @@ void suite_bed_mesh(void)
     section_parse_partiel_et_invalide();
     section_parse_troncature();
     section_store();
+    section_position_point();
+    section_profils_store();
 }

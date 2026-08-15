@@ -636,3 +636,28 @@ bool klipper_gcode_input_shaper_freq(char *sortie, size_t taille, char axe, floa
     int ecrit = snprintf(sortie, taille, "SET_INPUT_SHAPER SHAPER_FREQ_%c=%.1f", axe, (double)freq);
     return ecrit > 0 && (size_t)ecrit < taille;
 }
+
+bool klipper_gcode_bed_mesh_profil_load(char *sortie, size_t taille, const char *profil)
+{
+    if (sortie == NULL || taille == 0 || profil == NULL || profil[0] == '\0') {
+        return false;
+    }
+    size_t longueur = strlen(profil);
+    if (longueur >= 24) { /* BED_MESH_PROFIL_NOM_MAX, sans dependre du header store */
+        return false;
+    }
+    /* Barriere anti-injection (voir klipper_gcode_consigne_temp) + tiret :
+       Klipper accepte des noms plus permissifs, mais tout ce qui sort de
+       [A-Za-z0-9_-] exigerait des quotes que la ligne gcode ne sait pas
+       transporter surement -- refuse. */
+    for (size_t i = 0; i < longueur; i++) {
+        char c = profil[i];
+        bool valide = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!valide) {
+            return false;
+        }
+    }
+    int ecrit = snprintf(sortie, taille, "BED_MESH_PROFILE LOAD=%s", profil);
+    return ecrit > 0 && (size_t)ecrit < taille;
+}

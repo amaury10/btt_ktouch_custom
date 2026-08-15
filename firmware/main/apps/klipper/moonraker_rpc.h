@@ -37,6 +37,7 @@
 
 #include "etat_klipper.h"
 #include "klipper_fichiers.h"
+#include "bed_mesh_store.h" /* bed_mesh_profils_t -- rpc_lire_profils_bed_mesh */
 #include "power_devices.h"
 
 /* Construit une requête JSON-RPC 2.0 : `{"jsonrpc":"2.0","method":"...",
@@ -394,6 +395,16 @@ size_t miniature_construire_chemin(char *dest, size_t n, const char *gcode_chemi
  * déposer le résultat dans le store partagé est à la charge de
  * l'appelant (moonraker_ws.c), comme rpc_lire_fichiers/klipper_fichiers. */
 bool rpc_lire_power_devices(power_devices_t *dest, const char *json, size_t longueur);
+
+/* Reponse a `printer.objects.query {"objects":{"bed_mesh":["profiles"]}}`
+ * (feature "liste de profils", 2026-08-15) : extrait les NOMS des profils
+ * sauvegardes -- les cles de result.status.bed_mesh.profiles -- dans `dest`
+ * (instantane complet, remplace tout). Les matrices que chaque profil porte
+ * sont ignorees : seule la cle compte. Au-dela de BED_MESH_PROFILS_MAX ou
+ * nom trop long pour BED_MESH_PROFIL_NOM_MAX : tronque + drapeau, meme
+ * politique que rpc_lire_macros. Rend false (dest intact) si l'enveloppe
+ * n'a pas cette forme. */
+bool rpc_lire_profils_bed_mesh(bed_mesh_profils_t *dest, const char *json, size_t longueur);
 
 /* Extrait la liste des prises CHANGÉES depuis une notification
  * `notify_power_changed` : `params[0]` est lui-même un TABLEAU d'objets

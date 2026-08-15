@@ -112,3 +112,56 @@ uint32_t bed_mesh_generation(void)
     VERROU_RENDRE();
     return generation;
 }
+
+/* Liste des profils : ~230 octets, une instance statique suffit (pas la
+ * peine du détour PSRAM paresseux réservé aux gros blocs -- même ordre de
+ * grandeur que les statiques de moonraker_boite). Même verrou et MÊME
+ * compteur de génération que la carte, voir bed_mesh_store.h. */
+static bed_mesh_profils_t g_profils;
+
+void bed_mesh_profils_definir(const bed_mesh_profils_t *profils)
+{
+    if (profils == NULL) {
+        return;
+    }
+    VERROU_PRENDRE();
+    g_profils = *profils;
+    if (g_profils.nb > BED_MESH_PROFILS_MAX) {
+        g_profils.nb = BED_MESH_PROFILS_MAX; /* garde défensive */
+    }
+    for (uint8_t i = 0; i < BED_MESH_PROFILS_MAX; i++) {
+        g_profils.noms[i][BED_MESH_PROFIL_NOM_MAX - 1] = '\0';
+    }
+    g_generation++;
+    VERROU_RENDRE();
+}
+
+void bed_mesh_profils_lire(bed_mesh_profils_t *dest)
+{
+    if (dest == NULL) {
+        return;
+    }
+    VERROU_PRENDRE();
+    *dest = g_profils;
+    VERROU_RENDRE();
+}
+
+bool bed_mesh_position_point(const bed_mesh_t *mesh, uint8_t ligne, uint8_t colonne,
+                             float *x, float *y)
+{
+    if (mesh == NULL || !mesh->present || x == NULL || y == NULL ||
+        ligne >= mesh->nb_y || colonne >= mesh->nb_x) {
+        return false;
+    }
+    /* Grille de sondage régulière : colonne (X) et ligne (Y) interpolées
+       indépendamment. nb == 1 : un seul point posé sur la borne min. */
+    *x = mesh->mesh_min_x;
+    if (mesh->nb_x > 1) {
+        *x += (float)colonne * (mesh->mesh_max_x - mesh->mesh_min_x) / (float)(mesh->nb_x - 1);
+    }
+    *y = mesh->mesh_min_y;
+    if (mesh->nb_y > 1) {
+        *y += (float)ligne * (mesh->mesh_max_y - mesh->mesh_min_y) / (float)(mesh->nb_y - 1);
+    }
+    return true;
+}

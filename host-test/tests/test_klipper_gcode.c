@@ -32,6 +32,20 @@ static void section_input_shaper(void)
     VERIFIER_TEXTE(sortie, "temoin");
     VERIFIER(klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'Y', 10.0f));
     VERIFIER(klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'Y', 150.0f));
+
+    /* BED_MESH_PROFILE LOAD (liste de profils, 2026-08-15). */
+    VERIFIER(klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie), "default"));
+    VERIFIER_TEXTE(sortie, "BED_MESH_PROFILE LOAD=default");
+    VERIFIER(klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie), "pei-05_lisse"));
+    VERIFIER_TEXTE(sortie, "BED_MESH_PROFILE LOAD=pei-05_lisse");
+    strcpy(sortie, "temoin");
+    VERIFIER(!klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie), ""));
+    VERIFIER(!klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie), NULL));
+    VERIFIER(!klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie), "nom avec espace"));
+    VERIFIER(!klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie), "x\nM112"));
+    VERIFIER(!klipper_gcode_bed_mesh_profil_load(sortie, sizeof(sortie),
+                                                 "nom_beaucoup_trop_long_pour_24"));
+    VERIFIER_TEXTE(sortie, "temoin");
 }
 
 void suite_klipper_gcode(void)

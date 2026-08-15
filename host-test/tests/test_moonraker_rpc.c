@@ -1548,6 +1548,49 @@ static void section_methode_commande(void)
     VERIFIER(rpc_methode_commande(BACKEND_ACTION_PAUSE, court, sizeof(court)) == false);
 }
 
+/* --- profils bed_mesh (liste de profils, 2026-08-15) --------------------- */
+
+static void section_profils_bed_mesh(void)
+{
+    /* Enveloppe nominale d'une reponse printer.objects.query : les matrices
+       que chaque profil porte sont ignorees, seules les CLES comptent. */
+    const char *json =
+        "{\"jsonrpc\":\"2.0\",\"result\":{\"eventtime\":123.4,\"status\":{\"bed_mesh\":"
+        "{\"profiles\":{\"default\":{\"points\":[[0.1,0.2]],\"mesh_params\":{}},"
+        "\"textured\":{\"points\":[[0.0]]}}}}},\"id\":7}";
+    bed_mesh_profils_t profils;
+    memset(&profils, 0xFF, sizeof(profils));
+    VERIFIER(rpc_lire_profils_bed_mesh(&profils, json, strlen(json)));
+    VERIFIER(profils.nb == 2);
+    VERIFIER(!profils.tronques);
+    VERIFIER_TEXTE(profils.noms[0], "default");
+    VERIFIER_TEXTE(profils.noms[1], "textured");
+
+    /* Zero profil sauvegarde : objet vide, liste vide, pas un echec. */
+    const char *vide =
+        "{\"jsonrpc\":\"2.0\",\"result\":{\"status\":{\"bed_mesh\":{\"profiles\":{}}}},\"id\":8}";
+    VERIFIER(rpc_lire_profils_bed_mesh(&profils, vide, strlen(vide)));
+    VERIFIER(profils.nb == 0);
+
+    /* Nom trop long pour BED_MESH_PROFIL_NOM_MAX : ecarte + drapeau, les
+       autres survivent. */
+    const char *long_nom =
+        "{\"result\":{\"status\":{\"bed_mesh\":{\"profiles\":{"
+        "\"nom_vraiment_beaucoup_trop_long_pour_le_store\":{},\"ok\":{}}}}},\"id\":9}";
+    VERIFIER(rpc_lire_profils_bed_mesh(&profils, long_nom, strlen(long_nom)));
+    VERIFIER(profils.nb == 1);
+    VERIFIER(profils.tronques);
+    VERIFIER_TEXTE(profils.noms[0], "ok");
+
+    /* Enveloppe sans profiles : false, dest INTACT. */
+    profils.nb = 42;
+    const char *sans = "{\"result\":{\"status\":{\"bed_mesh\":{}}},\"id\":10}";
+    VERIFIER(!rpc_lire_profils_bed_mesh(&profils, sans, strlen(sans)));
+    VERIFIER(profils.nb == 42);
+    VERIFIER(!rpc_lire_profils_bed_mesh(&profils, NULL, 4));
+    VERIFIER(!rpc_lire_profils_bed_mesh(NULL, sans, strlen(sans)));
+}
+
 void suite_moonraker_rpc(void)
 {
     printf("suite : protocole moonraker (JSON-RPC / WebSocket)\n");
@@ -1570,4 +1613,5 @@ void suite_moonraker_rpc(void)
     section_lire_gcode_response();
     section_lire_methode();
     section_methode_commande();
+    section_profils_bed_mesh();
 }

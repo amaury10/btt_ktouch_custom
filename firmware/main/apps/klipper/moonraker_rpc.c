@@ -1202,6 +1202,58 @@ static void traiter_candidat_power_device(power_devices_t *p, const cJSON *item)
     p->nb++;
 }
 
+bool rpc_lire_profils_bed_mesh(bed_mesh_profils_t *dest, const char *json, size_t longueur)
+{
+    if (dest == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL) {
+        return false;
+    }
+
+    /* Enveloppe nominale d'une reponse printer.objects.query :
+     * result.status.bed_mesh.profiles (objet dont les CLES sont les noms). */
+    const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    const cJSON *statut = cJSON_GetObjectItemCaseSensitive(resultat, "status");
+    const cJSON *bed_mesh = cJSON_GetObjectItemCaseSensitive(statut, "bed_mesh");
+    const cJSON *profils = cJSON_GetObjectItemCaseSensitive(bed_mesh, "profiles");
+    if (!cJSON_IsObject(profils)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Instantane COMPLET : locale a zero, ecrite en bloc -- meme discipline
+     * que rpc_lire_power_devices ci-dessous. ~230 octets de pile, acceptable
+     * (voir bed_mesh_store.h). */
+    bed_mesh_profils_t local;
+    memset(&local, 0, sizeof(local));
+    const cJSON *profil = NULL;
+    cJSON_ArrayForEach(profil, profils) {
+        const char *nom = profil->string;
+        if (nom == NULL || nom[0] == '\0') {
+            continue; /* cle anonyme : jamais vu chez Moonraker, ignore */
+        }
+        if (local.nb >= BED_MESH_PROFILS_MAX) {
+            local.tronques = true;
+            break;
+        }
+        if (strlen(nom) >= BED_MESH_PROFIL_NOM_MAX) {
+            /* Nom inaffichable ET inutilisable (le gcode LOAD le refuserait
+               aussi) : signale, jamais silencieux. */
+            local.tronques = true;
+            continue;
+        }
+        copier_texte_utf8_borne(nom, local.noms[local.nb], BED_MESH_PROFIL_NOM_MAX);
+        local.nb++;
+    }
+
+    *dest = local;
+    cJSON_Delete(racine);
+    return true;
+}
+
 bool rpc_lire_power_devices(power_devices_t *dest, const char *json, size_t longueur)
 {
     if (dest == NULL || json == NULL || longueur == 0) {

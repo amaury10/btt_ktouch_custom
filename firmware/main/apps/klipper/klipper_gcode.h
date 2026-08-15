@@ -60,6 +60,14 @@ bool klipper_gcode_arret_urgence(char *sortie, size_t taille);
  * non vide, <= 16 octets. `freq` : bornes 10.0-150.0 Hz VALIDEES ICI (le
  * point host-testable, l'ecran ne fait que notifier sur faux). */
 bool klipper_gcode_input_shaper_type(char *sortie, size_t taille, char axe, const char *type);
+
+/* BED_MESH_PROFILE LOAD=<profil> (feature "liste de profils", 2026-08-15).
+ * Meme contrat "faux SANS toucher sortie". `profil` : non vide,
+ * < BED_MESH_PROFIL_NOM_MAX (24) octets, uniquement alphanumerique +
+ * underscore + tiret -- la meme barriere anti-injection que les autres
+ * constructeurs (un nom a espaces ou quotes ne peut pas etre passe surement
+ * dans une ligne gcode Klipper : refuse plutot que devine). */
+bool klipper_gcode_bed_mesh_profil_load(char *sortie, size_t taille, const char *profil);
 bool klipper_gcode_input_shaper_freq(char *sortie, size_t taille, char axe, float freq);
 
 /* Extrusion ou rétraction d'une distance donnée, en mode relatif, avec bordure
