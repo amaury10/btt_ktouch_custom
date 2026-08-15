@@ -308,6 +308,122 @@ void suite_ecran_temperatures(void)
     VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->cellules[2].valeur, 0), lv_color_hex(0x6B7280)));
     VERIFIER(!lv_color_eq(lv_obj_get_style_text_color(ctx->cellules[2].nom, 0), lv_color_hex(0x6B7280)));
 
+
+    /* ======================================================================
+     * Cibles cochees + consigne commune (spec
+     * 2026-08-15-temperatures-multi-cibles-design.md). L'etat est ici
+     * 2 extrudeurs + plateau, cellules[0]=T0, [1]=T1, [2]=Bed. ============ */
+    ECRAN_TEMPERATURES.mettre_a_jour(&etat, false, ctx);
+
+    /* --- (j) taper une case coche SANS ouvrir le clavier ; retaper decoche.
+     * C'est la garantie que le geste existant (tap sur la tuile) n'est pas
+     * capture par la case. --------------------------------------------- */
+    VERIFIER(!ctx->cellule_infos[0].selectionne);
+    lv_obj_send_event(ctx->cellules[0].case_cocher, LV_EVENT_CLICKED, NULL);
+    VERIFIER(ctx->cellule_infos[0].selectionne);
+    VERIFIER(dernier_enfant_calque_superieur() == NULL); /* aucun clavier ouvert */
+    lv_obj_send_event(ctx->cellules[0].case_cocher, LV_EVENT_CLICKED, NULL);
+    VERIFIER(!ctx->cellule_infos[0].selectionne);
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+
+    /* --- (k) prereglage avec T0 et T1 coches, plateau NON coche : DEUX
+     * gcodes, sur extruder et extruder1, AUCUN sur heater_bed. ---------- */
+    lv_obj_send_event(ctx->cellules[0].case_cocher, LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(ctx->cellules[1].case_cocher, LV_EVENT_CLICKED, NULL);
+    VERIFIER(ctx->cellule_infos[0].selectionne && ctx->cellule_infos[1].selectionne);
+    VERIFIER(!ctx->cellule_infos[2].selectionne);
+
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_TEMPERATURES_PRESET_PLA], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 2);
+    VERIFIER(source_etat_sim_avant_derniere_commande(action, sizeof(action), arguments,
+                                                     sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210") != NULL);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments,
+                                               sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder1 TARGET=210") != NULL);
+    source_etat_sim_cycle();
+
+    /* --- (l) TPU (nouveau prereglage) sur le SEUL plateau coche : un seul
+     * gcode, et c'est la cible PLATEAU (50) qui part, pas la buse. ------- */
+    lv_obj_send_event(ctx->cellules[0].case_cocher, LV_EVENT_CLICKED, NULL); /* decoche T0 */
+    lv_obj_send_event(ctx->cellules[1].case_cocher, LV_EVENT_CLICKED, NULL); /* decoche T1 */
+    lv_obj_send_event(ctx->cellules[2].case_cocher, LV_EVENT_CLICKED, NULL); /* coche Bed */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_TEMPERATURES_PRESET_TPU], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments,
+                                               sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=50") != NULL);
+    source_etat_sim_cycle();
+
+    /* --- (m) "Manuel" avec le plateau coche : le clavier s'ouvre, la valeur
+     * saisie part vers CETTE cible. ------------------------------------- */
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_TEMPERATURES_PRESET_MANUEL], LV_EVENT_CLICKED, NULL);
+    racine_clavier = dernier_enfant_calque_superieur();
+    kb = enfant_de_classe(racine_clavier, &lv_keyboard_class);
+    ta = enfant_de_classe(racine_clavier, &lv_textarea_class);
+    VERIFIER(kb != NULL);
+    VERIFIER(ta != NULL);
+    lv_textarea_set_text(ta, "70");
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(kb, LV_EVENT_READY, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments,
+                                               sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=70") != NULL);
+    lv_timer_handler();
+    source_etat_sim_cycle();
+
+    /* --- (n) "Manuel" SANS selection : aucun clavier, AUCUN gcode -- un
+     * nombre unique n'a pas de sens pour une paire buse/lit (spec). ----- */
+    lv_obj_send_event(ctx->cellules[2].case_cocher, LV_EVENT_CLICKED, NULL); /* decoche Bed */
+    VERIFIER(!ctx->cellule_infos[2].selectionne);
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_TEMPERATURES_PRESET_MANUEL], LV_EVENT_CLICKED, NULL);
+    VERIFIER(dernier_enfant_calque_superieur() == NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant);
+    lv_timer_handler();
+
+    /* --- (o) prereglage SANS selection : repli historique buse active +
+     * plateau (deux gcodes), pour ne pas laisser un bouton mort. -------- */
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(ctx->preset_boutons[ECRAN_TEMPERATURES_PRESET_PLA], LV_EVENT_CLICKED, NULL);
+    VERIFIER(source_etat_sim_file_taille() == avant + 2);
+    VERIFIER(source_etat_sim_avant_derniere_commande(action, sizeof(action), arguments,
+                                                     sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=extruder TARGET=210") != NULL);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments,
+                                               sizeof(arguments)) == true);
+    VERIFIER(strstr(arguments, "SET_HEATER_TEMPERATURE HEATER=heater_bed TARGET=60") != NULL);
+    source_etat_sim_cycle();
+
+    /* --- (p) la coche se PERIME quand l'emplacement change de chauffeur :
+     * T1 coche, puis Klipper redemarre avec 1 seule tete -> l'emplacement 1
+     * devient le plateau, la coche ne doit PAS lui etre transmise (sinon on
+     * chaufferait silencieusement le mauvais chauffeur). ---------------- */
+    lv_obj_send_event(ctx->cellules[1].case_cocher, LV_EVENT_CLICKED, NULL);
+    VERIFIER(ctx->cellule_infos[1].selectionne);
+
+    etat_klipper_t etat_1tete;
+    memset(&etat_1tete, 0, sizeof(etat_1tete));
+    etat_1tete.nb_extrudeurs = 1;
+    etat_1tete.extrudeurs[0].presente = true;
+    etat_1tete.extrudeurs[0].actuelle = 205.0f;
+    etat_1tete.extrudeurs[0].consigne = 200.0f;
+    etat_1tete.plateau.presente = true;
+    etat_1tete.plateau.actuelle = 55.0f;
+    etat_1tete.plateau.consigne = 55.0f;
+    etat_1tete.outil_actif = 0;
+    ECRAN_TEMPERATURES.mettre_a_jour(&etat_1tete, false, ctx);
+    VERIFIER_TEXTE(lv_label_get_text(ctx->cellules[1].nom), "Bed"); /* l'emplacement a change */
+    VERIFIER(!ctx->cellule_infos[1].selectionne);                   /* la coche est tombee */
+
+    /* Et l'emplacement 2, devenu vide, perd identite ET coche. */
+    VERIFIER(lv_obj_has_flag(ctx->cellules[2].racine, LV_OBJ_FLAG_HIDDEN));
+    VERIFIER(!ctx->cellule_infos[2].identite_connue);
+    VERIFIER(!ctx->cellule_infos[2].selectionne);
+
     lv_obj_delete(parent);
     free(brut);
 }

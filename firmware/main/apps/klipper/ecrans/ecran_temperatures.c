@@ -128,6 +128,16 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + PRESETS_Y + PRESETS_HAUTEUR <= BANDEAU_Y_EC
 #define PREREGLAGE_PETG_PLATEAU   80u
 #define PREREGLAGE_ABS_BUSE      250u
 #define PREREGLAGE_ABS_PLATEAU  100u
+/* TPU ajoute le 2026-08-15 (demande utilisateur) : 230/50 -- un flexible se
+ * chauffe comme un PETG doux, plateau tiede. */
+#define PREREGLAGE_TPU_BUSE      230u
+#define PREREGLAGE_TPU_PLATEAU    50u
+
+/* Case a cocher : 28 px, une cible tactile utilisable meme au palier
+ * COMPACT (tuile de 44 px de haut, il reste 8 px de marge en haut et en
+ * bas). Posee HORS du flux flex de la tuile, voir cellule_creer(). */
+#define CASE_TAILLE 28
+#define CASE_MARGE   6
 
 /* Tampon suffisant pour {"script":"<gcode>"} : KLIPPER_GCODE_MAX (160,
  * klipper_gcode.h) plus la marge du wrapper JSON (guillemets, cle "script",
@@ -223,6 +233,50 @@ static void cellule_creer(ecran_temperatures_cellule_t *c, lv_obj_t *parent)
     lv_obj_set_style_text_font(c->consigne, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_color(c->consigne, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
     lv_label_set_text(c->consigne, "");
+
+    /* Case a cocher (spec 2026-08-15) : IGNORE_LAYOUT la sort du flux flex
+       ci-dessus -- les trois libelles gardent exactement le placement qu'ils
+       avaient avant cette feature, aux trois paliers. Cliquable en propre :
+       LVGL ne fait pas remonter le clic vers `racine` sans EVENT_BUBBLE,
+       donc taper la case coche sans ouvrir le clavier. */
+    c->case_cocher = lv_obj_create(c->racine);
+    lv_obj_remove_style_all(c->case_cocher);
+    lv_obj_add_flag(c->case_cocher, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_add_flag(c->case_cocher, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(c->case_cocher, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(c->case_cocher, CASE_TAILLE, CASE_TAILLE);
+    lv_obj_align(c->case_cocher, LV_ALIGN_TOP_LEFT, CASE_MARGE, CASE_MARGE);
+    lv_obj_set_style_radius(c->case_cocher, 6, 0);
+    lv_obj_set_style_border_width(c->case_cocher, 2, 0);
+    lv_obj_set_style_border_color(c->case_cocher, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
+    lv_obj_set_style_bg_opa(c->case_cocher, LV_OPA_TRANSP, 0);
+
+    c->case_marque = lv_label_create(c->case_cocher);
+    lv_obj_set_style_text_font(c->case_marque, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(c->case_marque, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
+    lv_label_set_text(c->case_marque, LV_SYMBOL_OK);
+    lv_obj_center(c->case_marque);
+    lv_obj_add_flag(c->case_marque, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* Peint la case selon `selectionne` -- appelee au clic ET a chaque
+ * mettre_a_jour() (systematique, jamais incremental : meme politique que la
+ * bordure d'outil actif). */
+static void case_peindre(const ecran_temperatures_cellule_t *c, bool selectionne)
+{
+    if (c->case_cocher == NULL) {
+        return;
+    }
+    lv_obj_set_style_bg_opa(c->case_cocher, selectionne ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(c->case_cocher, lv_color_hex(COULEUR_ACTIF), 0);
+    lv_obj_set_style_border_color(c->case_cocher,
+                                  lv_color_hex(selectionne ? COULEUR_ACTIF
+                                                           : COULEUR_TEXTE_SECONDAIRE), 0);
+    if (selectionne) {
+        lv_obj_clear_flag(c->case_marque, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(c->case_marque, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 /* Construit {"script":"<script>"} via cJSON (jamais un snprintf a la main) :
@@ -278,6 +332,7 @@ static void envoyer_gcode(const char *script)
 
 const char ECRAN_TEMPERATURES_TITRE_BUSE[]    = "Nozzle target";
 const char ECRAN_TEMPERATURES_TITRE_PLATEAU[] = "Bed target";
+const char ECRAN_TEMPERATURES_TITRE_MANUEL[] = "Target for selected (C)";
 
 /* Nom du chauffeur Klipper d'un extrudeur : indice 0 => "extruder", indice N
  * (1..7) => "extruderN" -- PAS "extruder0" pour l'indice 0. Rend faux SANS
@@ -386,11 +441,90 @@ static void cellule_bouton_cb(lv_event_t *e)
     clavier_ouvrir(titre, valeur_initiale, CLAVIER_NUMERIQUE, cellule_clavier_rappel, info);
 }
 
-/* Prereglage : DEUX gcodes, toujours -- la buse ACTIVE (ctx->outil_actif_connu,
- * relu AU MOMENT DU CLIC) puis le plateau, decision figee ("chaque preset
- * envoie DEUX gcodes ... jamais un seul combine"). "Off" (cibles 0/0) n'est
- * pas un cas special : c'est le MEME chemin, juste avec des cibles nulles --
- * klipper_gcode_consigne_temp() accepte 0 comme cible valide ("eteindre"). */
+/* Nom de chauffeur d'une cible cochee -> gcode de consigne. Facteur commun
+ * des prereglages et de "Manuel" : eux ne different que par la VALEUR
+ * envoyee, jamais par la facon de l'envoyer. */
+static void envoyer_consigne_cible(const ecran_temperatures_cellule_info_t *info, uint16_t cible)
+{
+    char chauffeur[16];
+    if (info->est_plateau) {
+        snprintf(chauffeur, sizeof(chauffeur), "heater_bed");
+    } else if (!nom_chauffeur_extrudeur(info->indice_extrudeur, chauffeur, sizeof(chauffeur))) {
+        return;
+    }
+    char script[KLIPPER_GCODE_MAX];
+    if (klipper_gcode_consigne_temp(script, sizeof(script), chauffeur, cible)) {
+        envoyer_gcode(script);
+    }
+}
+
+/* Nombre de cibles cochees PARMI LES CELLULES VISIBLES -- une cellule
+ * masquee (au-dela de `total` du dernier mettre_a_jour()) ne porte aucun
+ * chauffeur reel, sa coche eventuelle ne doit jamais compter. */
+static uint8_t nb_cibles_cochees(const ecran_temperatures_ctx_t *ctx)
+{
+    uint8_t n = 0;
+    for (size_t i = 0; i < ECRAN_TEMPERATURES_CELLULES_MAX; i++) {
+        if (ctx->cellule_infos[i].identite_connue && ctx->cellule_infos[i].selectionne) {
+            n++;
+        }
+    }
+    return n;
+}
+
+/* Tap sur une case : bascule la coche, repeint, et RIEN d'autre -- surtout
+ * pas d'ouverture de clavier (c'est le role du tap sur le reste de la
+ * tuile). */
+static void case_cocher_cb(lv_event_t *e)
+{
+    ecran_temperatures_cellule_info_t *info = lv_event_get_user_data(e);
+    if (info == NULL || info->ctx == NULL || !info->identite_connue) {
+        return;
+    }
+    size_t indice = (size_t)(info - info->ctx->cellule_infos);
+    if (indice >= ECRAN_TEMPERATURES_CELLULES_MAX) {
+        return; /* impossible par construction ; garde defensive */
+    }
+    info->selectionne = !info->selectionne;
+    case_peindre(&info->ctx->cellules[indice], info->selectionne);
+}
+
+/* Rappel du clavier de "Manuel" : LA MEME valeur pour toutes les cibles
+ * cochees, buses et plateau confondus (spec, section 3). */
+static void manuel_clavier_rappel(const char *valeur, void *contexte)
+{
+    ecran_temperatures_ctx_t *ctx = contexte;
+    if (ctx == NULL || valeur == NULL || valeur[0] == '\0') {
+        return;
+    }
+    long saisie = strtol(valeur, NULL, 10);
+    if (saisie < ECRAN_TEMPERATURES_TEMP_MIN || saisie > ECRAN_TEMPERATURES_TEMP_MAX) {
+        habillage_notifier("Temperature out of range (0-350 C)", true);
+        return;
+    }
+    for (size_t i = 0; i < ECRAN_TEMPERATURES_CELLULES_MAX; i++) {
+        const ecran_temperatures_cellule_info_t *info = &ctx->cellule_infos[i];
+        if (info->identite_connue && info->selectionne) {
+            envoyer_consigne_cible(info, (uint16_t)saisie);
+        }
+    }
+}
+
+/* Prereglage : UN gcode par chauffeur vise, jamais un combine (regle figee
+ * de longue date). Ce que "vise" veut dire a change le 2026-08-15 (spec
+ * 2026-08-15-temperatures-multi-cibles-design.md) :
+ *
+ *   - des cibles COCHEES : la cible buse part vers CHAQUE extrudeur coche,
+ *     la cible plateau vers le plateau s'il est coche ;
+ *   - AUCUNE cible cochee : repli sur le comportement historique, buse
+ *     ACTIVE (ctx->outil_actif_connu, relu AU MOMENT DU CLIC) + plateau.
+ *     C'est le bon defaut a une tete, et ca evite un bouton mort pour qui
+ *     n'a jamais rien coche.
+ *
+ * "Off" (cibles 0/0) n'est pas un cas special : meme chemin, cibles nulles
+ * -- klipper_gcode_consigne_temp() accepte 0 ("eteindre"). "Manuel" en est
+ * un, lui : il n'a pas de cibles propres et EXIGE une selection (voir plus
+ * bas). */
 static void preset_bouton_cb(lv_event_t *e)
 {
     ecran_temperatures_preset_info_t *info = lv_event_get_user_data(e);
@@ -398,9 +532,37 @@ static void preset_bouton_cb(lv_event_t *e)
     if (info == NULL || info->ctx == NULL || cible == NULL) {
         return;
     }
+    ecran_temperatures_ctx_t *ctx = info->ctx;
+    uint8_t cochees = nb_cibles_cochees(ctx);
 
+    if (info->est_manuel) {
+        /* Pas de repli ici, contrairement aux prereglages : un nombre unique
+           n'a pas de sens pour une paire buse/lit -- appliquer 210 au
+           plateau "par defaut" serait une supposition dangereuse. */
+        if (cochees == 0) {
+            habillage_notifier("Select one or more targets first", false);
+            return;
+        }
+        clavier_ouvrir(ECRAN_TEMPERATURES_TITRE_MANUEL, "", CLAVIER_NUMERIQUE,
+                       manuel_clavier_rappel, ctx);
+        return;
+    }
+
+    if (cochees > 0) {
+        for (size_t i = 0; i < ECRAN_TEMPERATURES_CELLULES_MAX; i++) {
+            const ecran_temperatures_cellule_info_t *cellule = &ctx->cellule_infos[i];
+            if (!cellule->identite_connue || !cellule->selectionne) {
+                continue;
+            }
+            envoyer_consigne_cible(cellule,
+                                   cellule->est_plateau ? info->cible_plateau : info->cible_buse);
+        }
+        return;
+    }
+
+    /* Repli historique : buse active + plateau. */
     char chauffeur_buse[16];
-    if (nom_chauffeur_extrudeur(info->ctx->outil_actif_connu, chauffeur_buse, sizeof(chauffeur_buse))) {
+    if (nom_chauffeur_extrudeur(ctx->outil_actif_connu, chauffeur_buse, sizeof(chauffeur_buse))) {
         char script_buse[KLIPPER_GCODE_MAX];
         if (klipper_gcode_consigne_temp(script_buse, sizeof(script_buse), chauffeur_buse, info->cible_buse)) {
             envoyer_gcode(script_buse);
@@ -438,6 +600,11 @@ static void ecran_temperatures_construire(lv_obj_t *parent, void *contexte)
          * masquee jusque-la. */
         ctx->cellule_infos[i].ctx = ctx;
         lv_obj_add_event_cb(ctx->cellules[i].racine, cellule_bouton_cb, LV_EVENT_CLICKED, &ctx->cellule_infos[i]);
+        /* Case a cocher : son PROPRE rappel, sur le meme user_data (l'info
+           porte l'identite du chauffeur ET la coche). Le clic n'atteint
+           jamais `racine` -- pas de EVENT_BUBBLE sur cet enfant. */
+        lv_obj_add_event_cb(ctx->cellules[i].case_cocher, case_cocher_cb, LV_EVENT_CLICKED,
+                            &ctx->cellule_infos[i]);
     }
 
     /* --- rangee de prereglages, quatre boutons a largeur egale -- meme
@@ -457,11 +624,16 @@ static void ecran_temperatures_construire(lv_obj_t *parent, void *contexte)
         const char *libelle;
         uint16_t    cible_buse;
         uint16_t    cible_plateau;
+        bool        est_manuel;
     } PRESET_DEFS[ECRAN_TEMPERATURES_PRESET_NB] = {
-        [ECRAN_TEMPERATURES_PRESET_PLA]  = { "PLA 210/60",  PREREGLAGE_PLA_BUSE,  PREREGLAGE_PLA_PLATEAU },
-        [ECRAN_TEMPERATURES_PRESET_PETG] = { "PETG 240/80", PREREGLAGE_PETG_BUSE, PREREGLAGE_PETG_PLATEAU },
-        [ECRAN_TEMPERATURES_PRESET_ABS]  = { "ABS 250/100", PREREGLAGE_ABS_BUSE,  PREREGLAGE_ABS_PLATEAU },
-        [ECRAN_TEMPERATURES_PRESET_OFF]  = { "Off",         0,                    0 },
+        [ECRAN_TEMPERATURES_PRESET_PLA]  = { "PLA 210/60",  PREREGLAGE_PLA_BUSE,  PREREGLAGE_PLA_PLATEAU,  false },
+        [ECRAN_TEMPERATURES_PRESET_PETG] = { "PETG 240/80", PREREGLAGE_PETG_BUSE, PREREGLAGE_PETG_PLATEAU, false },
+        [ECRAN_TEMPERATURES_PRESET_ABS]  = { "ABS 250/100", PREREGLAGE_ABS_BUSE,  PREREGLAGE_ABS_PLATEAU,  false },
+        [ECRAN_TEMPERATURES_PRESET_TPU]  = { "TPU 230/50",  PREREGLAGE_TPU_BUSE,  PREREGLAGE_TPU_PLATEAU,  false },
+        [ECRAN_TEMPERATURES_PRESET_OFF]  = { "Off",         0,                    0,                       false },
+        /* Manuel : cibles a zero et JAMAIS lues (est_manuel court-circuite
+           tout, voir preset_bouton_cb()) -- la valeur vient du clavier. */
+        [ECRAN_TEMPERATURES_PRESET_MANUEL] = { "Manual",    0,                    0,                       true },
     };
     for (uint8_t i = 0; i < ECRAN_TEMPERATURES_PRESET_NB; i++) {
         lv_obj_t *bouton = lv_button_create(ctx->zone_preregalges);
@@ -488,8 +660,28 @@ static void ecran_temperatures_construire(lv_obj_t *parent, void *contexte)
         ctx->preset_infos[i].ctx = ctx;
         ctx->preset_infos[i].cible_buse = PRESET_DEFS[i].cible_buse;
         ctx->preset_infos[i].cible_plateau = PRESET_DEFS[i].cible_plateau;
+        ctx->preset_infos[i].est_manuel = PRESET_DEFS[i].est_manuel;
         lv_obj_add_event_cb(bouton, preset_bouton_cb, LV_EVENT_CLICKED, &ctx->preset_infos[i]);
     }
+}
+
+/* Pose l'identite du chauffeur porte par un emplacement, et EFFACE la coche
+ * si cette identite a change. Un redemarrage Klipper avec un nombre de tetes
+ * different reaffecte les emplacements dans l'ordre : sans cet effacement,
+ * une coche heritee viserait un autre chauffeur que celui coche par
+ * l'utilisateur -- chauffer silencieusement la mauvaise buse est exactement
+ * ce qu'il ne faut pas (spec 2026-08-15). */
+static void info_identite_poser(ecran_temperatures_cellule_info_t *info, bool est_plateau,
+                                uint8_t indice)
+{
+    bool changee = !info->identite_connue || info->identite_est_plateau != est_plateau ||
+                   (!est_plateau && info->identite_indice != indice);
+    if (changee) {
+        info->selectionne = false;
+    }
+    info->identite_connue = true;
+    info->identite_est_plateau = est_plateau;
+    info->identite_indice = indice;
 }
 
 static void ecran_temperatures_mettre_a_jour(const void *etat, bool donnees_perimees, void *contexte)
@@ -550,6 +742,8 @@ static void ecran_temperatures_mettre_a_jour(const void *etat, bool donnees_peri
         ctx->cellule_infos[total].est_plateau = false;
         ctx->cellule_infos[total].indice_extrudeur = i;
         ctx->cellule_infos[total].consigne_courante = consigne_u16(e->extrudeurs[i].consigne);
+        info_identite_poser(&ctx->cellule_infos[total], false, i);
+        case_peindre(c, ctx->cellule_infos[total].selectionne);
         total++;
     }
 
@@ -571,6 +765,8 @@ static void ecran_temperatures_mettre_a_jour(const void *etat, bool donnees_peri
         ctx->cellule_infos[total].est_plateau = true;
         ctx->cellule_infos[total].indice_extrudeur = 0; /* non utilise, est_plateau=true */
         ctx->cellule_infos[total].consigne_courante = consigne_u16(e->plateau.consigne);
+        info_identite_poser(&ctx->cellule_infos[total], true, 0);
+        case_peindre(c, ctx->cellule_infos[total].selectionne);
         total++;
     }
 
@@ -581,6 +777,14 @@ static void ecran_temperatures_mettre_a_jour(const void *etat, bool donnees_peri
         ecran_temperatures_cellule_t *c = &ctx->cellules[i];
         if (i >= total) {
             lv_obj_add_flag(c->racine, LV_OBJ_FLAG_HIDDEN);
+            /* Emplacement sans chauffeur : il perd son identite ET sa coche.
+               Sans cela, une cible cochee puis disparue (Klipper redemarre
+               avec moins de tetes) resterait comptee par
+               nb_cibles_cochees() et un prereglage croirait avoir une
+               selection alors que rien n'est visible. */
+            ctx->cellule_infos[i].identite_connue = false;
+            ctx->cellule_infos[i].selectionne = false;
+            case_peindre(c, false);
             continue;
         }
         lv_obj_clear_flag(c->racine, LV_OBJ_FLAG_HIDDEN);

@@ -48,6 +48,16 @@ typedef struct {
     lv_obj_t *nom;
     lv_obj_t *valeur;
     lv_obj_t *consigne;
+    /* Case a cocher (spec 2026-08-15-temperatures-multi-cibles-design.md) :
+       enfant de `racine` mais HORS de son flux flex
+       (LV_OBJ_FLAG_IGNORE_LAYOUT), posee en haut a gauche -- la mise en page
+       des trois libelles ci-dessus est inchangee aux trois paliers. Elle a
+       son PROPRE rappel de clic : LVGL ne fait pas remonter le clic d'un
+       enfant cliquable vers le parent sans EVENT_BUBBLE, donc taper la case
+       coche, taper ailleurs dans la tuile ouvre le clavier -- le geste
+       existant est preserve. */
+    lv_obj_t *case_cocher;
+    lv_obj_t *case_marque; /* le LV_SYMBOL_OK, masque quand la case est decochee */
 } ecran_temperatures_cellule_t;
 
 /* user_data du rappel de clic d'UNE cellule de température -- même forme
@@ -71,6 +81,25 @@ typedef struct {
      * que le dernier rendu a montré à l'utilisateur, pas un état backend qui
      * a pu changer entre-temps. */
     uint16_t consigne_courante;
+
+    /* Cible cochee ? (spec 2026-08-15) -- les prereglages et "Manuel"
+       n'agissent que sur les cibles cochees. Vit ICI, a cote de l'identite
+       du chauffeur, et pas dans un tableau parallele de plus : c'est la
+       meme donnee, elle doit se perimer avec elle (voir `identite_connue`
+       juste en dessous). */
+    bool selectionne;
+
+    /* Identite (est_plateau/indice_extrudeur) REELLEMENT posee au dernier
+       mettre_a_jour(), et drapeau disant qu'il y en a une. Sert a detecter
+       qu'un emplacement CHANGE de chauffeur -- ce qui arrive quand Klipper
+       redemarre avec un nombre de tetes different, les emplacements etant
+       reaffectes dans l'ordre. Une coche heritee viserait alors un autre
+       chauffeur que celui coche par l'utilisateur : chauffer silencieusement
+       la mauvaise buse est precisement ce qu'il ne faut pas, donc la
+       selection est EFFACEE des que l'identite change. */
+    bool    identite_connue;
+    bool    identite_est_plateau;
+    uint8_t identite_indice;
 } ecran_temperatures_cellule_info_t;
 
 /* Titres du clavier numérique de température, copie FIXE exportée -- même
@@ -78,6 +107,8 @@ typedef struct {
  * (ecran_temperatures.c) doit toujours ouvrir EXACTEMENT le même clavier. */
 extern const char ECRAN_TEMPERATURES_TITRE_BUSE[];
 extern const char ECRAN_TEMPERATURES_TITRE_PLATEAU[];
+/* Clavier de "Manuel" : une seule consigne pour toutes les cibles cochees. */
+extern const char ECRAN_TEMPERATURES_TITRE_MANUEL[];
 
 /* Bornes de saisie du clavier numérique de température -- nommées pour que
  * cellule_clavier_rappel() (le rappel) et un futur test ne puissent jamais
@@ -85,13 +116,18 @@ extern const char ECRAN_TEMPERATURES_TITRE_PLATEAU[];
 #define ECRAN_TEMPERATURES_TEMP_MIN 0
 #define ECRAN_TEMPERATURES_TEMP_MAX 350
 
-/* Préréglages (brief : "PLA 210/60, PETG 240/80, ABS 250/100, Off") --
- * index FIXE dans `preset_boutons`/`preset_infos`. */
-#define ECRAN_TEMPERATURES_PRESET_PLA  0
-#define ECRAN_TEMPERATURES_PRESET_PETG 1
-#define ECRAN_TEMPERATURES_PRESET_ABS  2
-#define ECRAN_TEMPERATURES_PRESET_OFF  3
-#define ECRAN_TEMPERATURES_PRESET_NB   4
+/* Préréglages -- index FIXE dans `preset_boutons`/`preset_infos`.
+ * TPU et MANUEL ajoutes le 2026-08-15 (spec
+ * 2026-08-15-temperatures-multi-cibles-design.md). MANUEL n'a pas de cibles
+ * propres : il ouvre le clavier numerique et applique LA MEME valeur a
+ * toutes les cibles cochees (voir preset_bouton_cb() dans le .c). */
+#define ECRAN_TEMPERATURES_PRESET_PLA    0
+#define ECRAN_TEMPERATURES_PRESET_PETG   1
+#define ECRAN_TEMPERATURES_PRESET_ABS    2
+#define ECRAN_TEMPERATURES_PRESET_TPU    3
+#define ECRAN_TEMPERATURES_PRESET_OFF    4
+#define ECRAN_TEMPERATURES_PRESET_MANUEL 5
+#define ECRAN_TEMPERATURES_PRESET_NB     6
 
 /* user_data d'un rappel de clic de préréglage : le contexte de l'écran
  * (pour lire l'outil actif AU MOMENT DU CLIC) et les deux cibles (°C) que CE
@@ -101,6 +137,12 @@ typedef struct {
     struct ecran_temperatures_ctx_s *ctx;
     uint16_t cible_buse;
     uint16_t cible_plateau;
+    /* MANUEL : pas de cibles figees, on demande la valeur au clavier puis on
+       l'applique a TOUTES les cibles cochees (buses et plateau confondus).
+       Sans selection, "Manuel" ne fait RIEN et le dit -- un nombre unique
+       n'a pas de sens pour une paire buse/lit, contrairement a un
+       prereglage (voir la spec, section 3). */
+    bool     est_manuel;
 } ecran_temperatures_preset_info_t;
 
 /* Une par extrudeur possible plus le plateau (voir KLIPPER_EXTRUDEURS_MAX
