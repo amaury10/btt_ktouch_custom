@@ -37,7 +37,13 @@
 #define ECRAN_ACTIONS_CASE_MACROS  4
 #define ECRAN_ACTIONS_CASE_DISABLE 5
 #define ECRAN_ACTIONS_CASE_CONSOLE 6
-#define ECRAN_ACTIONS_NB           7
+/* Huitième case (demande utilisateur du 2026-08-15, après un estop réel) :
+ * FIRMWARE_RESTART depuis l'écran -- après un arrêt d'urgence, Klipper reste
+ * en shutdown tant qu'on ne le relance pas, et exiger un navigateur pour ça
+ * annule l'intérêt d'une dalle de contrôle. Avec confirmation (contrairement
+ * à Disable Motors) : en pleine impression, ce gcode la tue. */
+#define ECRAN_ACTIONS_CASE_RESTART 7
+#define ECRAN_ACTIONS_NB           8
 
 typedef struct ecran_actions_ctx_s {
     lv_obj_t *zone_grille;

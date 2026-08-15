@@ -236,6 +236,13 @@ static uint32_t g_id_power = 0;
  * verrou par traiter_data(), juste apres celui de g_macros_a_demander. */
 static bool g_power_a_demander = false;
 
+/* Réabonnement aux objets imprimante différé -- MÊME mécanisme que
+ * g_macros_a_demander/g_power_a_demander (posé SOUS g_verrou par
+ * RPC_MSG_KLIPPY_READY, consommé HORS verrou par traiter_data()) : voir
+ * envoyer_abonnement() pour le POURQUOI (fix "écran figé sur printing"
+ * après FIRMWARE_RESTART, 2026-08-15). */
+static bool g_abonnement_a_demander = false;
+
 /* Drapeau "une requete macros doit partir des que g_verrou sera relache" --
  * voir son unique lecteur/ecrivain sous verrou (traiter_message_complet(),
  * cas RPC_MSG_KLIPPY_READY) et son unique consommateur HORS verrou
@@ -549,6 +556,35 @@ static void envoyer_requete_miniature(const char *fichier)
  * Appelée depuis la tâche WS elle-même (le gestionnaire d'événement) :
  * g_id_abonnement/g_id_macros n'ont donc besoin d'aucun verrou (voir leurs
  * commentaires de déclaration). */
+/* (Ré)abonnement aux objets imprimante -- factorisé (fix "écran figé sur
+ * printing" du 2026-08-15) : appelé au connect (envoyer_identify_et_
+ * abonnement() ci-dessous) ET à chaque notify_klippy_ready via
+ * g_abonnement_a_demander. POURQUOI le second point d'entrée : un
+ * FIRMWARE_RESTART (après un estop, typiquement) redémarre Klippy SANS
+ * couper le WS -- l'ancien abonnement est lié à l'instance morte, plus
+ * aucun notify_status_update n'arrive, et l'état publié reste figé sur la
+ * dernière valeur d'avant le redémarrage ("printing" éternel constaté sur
+ * machine réelle, imprimante pourtant idle). Se réabonner rafraîchit AUSSI
+ * tout l'état d'un coup : la réponse d'abonnement est fusionnée comme
+ * instantané complet (voir id == g_id_abonnement dans
+ * traiter_message_complet()). JAMAIS sous g_verrou (prochain_id() le prend
+ * en interne), même contrat que envoyer_requete_macros(). */
+static void envoyer_abonnement(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id_abonnement = prochain_id();
+    if (rpc_construire_abonnement(tampon, sizeof(tampon), id_abonnement)) {
+        g_id_abonnement = id_abonnement;
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de l'abonnement echoue (id=%u)", (unsigned)id_abonnement);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de l'abonnement impossible");
+    }
+}
+
 static void envoyer_identify_et_abonnement(void)
 {
     char tampon[MOONRAKER_WS_REQUETE_OCTETS];
@@ -575,17 +611,7 @@ static void envoyer_identify_et_abonnement(void)
         JOURNAL_ERREUR(TAG, "construction de server.connection.identify impossible");
     }
 
-    uint32_t id_abonnement = prochain_id();
-    if (rpc_construire_abonnement(tampon, sizeof(tampon), id_abonnement)) {
-        g_id_abonnement = id_abonnement;
-        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
-                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
-        if (envoye < 0) {
-            JOURNAL_ALERTE(TAG, "envoi WS de l'abonnement echoue (id=%u)", (unsigned)id_abonnement);
-        }
-    } else {
-        JOURNAL_ERREUR(TAG, "construction de l'abonnement impossible");
-    }
+    envoyer_abonnement();
 
     envoyer_requete_macros();
     /* Tache 2, jalon "browser de fichiers" : JUSTE APRES les macros, meme
@@ -819,6 +845,13 @@ static void traiter_message_complet(const char *json, size_t longueur)
          * directement ICI, meme raison exacte que pour les macros
          * (auto-interblocage sur g_verrou). */
         g_power_a_demander = true;
+        /* Fix "écran figé sur printing" (2026-08-15) : l'abonnement aux
+         * objets imprimante est lié à l'instance Klippy qui vient de
+         * mourir -- sans réabonnement, plus AUCUN notify_status_update
+         * n'arrive et l'état reste figé pour toujours. Même mécanisme
+         * différé que les deux drapeaux ci-dessus (jamais d'envoi sous
+         * g_verrou), voir envoyer_abonnement(). */
+        g_abonnement_a_demander = true;
         break;
     case RPC_MSG_KLIPPY_DECONNECTE:
         g_klippy_pret = false;
@@ -981,6 +1014,13 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         if (g_macros_a_demander) {
             g_macros_a_demander = false;
             envoyer_requete_macros();
+        }
+        /* Fix "écran figé sur printing" : réabonnement après un
+         * redémarrage de Klippy, même mécanisme -- voir
+         * g_abonnement_a_demander et envoyer_abonnement(). */
+        if (g_abonnement_a_demander) {
+            g_abonnement_a_demander = false;
+            envoyer_abonnement();
         }
         /* Feature "Power devices Moonraker", tache B : meme mecanisme,
          * drapeau distinct -- voir g_power_a_demander. */

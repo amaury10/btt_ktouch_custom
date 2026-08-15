@@ -25,6 +25,7 @@
 #include "lvgl.h"
 
 #include "backend.h"
+#include "confirmation.h" /* case Restart Klipper (2026-08-15) : tap -> confirmation -> gcode */
 #include "ecran_actions.h"
 #include "habillage.h"
 #include "navigation.h"
@@ -49,6 +50,9 @@ static const struct {
     [ECRAN_ACTIONS_CASE_MACROS]  = { "Macros",      "macros" },
     [ECRAN_ACTIONS_CASE_DISABLE] = { "Disable Motors", NULL }, /* pas une navigation */
     [ECRAN_ACTIONS_CASE_CONSOLE] = { "Console",     "console" },
+    /* Huitieme case (2026-08-15) : FIRMWARE_RESTART derriere confirmation --
+     * pas une navigation non plus, voir ecran_actions.h. */
+    [ECRAN_ACTIONS_CASE_RESTART] = { "Restart Klipper", NULL },
 };
 
 void suite_ecran_actions(void)
@@ -104,8 +108,8 @@ void suite_ecran_actions(void)
     VERIFIER(lv_obj_get_child_count(zone_grille) == ECRAN_ACTIONS_NB);
 
     for (int i = 0; i < ECRAN_ACTIONS_NB; i++) {
-        if (i == ECRAN_ACTIONS_CASE_DISABLE) {
-            continue; /* pas une navigation -- verifie separement plus bas */
+        if (i == ECRAN_ACTIONS_CASE_DISABLE || i == ECRAN_ACTIONS_CASE_RESTART) {
+            continue; /* pas des navigations -- verifiees separement plus bas */
         }
 
         lv_obj_t *bouton = lv_obj_get_child(zone_grille, i);
@@ -137,6 +141,46 @@ void suite_ecran_actions(void)
     VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
     VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
     VERIFIER(strstr(arguments, "\"script\":\"M84\"") != NULL);
+    source_etat_sim_cycle();
+
+    VERIFIER(navigation_profondeur() == 1);
+    VERIFIER_TEXTE(navigation_id_courant(), "actions");
+
+    /* ---------------------------------------------------------------------
+     * Partie 4 : "Restart Klipper" (2026-08-15) -- tap -> confirmation
+     * OUVERTE (rien n'est envoye), confirmer -> FIRMWARE_RESTART part, pile
+     * de navigation inchangee. Meme idiome msgbox que le groupe 4 de
+     * test_ecran_fichiers.c (rappel de confirmation.c SYNCHRONE). --------- */
+    lv_obj_t *bouton_restart = lv_obj_get_child(zone_grille, ECRAN_ACTIONS_CASE_RESTART);
+    VERIFIER(bouton_restart != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_obj_get_child(bouton_restart, 0)), "Restart Klipper");
+
+    VERIFIER(!confirmation_est_ouverte());
+    avant = source_etat_sim_file_taille();
+    lv_obj_send_event(bouton_restart, LV_EVENT_CLICKED, NULL);
+    VERIFIER(confirmation_est_ouverte());
+    VERIFIER(source_etat_sim_file_taille() == avant); /* rien envoye avant confirmation */
+
+    lv_obj_t *calque = lv_layer_top();
+    lv_obj_t *fond = lv_obj_get_child(calque, lv_obj_get_child_count(calque) - 1);
+    VERIFIER(fond != NULL);
+    lv_obj_t *mbox = lv_obj_get_child(fond, 0);
+    VERIFIER(mbox != NULL);
+    VERIFIER_TEXTE(lv_label_get_text(lv_msgbox_get_title(mbox)), "Restart Klipper?");
+    lv_obj_t *pied = lv_msgbox_get_footer(mbox);
+    VERIFIER(pied != NULL);
+    lv_obj_t *bouton_confirmer = lv_obj_get_child(pied, 1);
+    VERIFIER(bouton_confirmer != NULL);
+
+    lv_obj_send_event(bouton_confirmer, LV_EVENT_CLICKED, NULL);
+    VERIFIER(!confirmation_est_ouverte());
+    VERIFIER(source_etat_sim_file_taille() == avant + 1);
+    VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments, sizeof(arguments)) == true);
+    VERIFIER_TEXTE(action, BACKEND_ACTION_GCODE);
+    VERIFIER(strstr(arguments, "\"script\":\"FIRMWARE_RESTART\"") != NULL);
+    lv_timer_handler();      /* acheve la fermeture asynchrone du dialogue -- meme
+                                raison que le groupe 4 de test_ecran_fichiers.c
+                                (la suite console exige un calque superieur vide) */
     source_etat_sim_cycle();
 
     VERIFIER(navigation_profondeur() == 1);

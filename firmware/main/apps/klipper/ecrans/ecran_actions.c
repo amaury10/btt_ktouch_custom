@@ -23,6 +23,8 @@
  * (aucune ressource au-dela du contexte -- voir ecran.h). */
 #include "ecran_actions.h"
 
+#include "confirmation.h" /* case Restart Klipper -- confirmation avant FIRMWARE_RESTART */
+
 #include <string.h>
 
 #include "cJSON.h"
@@ -189,6 +191,27 @@ static void actions_cb_disable_motors(lv_event_t *e)
     }
 }
 
+/* Huitieme case ("Restart Klipper", voir ecran_actions.h) : FIRMWARE_RESTART
+ * derriere une CONFIRMATION -- contrairement a Disable Motors, ce gcode tue
+ * une impression en cours ; Moonraker l'accepte meme Klipper en shutdown
+ * (c'est precisement son cas d'usage : relancer apres un estop). Envoi PUR,
+ * meme discipline d'echec silencieux que le reste de ce fichier. */
+static void actions_restart_confirme(bool confirme, void *contexte)
+{
+    (void)contexte;
+    if (!confirme) {
+        return;
+    }
+    envoyer_gcode("FIRMWARE_RESTART");
+}
+
+static void actions_cb_restart_klipper(lv_event_t *e)
+{
+    (void)e;
+    confirmation_ouvrir("Restart Klipper?", "FIRMWARE_RESTART", "Restart",
+                        /*destructif=*/true, actions_restart_confirme, NULL);
+}
+
 typedef void (*actions_cb_t)(lv_event_t *e);
 
 static const struct {
@@ -199,6 +222,7 @@ static const struct {
     BOUTONS_NAV(DEFINIR_ENTREE)
 #undef DEFINIR_ENTREE
     [ECRAN_ACTIONS_CASE_DISABLE] = {"Disable Motors", actions_cb_disable_motors},
+    [ECRAN_ACTIONS_CASE_RESTART] = {"Restart Klipper", actions_cb_restart_klipper},
 };
 
 #undef BOUTONS_NAV
