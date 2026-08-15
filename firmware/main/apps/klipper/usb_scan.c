@@ -15,7 +15,6 @@
 
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h" /* xTaskCreateWithCaps -- pile de scan en PSRAM */
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "pandatouch_msc.h"
@@ -330,15 +329,16 @@ void usb_scan_demarrage_paresseux(void)
         }
     }
     if (s_scan_tache == NULL) {
-        /* Pile EN PSRAM (revue du 2026-08-14, L7) : 8 Kio pérennes en RAM
-           interne seraient ~60 % de la marge mesurée clé montée (13 Kio).
-           CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY et
-           CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM sont déjà actifs, et
-           cette tâche ne touche jamais un chemin cache-flash-désactivé
-           (parcours VFS USB + store PSRAM + journal uniquement). */
-        BaseType_t cree = xTaskCreateWithCaps(usb_scan_tache, "usb_scan", USB_SCAN_TASK_STACK, NULL,
-                                              USB_SCAN_TASK_PRIO, &s_scan_tache,
-                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        /* Pile en RAM INTERNE (retour arriere du 2026-08-15 apres-midi) :
+           l'experience "pile en PSRAM via xTaskCreateWithCaps" est
+           l'element commun aux 4 crashs WDT(7) muets (RTC watchdog, les
+           deux coeurs interruptions coupees, coredump jamais ecrit) --
+           une tache a pile PSRAM spinnant en section critique pendant une
+           fenetre cache-flash-desactive de l'autre coeur est le suspect
+           structurel. La marge interne (~87 Ko au repos depuis les fix du
+           14/08) absorbe largement ces 8 Ko. */
+        BaseType_t cree = xTaskCreate(usb_scan_tache, "usb_scan", USB_SCAN_TASK_STACK, NULL,
+                                      USB_SCAN_TASK_PRIO, &s_scan_tache);
         if (cree != pdPASS) {
             s_scan_tache = NULL;
             JOURNAL_ERREUR(TAG, "creation de la tache de scan USB echouee (memoire epuisee) ; USB non demarre");

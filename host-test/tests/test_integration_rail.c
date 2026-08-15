@@ -147,6 +147,17 @@ void suite_integration_rail(void)
     lv_obj_send_event(rail->boutons[RAIL_ACCUEIL], LV_EVENT_CLICKED, NULL);
     VERIFIER(navigation_profondeur() == 1);
 
+    /* --- clic PRINTERS (2026-08-15) : empile l'ecran Parc, meme garde
+     * anti-re-empilement que Macros ---------------------------------------- */
+    lv_obj_send_event(rail->boutons[RAIL_PRINTERS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2);
+    VERIFIER_TEXTE(navigation_id_courant(), "parc");
+    lv_obj_send_event(rail->boutons[RAIL_PRINTERS], LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 2); /* pas de copie empilee */
+    VERIFIER_TEXTE(navigation_id_courant(), "parc");
+    lv_obj_send_event(rail->boutons[RAIL_ACCUEIL], LV_EVENT_CLICKED, NULL);
+    VERIFIER(navigation_profondeur() == 1);
+
     /* --- clic STOP : ouvre une confirmation, N'ENVOIE RIEN tant que non
      * confirme, puis M112 a la confirmation -------------------------------- */
     VERIFIER(!confirmation_est_ouverte());

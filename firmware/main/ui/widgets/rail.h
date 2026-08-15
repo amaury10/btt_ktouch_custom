@@ -1,6 +1,7 @@
 /* rail.h — le rail persistant d'accès rapide : une colonne verticale de
- * quatre boutons (Back, Accueil, Macros, STOP) présente en permanence sur le
- * côté de l'écran (jalon refonte accueil/déplacer). Back remonte d'UN seul
+ * cinq boutons (Back, Accueil, Macros, Printers, STOP) présente en
+ * permanence sur le côté de l'écran (jalon refonte accueil/déplacer ;
+ * Printers ajouté avec la gestion de parc, 2026-08-15). Back remonte d'UN seul
  * niveau de navigation (équivalent au bouton retour de la barre du haut,
  * navigation_depiler()) -- le rail ne fait PLUS de homing (RAIL_HOME a été
  * retiré : le homing des axes vit désormais uniquement dans ses écrans
@@ -31,6 +32,10 @@ typedef enum {
     RAIL_BACK,
     RAIL_ACCUEIL,
     RAIL_MACROS,
+    /* Accès rapide au parc d'imprimantes (demande utilisateur du 2026-08-15,
+     * juste après la validation du parc en conditions réelles) : SOUS Macros
+     * dans la pile haute, STOP reste seul en bas. */
+    RAIL_PRINTERS,
     RAIL_STOP,
     RAIL_NB
 } rail_action_t;

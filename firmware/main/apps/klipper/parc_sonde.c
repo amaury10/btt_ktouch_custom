@@ -10,7 +10,6 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h" /* xTaskCreateWithCaps -- pile en PSRAM */
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
@@ -168,9 +167,16 @@ void parc_sonde_demarrage_paresseux(void)
         }
     }
     if (s_tache == NULL) {
-        BaseType_t cree = xTaskCreateWithCaps(parc_sonde_tache, "parc_sonde", PARC_SONDE_TASK_STACK,
-                                              NULL, PARC_SONDE_TASK_PRIO, &s_tache,
-                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        /* Pile en RAM INTERNE (retour arriere du 2026-08-15 apres-midi) :
+           l'experience "pile en PSRAM via xTaskCreateWithCaps" est
+           l'element commun aux 4 crashs WDT(7) muets (RTC watchdog, les
+           deux coeurs interruptions coupees, coredump jamais ecrit) --
+           une tache a pile PSRAM spinnant en section critique pendant une
+           fenetre cache-flash-desactive de l'autre coeur est le suspect
+           structurel. La marge interne (~87 Ko au repos depuis les fix du
+           14/08) absorbe largement ces 8 Ko. */
+        BaseType_t cree = xTaskCreate(parc_sonde_tache, "parc_sonde", PARC_SONDE_TASK_STACK,
+                                      NULL, PARC_SONDE_TASK_PRIO, &s_tache);
         if (cree != pdPASS) {
             s_tache = NULL;
             JOURNAL_ERREUR(TAG, "creation de la tache de sonde echouee ; sonde non demarree");

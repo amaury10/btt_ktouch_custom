@@ -8,6 +8,7 @@
 #include "backend.h"
 #include "confirmation.h"
 #include "ecran_macros.h"
+#include "ecran_parc.h" /* RAIL_PRINTERS -- acces rapide au parc (2026-08-15) */
 #include "klipper_gcode.h"
 #include "navigation.h"
 #include "source_etat.h"
@@ -115,6 +116,18 @@ void rail_action_klipper(rail_action_t action, void *ctx)
          * "rien ne se passe", la pile est bornee et loin de sa borne en
          * usage normal. */
         navigation_empiler(&ECRAN_MACROS);
+        break;
+    }
+    case RAIL_PRINTERS: {
+        /* Acces rapide au parc (2026-08-15) : meme garde anti-re-empilement
+         * que RAIL_MACROS ci-dessus -- le rail est persistant, re-taper le
+         * bouton depuis l'ecran Parc lui-meme ne doit pas empiler des
+         * copies. */
+        const char *courant = navigation_id_courant();
+        if (courant != NULL && strcmp(courant, ECRAN_PARC.id) == 0) {
+            break;
+        }
+        navigation_empiler(&ECRAN_PARC);
         break;
     }
     case RAIL_STOP:

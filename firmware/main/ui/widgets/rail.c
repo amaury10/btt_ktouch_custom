@@ -30,7 +30,7 @@
 #define ECART_BOUTONS            8
 #define RACINE_HAUTEUR_DEFAUT   (RAIL_NB * BOUTON_HAUTEUR_DEFAUT + (RAIL_NB - 1) * ECART_BOUTONS)
 
-static const char *const LIBELLES[RAIL_NB] = { "Back", "Accueil", "Macros", "STOP" };
+static const char *const LIBELLES[RAIL_NB] = { "Back", "Accueil", "Macros", "Printers", "STOP" };
 /* LV_SYMBOL_LEFT (fleche) pour Back -- remonte d'un niveau de navigation,
  * meme symbole que le bouton retour de la barre du haut (habillage.c) ;
  * LV_SYMBOL_HOME (une maison) pour l'ecran d'accueil, jamais confondu avec
@@ -39,6 +39,7 @@ static const char *const ICONES[RAIL_NB] = {
     LV_SYMBOL_LEFT,
     LV_SYMBOL_HOME,
     LV_SYMBOL_LIST,
+    LV_SYMBOL_SHUFFLE, /* Printers : la bascule d'imprimante, d'ou les fleches croisees */
     LV_SYMBOL_STOP,
 };
 
