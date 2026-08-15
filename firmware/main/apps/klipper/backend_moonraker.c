@@ -780,6 +780,15 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    /* Feature Spoolman : meme contrat que power juste au-dessus --
+     * `arguments_json` EST deja les params de server.spoolman.spool_id
+     * ({"spool_id":N} ou {"spool_id":null}), construits par l'ecran. */
+    bool est_spoolman = (strcmp(action, BACKEND_ACTION_SPOOLMAN) == 0);
+    if (est_spoolman && arguments_json == NULL) {
+        JOURNAL_ALERTE(TAG, "commande spoolman sans arguments_json");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     if (moonraker_ws_en_ligne()) {
         /* Jalon 3a, tache 6 : BACKEND_ACTION_MACRO -> printer.gcode.script
          * {"script":"<nom>"} -- rpc_methode_commande() (tache 5) refuse
@@ -878,6 +887,29 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                 return ESP_FAIL;
             }
             JOURNAL_INFO(TAG, "commande gcode -> WS printer.gcode.script");
+            return ESP_OK;
+        }
+
+        if (est_spoolman) {
+            /* Feature Spoolman : copie stricte du bloc power ci-dessous --
+             * `arguments_json` relaye tel quel, pas de repli HTTP (WS hors
+             * ligne tombe dans la table generique, qui ne connait pas
+             * "spoolman" -> ESP_ERR_NOT_SUPPORTED, refus honnete plutot
+             * qu'un silence). */
+            bool succes = false;
+            char erreur[128];
+            erreur[0] = '\0';
+            esp_err_t erreur_ws = moonraker_ws_commande("server.spoolman.spool_id", arguments_json,
+                                                          MOONRAKER_WS_COMMANDE_TIMEOUT_MS, &succes,
+                                                          erreur, sizeof(erreur));
+            if (erreur_ws != ESP_OK) {
+                JOURNAL_ALERTE(TAG, "commande spoolman (WS) en echec (%s)", esp_err_to_name(erreur_ws));
+                return erreur_ws;
+            }
+            if (!succes) {
+                JOURNAL_ALERTE(TAG, "spoolman refusee par Moonraker (%s)", erreur);
+                return ESP_FAIL;
+            }
             return ESP_OK;
         }
 

@@ -114,7 +114,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_niveau_lit.c
     ${ECRANS_DIR}/ecran_limites.c
     ${ECRANS_DIR}/ecran_retraction.c
-    ${ECRANS_DIR}/ecran_stub.c
+    ${ECRANS_DIR}/ecran_spoolman.c
     ${ECRANS_DIR}/ecran_updater.c
     ${ECRANS_DIR}/ecran_configuration.c
     ${ECRANS_DIR}/ecran_macros.c
@@ -129,6 +129,7 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_homing.c
     ${WIFI_MOCK_DIR}/wifi_mock.c
     ${WIFI_MOCK_DIR}/usb_upload_http_mock.c
+    ${WIFI_MOCK_DIR}/moonraker_ws_mock.c
     ${EXEMPLES_DIR}/backend_jouet.c
     ${EXEMPLES_DIR}/ecran_jouet.c
     ${KLIPPER_DIR}/moonraker_parse.c
@@ -137,6 +138,7 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/usb_fichiers.c
     ${KLIPPER_DIR}/parc_imprimantes.c
     ${KLIPPER_DIR}/bed_mesh_store.c
+    ${KLIPPER_DIR}/spoolman_store.c
     ${KLIPPER_DIR}/bed_mesh_parse.c
     ${KLIPPER_DIR}/parc_parse.c
     ${KLIPPER_DIR}/parc_sonde.c

@@ -186,6 +186,13 @@ rpc_message_type_t rpc_classifier(const char *json, size_t longueur, uint32_t *i
              * plus faire confiance a l'etat pousse, exactement comme une
              * deconnexion. */
             type = RPC_MSG_KLIPPY_DECONNECTE;
+        } else if (strcmp(methode->valuestring, "notify_active_spool_set") == 0) {
+            /* Feature Spoolman (2026-08-15) : type a part entiere plutot
+             * qu'un RPC_MSG_AUTRE re-parse apres coup -- une classification,
+             * un parse (lecon de la revue Bed Mesh, constats F1/F6 : la
+             * detection par sous-chaine a ete supprimee, ne pas la
+             * reintroduire ici). */
+            type = RPC_MSG_SPOOL_ACTIF;
         } else {
             type = RPC_MSG_AUTRE;
         }
@@ -1200,6 +1207,208 @@ static void traiter_candidat_power_device(power_devices_t *p, const cJSON *item)
     d->allumee = allumee;
     d->connue = true;
     p->nb++;
+}
+
+/* Couleur Spoolman : "RRGGBB" ou "RRGGBBAA" (alpha ignore, la dalle ne
+ * compose pas). Toute autre forme -> couleur INCONNUE : la pastille sera
+ * grise, jamais une couleur inventee a partir d'une chaine douteuse. */
+static bool couleur_hex_lire(const char *texte, uint32_t *sortie)
+{
+    if (texte == NULL) {
+        return false;
+    }
+    size_t n = strlen(texte);
+    if (texte[0] == '#') { /* tolere "#RRGGBB" : jamais produit par Spoolman, gratuit */
+        texte++;
+        n--;
+    }
+    if (n != 6 && n != 8) {
+        return false;
+    }
+    uint32_t valeur = 0;
+    for (size_t i = 0; i < n; i++) {
+        char c = texte[i];
+        uint32_t chiffre;
+        if (c >= '0' && c <= '9') {
+            chiffre = (uint32_t)(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            chiffre = (uint32_t)(c - 'a') + 10u;
+        } else if (c >= 'A' && c <= 'F') {
+            chiffre = (uint32_t)(c - 'A') + 10u;
+        } else {
+            return false; /* un seul caractere douteux invalide TOUTE la couleur */
+        }
+        if (i < 6) { /* les 6 premiers chiffres = RGB ; l'alpha eventuel est valide mais ignore */
+            valeur = (valeur << 4) | chiffre;
+        }
+    }
+    *sortie = valeur;
+    return true;
+}
+
+/* Une entree du tableau /v1/spool -> une bobine. Rend false si l'entree doit
+ * etre IGNOREE (pas un objet, archivee, ou sans identifiant exploitable). */
+static bool lire_bobine(const cJSON *entree, spoolman_bobine_t *bobine)
+{
+    if (!cJSON_IsObject(entree)) {
+        return false;
+    }
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(entree, "archived"))) {
+        return false; /* bobine rangee/finie : hors de la liste affichee */
+    }
+    float valeur = 0.0f;
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(entree, "id");
+    if (!valeur_finie(id, &valeur) || valeur < 0.0f) {
+        return false; /* sans identifiant, impossible de la designer active */
+    }
+
+    memset(bobine, 0, sizeof(*bobine));
+    bobine->id = (int32_t)valeur;
+
+    const cJSON *filament = cJSON_GetObjectItemCaseSensitive(entree, "filament");
+    if (cJSON_IsObject(filament)) {
+        const cJSON *champ = cJSON_GetObjectItemCaseSensitive(filament, "name");
+        if (cJSON_IsString(champ) && champ->valuestring != NULL) {
+            copier_texte_utf8_borne(champ->valuestring, bobine->filament, sizeof(bobine->filament));
+        }
+        champ = cJSON_GetObjectItemCaseSensitive(filament, "material");
+        if (cJSON_IsString(champ) && champ->valuestring != NULL) {
+            copier_texte_utf8_borne(champ->valuestring, bobine->matiere, sizeof(bobine->matiere));
+        }
+        champ = cJSON_GetObjectItemCaseSensitive(filament, "color_hex");
+        if (cJSON_IsString(champ)) {
+            bobine->couleur_connue = couleur_hex_lire(champ->valuestring, &bobine->couleur);
+        }
+        champ = cJSON_GetObjectItemCaseSensitive(filament, "weight");
+        if (valeur_finie(champ, &valeur)) {
+            bobine->total_g = valeur;
+        }
+        const cJSON *fabricant = cJSON_GetObjectItemCaseSensitive(filament, "vendor");
+        if (cJSON_IsObject(fabricant)) {
+            champ = cJSON_GetObjectItemCaseSensitive(fabricant, "name");
+            if (cJSON_IsString(champ) && champ->valuestring != NULL) {
+                copier_texte_utf8_borne(champ->valuestring, bobine->fabricant,
+                                        sizeof(bobine->fabricant));
+            }
+        }
+    }
+
+    /* remaining_weight ABSENT est un cas normal (bobine sans poids initial
+       declare) : `restant_connu` reste faux et l'ecran affiche "?", jamais un
+       0 g qui ferait croire a une bobine vide. */
+    const cJSON *restant = cJSON_GetObjectItemCaseSensitive(entree, "remaining_weight");
+    if (valeur_finie(restant, &valeur)) {
+        bobine->restant_g = valeur;
+        bobine->restant_connu = true;
+    }
+    return true;
+}
+
+bool rpc_lire_spoolman_liste(spoolman_liste_t *dest, const char *json, size_t longueur)
+{
+    if (dest == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL) {
+        return false;
+    }
+    /* `result` = tableau (reponse du proxy Moonraker) ou, a defaut, un
+     * tableau a la racine -- meme tolerance d'enveloppe que
+     * rpc_lire_power_devices. */
+    const cJSON *tableau = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    if (!cJSON_IsArray(tableau)) {
+        tableau = cJSON_IsArray(racine) ? racine : NULL;
+    }
+    if (!cJSON_IsArray(tableau)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+
+    /* Instantane COMPLET : locale a zero, ecrite en bloc a la fin. ~1 Ko de
+     * pile : acceptable ICI et nulle part ailleurs -- ce chemin ne tourne que
+     * sur la tache WS (pile 8 Ko), jamais sur celle de l'IHM. */
+    spoolman_liste_t local;
+    memset(&local, 0, sizeof(local));
+    local.connue = true;
+    const cJSON *entree = NULL;
+    cJSON_ArrayForEach(entree, tableau) {
+        if (local.nb >= SPOOLMAN_BOBINES_MAX) {
+            local.tronquee = true;
+            break;
+        }
+        if (lire_bobine(entree, &local.bobines[local.nb])) {
+            local.nb++;
+        }
+    }
+
+    *dest = local;
+    cJSON_Delete(racine);
+    return true;
+}
+
+bool rpc_lire_spoolman_statut(spoolman_etat_t *dest, const char *json, size_t longueur)
+{
+    if (dest == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL) {
+        return false;
+    }
+    const cJSON *resultat = cJSON_GetObjectItemCaseSensitive(racine, "result");
+    if (!cJSON_IsObject(resultat)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+    spoolman_etat_t local;
+    local.connecte = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resultat, "spoolman_connected"));
+    local.statut_connu = true;
+    /* spool_id vaut `null` quand aucune bobine n'est active : c'est une
+     * REPONSE VALIDE, pas une anomalie. */
+    local.id_actif = SPOOLMAN_AUCUNE_BOBINE;
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(resultat, "spool_id");
+    float valeur = 0.0f;
+    if (valeur_finie(id, &valeur) && valeur >= 0.0f) {
+        local.id_actif = (int32_t)valeur;
+    }
+    *dest = local;
+    cJSON_Delete(racine);
+    return true;
+}
+
+bool rpc_lire_notif_spool_actif(int32_t *dest, const char *json, size_t longueur)
+{
+    if (dest == NULL || json == NULL || longueur == 0) {
+        return false;
+    }
+    cJSON *racine = cJSON_ParseWithLength(json, longueur);
+    if (racine == NULL) {
+        return false;
+    }
+    /* notify_active_spool_set : params = [ {"spool_id": N|null} ]. */
+    const cJSON *params = cJSON_GetObjectItemCaseSensitive(racine, "params");
+    if (!cJSON_IsArray(params) || cJSON_GetArraySize(params) < 1) {
+        cJSON_Delete(racine);
+        return false;
+    }
+    const cJSON *premier = cJSON_GetArrayItem(params, 0);
+    if (!cJSON_IsObject(premier)) {
+        cJSON_Delete(racine);
+        return false;
+    }
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(premier, "spool_id");
+    if (id == NULL) {
+        cJSON_Delete(racine);
+        return false; /* la cle DOIT etre presente, fut-ce a null */
+    }
+    *dest = SPOOLMAN_AUCUNE_BOBINE;
+    float valeur = 0.0f;
+    if (valeur_finie(id, &valeur) && valeur >= 0.0f) {
+        *dest = (int32_t)valeur;
+    }
+    cJSON_Delete(racine);
+    return true;
 }
 
 bool rpc_lire_profils_bed_mesh(bed_mesh_profils_t *dest, const char *json, size_t longueur)

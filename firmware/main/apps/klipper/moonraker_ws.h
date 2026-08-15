@@ -90,3 +90,11 @@ esp_err_t moonraker_ws_commande(const char *methode, const char *params_json,
  * CE fichier reste interne, voir son commentaire de tête sur le risque de
  * déluge déjà documenté dans backend_moonraker.c). */
 uint32_t moonraker_ws_compteur_reconnexions(void);
+
+/* Feature Spoolman (2026-08-15) : redemande la liste des bobines
+ * (server.spoolman.proxy -> /v1/spool). Appelable depuis N'IMPORTE QUELLE
+ * tache -- l'ecran Spoolman s'en sert pour son bouton Refresh. No-op
+ * silencieux si le WebSocket est hors ligne. La reponse arrive de facon
+ * asynchrone sur la tache WS et atterrit dans spoolman_store.h : cette
+ * fonction ne rend RIEN, elle ne fait que declencher. */
+void moonraker_ws_demander_bobines(void);

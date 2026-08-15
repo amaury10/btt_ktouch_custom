@@ -79,7 +79,7 @@
 #include "ecran_reglage_fin.h"
 #include "ecran_reglages_wifi.h"
 #include "ecran_retraction.h"
-#include "ecran_stub.h"
+#include "ecran_spoolman.h"
 #include "ecran_temperatures.h"
 #include "ecran_updater.h"
 #include "ecran_ventilateurs.h"

@@ -31,7 +31,7 @@ void suite_ecran_zcalibrate(void);
 void suite_ecran_niveau_lit(void);
 void suite_ecran_limites(void);
 void suite_ecran_retraction(void);
-void suite_ecran_stub(void);
+void suite_ecran_spoolman(void);
 void suite_ecran_updater(void);
 void suite_accueil_choix(void);
 void suite_clavier(void);
@@ -276,13 +276,13 @@ int main(void)
      * contrairement aux suites d'ecran ci-dessus : ces stubs n'envoient
      * jamais de commande et ne lisent jamais l'etat backend
      * (mettre_a_jour = NULL), voir le commentaire de tete de
-     * suite_ecran_stub() dans test_ecran_stub.c. */
-    suite_ecran_stub();
+     * suite_ecran_spoolman() dans test_ecran_spoolman.c. */
+    suite_ecran_spoolman();
 
     /* Task 2 (jalon OTA firmware) : l'ecran Updater, ex-sixieme stub de la
      * tache 7 -- affiche desormais slot/version en lecture seule au lieu du
      * placeholder "backend absent". Meme absence de contrainte
-     * d'ordonnancement que suite_ecran_stub() juste au-dessus (aucune
+     * d'ordonnancement que suite_ecran_spoolman() juste au-dessus (aucune
      * commande envoyee, mettre_a_jour = NULL) -- voir le commentaire de tete
      * de suite_ecran_updater() dans test_ecran_updater.c. */
     suite_ecran_updater();

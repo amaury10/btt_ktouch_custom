@@ -136,7 +136,7 @@ add_executable(tests
     tests/test_ecran_niveau_lit.c
     tests/test_ecran_limites.c
     tests/test_ecran_retraction.c
-    tests/test_ecran_stub.c
+    tests/test_ecran_spoolman.c
     tests/test_ecran_updater.c
     tests/test_accueil_choix.c
     tests/test_clavier.c
@@ -169,6 +169,7 @@ add_executable(tests
     tests/test_parc.c
     tests/test_bed_mesh.c
     tests/usb_upload_http_mock.c
+    tests/moonraker_ws_mock.c
     ${MAIN_DIR}/web_macros.c
     ${MAIN_DIR}/ota_image.c
     ${KLIPPER_DIR}/moonraker_parse.c
@@ -181,6 +182,7 @@ add_executable(tests
     ${KLIPPER_DIR}/usb_fichiers.c
     ${KLIPPER_DIR}/parc_imprimantes.c
     ${KLIPPER_DIR}/bed_mesh_store.c
+    ${KLIPPER_DIR}/spoolman_store.c
     ${KLIPPER_DIR}/bed_mesh_parse.c
     ${KLIPPER_DIR}/parc_parse.c
     ${KLIPPER_DIR}/parc_sonde.c
@@ -218,7 +220,7 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_niveau_lit.c
     ${ECRANS_DIR}/ecran_limites.c
     ${ECRANS_DIR}/ecran_retraction.c
-    ${ECRANS_DIR}/ecran_stub.c
+    ${ECRANS_DIR}/ecran_spoolman.c
     ${ECRANS_DIR}/ecran_updater.c
     ${ECRANS_DIR}/ecran_power.c
     ${ECRANS_DIR}/ecran_console.c

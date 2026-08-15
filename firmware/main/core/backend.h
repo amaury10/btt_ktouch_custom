@@ -97,3 +97,16 @@ typedef struct {
  * que BACKEND_ACTION_GCODE, l'appelant a déjà construit le JSON attendu par
  * Moonraker, le backend ne fait que le transmettre. */
 #define BACKEND_ACTION_POWER      "power"
+
+/* Feature Spoolman (spec 2026-08-15) : designe la bobine chargee.
+ * arguments_json = {"spool_id":N} ou {"spool_id":null} (aucune) — deja
+ * construit par l'ecran (ecran_spoolman.c), relaye tel quel comme
+ * params_json de server.spoolman.spool_id : meme esprit que
+ * BACKEND_ACTION_POWER juste au-dessus.
+ *
+ * POURQUOI cette methode plutot que la macro gcode SET_ACTIVE_SPOOL
+ * (installee sur le Pi pour Mainsail et les slicers) : elle ne depend pas de
+ * printer.cfg, ne traverse pas la file gcode, et fonctionne meme si Klippy
+ * est en erreur — trois raisons pour lesquelles un panneau d'ecran ne doit
+ * pas emprunter le chemin gcode ici. */
+#define BACKEND_ACTION_SPOOLMAN   "spoolman"

@@ -55,6 +55,7 @@
 #include "moonraker_boite.h"
 #include "moonraker_rpc.h"
 #include "bed_mesh_store.h" /* bed_mesh_profils_definir -- liste de profils */
+#include "spoolman_store.h" /* feature Spoolman : liste de bobines + bobine active */
 #include "power_devices.h"
 
 static const char *TAG = "moonraker_ws";
@@ -271,6 +272,17 @@ static bool g_power_a_demander = false;
 static uint32_t g_id_profils_bed_mesh = 0;
 static bool     g_profils_bed_mesh_a_demander = false;
 
+/* Feature Spoolman (2026-08-15) : deux requetes ponctuelles, memes
+ * conventions que les identifiants ci-dessus -- avec UNE difference capitale
+ * pour `g_id_spoolman_liste` : il est aussi ecrit par
+ * moonraker_ws_demander_bobines(), appelable depuis la tache IHM (bouton
+ * Refresh). Il est donc le seul de cette famille a etre lu ET ecrit SOUS
+ * g_verrou, jamais en acces nu (les autres restent confines a la tache WS,
+ * voir leurs commentaires). */
+static uint32_t g_id_spoolman_liste = 0;
+static uint32_t g_id_spoolman_statut = 0;
+static bool     g_spoolman_a_demander = false;
+
 /* Réabonnement aux objets imprimante différé -- MÊME mécanisme que
  * g_macros_a_demander/g_power_a_demander (posé SOUS g_verrou par
  * RPC_MSG_KLIPPY_READY, consommé HORS verrou par traiter_data()) : voir
@@ -485,6 +497,51 @@ static void envoyer_requete_macros(void)
     }
 }
 
+/* Feature Spoolman : liste des bobines via le proxy Moonraker. `query` exclut
+ * les bobines archivees des la source -- inutile de faire voyager puis
+ * filtrer ce que l'ecran n'affichera jamais. Appelee au connect, sur
+ * notify_klippy_ready, et par moonraker_ws_demander_bobines() (bouton
+ * Refresh). PREND g_verrou pour publier l'identifiant (voir sa declaration)
+ * ; ne JAMAIS l'appeler alors qu'on le detient deja. */
+static void envoyer_requete_bobines(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "server.spoolman.proxy",
+                               "{\"request_method\":\"GET\",\"path\":\"/v1/spool\","
+                               "\"query\":\"allow_archived=false\"}")) {
+        xSemaphoreTake(g_verrou, portMAX_DELAY);
+        g_id_spoolman_liste = id;
+        xSemaphoreGive(g_verrou);
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS de la liste Spoolman echoue (id=%u)", (unsigned)id);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de la requete liste Spoolman impossible");
+    }
+}
+
+/* Feature Spoolman : bobine active + etat de la liaison Moonraker/Spoolman.
+ * Tache WS uniquement (aucun appelant IHM), donc identifiant en acces nu
+ * comme ses voisins. */
+static void envoyer_requete_statut_spoolman(void)
+{
+    char tampon[MOONRAKER_WS_REQUETE_OCTETS];
+    uint32_t id = prochain_id();
+    if (rpc_construire_requete(tampon, sizeof(tampon), id, "server.spoolman.status", NULL)) {
+        g_id_spoolman_statut = id;
+        int envoye = esp_websocket_client_send_text(g_client, tampon, (int)strlen(tampon),
+                                                      pdMS_TO_TICKS(MOONRAKER_WS_ENVOI_DELAI_MS));
+        if (envoye < 0) {
+            JOURNAL_ALERTE(TAG, "envoi WS du statut Spoolman echoue (id=%u)", (unsigned)id);
+        }
+    } else {
+        JOURNAL_ERREUR(TAG, "construction de la requete statut Spoolman impossible");
+    }
+}
+
 /* Feature "liste de profils bed_mesh" (2026-08-15) : COPIE du patron
  * envoyer_requete_macros() ci-dessus (memes controles d'envoi, jamais sous
  * g_verrou). Ne demande QUE l'attribut `profiles` de bed_mesh -- une query
@@ -682,6 +739,10 @@ static void envoyer_identify_et_abonnement(void)
     /* Feature "liste de profils bed_mesh" : MEME endroit, meme absence de
      * verrou -- voir le commentaire de envoyer_requete_profils_bed_mesh(). */
     envoyer_requete_profils_bed_mesh();
+    /* Feature Spoolman : statut PUIS liste -- dans cet ordre, pour que
+     * l'ecran connaisse deja la bobine active quand la liste arrive. */
+    envoyer_requete_statut_spoolman();
+    envoyer_requete_bobines();
 }
 
 /* Feature "Miniatures gcode", tâche B : détecte un `print_stats.filename`
@@ -809,6 +870,21 @@ static void traiter_message_complet(const char *json, size_t longueur)
             if (rpc_lire_profils_bed_mesh(&profils, json, longueur)) {
                 bed_mesh_profils_definir(&profils);
             }
+        } else if (id == g_id_spoolman_liste && g_id_spoolman_liste != 0) {
+            /* Feature Spoolman : liste des bobines -> store dedie (jamais
+             * etat_klipper_t, ~1 Ko). `spoolman_liste_t` sur la pile de la
+             * tache WS (8 Ko) : voir le commentaire de
+             * rpc_lire_spoolman_liste(). */
+            spoolman_liste_t liste;
+            if (rpc_lire_spoolman_liste(&liste, json, longueur)) {
+                spoolman_definir_liste(&liste);
+            }
+        } else if (id == g_id_spoolman_statut && g_id_spoolman_statut != 0) {
+            spoolman_etat_t etat;
+            if (rpc_lire_spoolman_statut(&etat, json, longueur)) {
+                spoolman_definir_connecte(etat.connecte);
+                spoolman_definir_actif(etat.id_actif);
+            }
         } else if (id == g_id_power && g_id_power != 0) {
             /* Feature "Power devices Moonraker", tache B : reponse a
              * machine.device_power.devices -- meme raisonnement que le cas
@@ -924,7 +1000,24 @@ static void traiter_message_complet(const char *json, size_t longueur)
         /* Liste de profils bed_mesh : un redemarrage Klippy est justement le
          * moment ou elle change (SAVE_CONFIG) -- meme mecanisme differe. */
         g_profils_bed_mesh_a_demander = true;
+        /* Feature Spoolman : Moonraker se reconnecte a Spoolman apres un
+         * redemarrage Klippy (voir _handle_klippy_ready du composant) --
+         * c'est le moment de reprendre statut et liste. Meme mecanisme
+         * differe, jamais d'envoi sous g_verrou. */
+        g_spoolman_a_demander = true;
         break;
+    case RPC_MSG_SPOOL_ACTIF: {
+        /* Feature Spoolman : la bobine active vient de changer -- ici ou
+         * ailleurs (Mainsail, slicer). Le seul champ pousse est l'id : les
+         * poids restants, eux, ne bougent qu'a l'extrusion et sont
+         * rafraichis au connect ou par le bouton Refresh (voir la spec,
+         * section "Risque connu"). */
+        int32_t id_actif = SPOOLMAN_AUCUNE_BOBINE;
+        if (rpc_lire_notif_spool_actif(&id_actif, json, longueur)) {
+            spoolman_definir_actif(id_actif);
+        }
+        break;
+    }
     case RPC_MSG_KLIPPY_DECONNECTE:
         g_klippy_pret = false;
         break;
@@ -1112,6 +1205,11 @@ static void traiter_data(const esp_websocket_event_data_t *data)
         if (g_profils_bed_mesh_a_demander) {
             g_profils_bed_mesh_a_demander = false;
             envoyer_requete_profils_bed_mesh();
+        }
+        if (g_spoolman_a_demander) {
+            g_spoolman_a_demander = false;
+            envoyer_requete_statut_spoolman();
+            envoyer_requete_bobines();
         }
         if (g_power_a_demander) {
             g_power_a_demander = false;
@@ -1348,6 +1446,9 @@ esp_err_t moonraker_ws_demarrer(const backend_hote_t *hote)
     g_id_power = 0;
     g_id_profils_bed_mesh = 0;
     g_profils_bed_mesh_a_demander = false;
+    g_id_spoolman_liste = 0;
+    g_id_spoolman_statut = 0;
+    g_spoolman_a_demander = false;
     g_id_miniature = 0;
     g_macros_a_demander = false;
     g_power_a_demander = false;
@@ -1567,4 +1668,18 @@ esp_err_t moonraker_ws_commande(const char *methode, const char *params_json,
 uint32_t moonraker_ws_compteur_reconnexions(void)
 {
     return g_compteur_reconnexions;
+}
+
+void moonraker_ws_demander_bobines(void)
+{
+    /* Appelee depuis la tache IHM (bouton Refresh de l'ecran Spoolman) :
+     * meme discipline que moonraker_ws_commande() -- on n'envoie QUE si le
+     * client est en ligne, et esp_websocket_client_send_text() prend son
+     * propre verrou d'emission, il est donc sur de l'appeler hors tache WS.
+     * L'identifiant de correlation est publie sous g_verrou par
+     * envoyer_requete_bobines() elle-meme. */
+    if (!moonraker_ws_en_ligne()) {
+        return;
+    }
+    envoyer_requete_bobines();
 }

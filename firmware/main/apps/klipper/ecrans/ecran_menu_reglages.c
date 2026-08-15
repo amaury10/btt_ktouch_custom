@@ -15,7 +15,8 @@
  * est instanciee deux fois plus bas : une premiere pour generer les onze
  * rappels de clic `menu_reglages_cb_<symbole>()` (chacun ferme sur son propre
  * `navigation_empiler(&<symbole>)`, meme X-macro que STUBS() dans
- * ecran_stub.c), une seconde pour peupler la table MENU_REGLAGES_DEFS (paire
+ * l'ancien ecran_stub.c, supprime avec son dernier stub), une seconde pour
+ * peupler la table MENU_REGLAGES_DEFS (paire
  * libelle/rappel) lue par la boucle de construction. Menu purement statique :
  * `mettre_a_jour = NULL` (rien a rafraichir), `detruire = NULL` (rien a
  * liberer au-dela du contexte -- voir ecran.h). */
@@ -31,7 +32,7 @@
 #include "ecran_retraction.h"    /* ECRAN_RETRACTION */
 #include "ecran_bed_mesh.h"      /* ECRAN_BED_MESH -- plus un stub (2026-08-15) */
 #include "ecran_input_shaper.h"  /* ECRAN_INPUT_SHAPER -- plus un stub (2026-08-15) */
-#include "ecran_stub.h"          /* ECRAN_SPOOLMAN (dernier stub) */
+#include "ecran_spoolman.h"      /* ECRAN_SPOOLMAN (dernier stub remplace, 2026-08-15) */
 #include "ecran_updater.h"       /* ECRAN_UPDATER (Task 2, jalon OTA firmware -- plus un stub) */
 #include "ecran_zcalibrate.h"    /* ECRAN_ZCALIBRATE */
 #include "navigation.h"          /* navigation_empiler() */

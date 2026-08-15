@@ -38,6 +38,7 @@
 #include "etat_klipper.h"
 #include "klipper_fichiers.h"
 #include "bed_mesh_store.h" /* bed_mesh_profils_t -- rpc_lire_profils_bed_mesh */
+#include "spoolman_store.h" /* spoolman_liste_t/spoolman_etat_t -- parseurs Spoolman */
 #include "power_devices.h"
 
 /* Construit une requête JSON-RPC 2.0 : `{"jsonrpc":"2.0","method":"...",
@@ -94,6 +95,12 @@ typedef enum {
                                 * notify_status_update cessent d'arriver —
                                 * même signal côté appelant, qui doit cesser
                                 * de faire confiance à l'état poussé. */
+    RPC_MSG_SPOOL_ACTIF,      /* notify_active_spool_set (feature Spoolman,
+                               * 2026-08-15) : Moonraker signale la bobine
+                               * DESIGNEE ACTIVE -- par nous, par Mainsail ou
+                               * par un slicer. Type a part entiere plutot
+                               * qu'un RPC_MSG_AUTRE re-parse ensuite : une
+                               * classification, un parse. */
     RPC_MSG_AUTRE,            /* notification reconnue comme telle mais ignorée.
                                * ATTENTION (fixtures tâche 4, vérifié contre un
                                * VRAI Klipper) : notify_gcode_response tombe ici,
@@ -405,6 +412,33 @@ bool rpc_lire_power_devices(power_devices_t *dest, const char *json, size_t long
  * politique que rpc_lire_macros. Rend false (dest intact) si l'enveloppe
  * n'a pas cette forme. */
 bool rpc_lire_profils_bed_mesh(bed_mesh_profils_t *dest, const char *json, size_t longueur);
+
+/* ------------------------------------------------------------------------
+ * Spoolman (feature 2026-08-15, spec 2026-08-15-spoolman-design.md)
+ * ------------------------------------------------------------------------
+ * TOUT passe par Moonraker, jamais par le serveur Spoolman en direct :
+ * l'ecran ne connait qu'une adresse serveur, et Moonraker relaie deja tout
+ * ce qu'il faut (verifie sur machine reelle, Moonraker v0.9.3). */
+
+/* Reponse a `server.spoolman.proxy` {"request_method":"GET",
+ * "path":"/v1/spool", ...} : `result` = tableau de bobines (ou un tableau nu
+ * a la racine, meme tolerance que rpc_lire_power_devices). Instantane
+ * COMPLET : remplace tout `*dest`. Une bobine archivee ou sans `id`
+ * exploitable est IGNOREE ; au-dela de SPOOLMAN_BOBINES_MAX, `tronquee` est
+ * leve. `remaining_weight` absent est un cas NORMAL (bobine sans poids
+ * initial) : `restant_connu` reste faux. Rend false (dest intact) si
+ * l'enveloppe n'est pas celle-la. */
+bool rpc_lire_spoolman_liste(spoolman_liste_t *dest, const char *json, size_t longueur);
+
+/* Reponse a `server.spoolman.status` : result.spoolman_connected +
+ * result.spool_id (`null` = aucune bobine active, reponse VALIDE). */
+bool rpc_lire_spoolman_statut(spoolman_etat_t *dest, const char *json, size_t longueur);
+
+/* Notification `notify_active_spool_set` (classee RPC_MSG_SPOOL_ACTIF) :
+ * params[0].spool_id. `*dest` recoit SPOOLMAN_AUCUNE_BOBINE quand la cle est
+ * a null. Rend false si la cle est absente : une notification sans spool_id
+ * n'apprend rien, mieux vaut garder l'etat courant. */
+bool rpc_lire_notif_spool_actif(int32_t *dest, const char *json, size_t longueur);
 
 /* Extrait la liste des prises CHANGÉES depuis une notification
  * `notify_power_changed` : `params[0]` est lui-même un TABLEAU d'objets

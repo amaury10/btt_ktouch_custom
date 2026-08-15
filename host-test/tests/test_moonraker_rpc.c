@@ -1591,6 +1591,124 @@ static void section_profils_bed_mesh(void)
     VERIFIER(!rpc_lire_profils_bed_mesh(NULL, sans, strlen(sans)));
 }
 
+/* --- Spoolman (spec 2026-08-15-spoolman-design.md) ----------------------- */
+
+static void section_spoolman(void)
+{
+    /* Forme RELEVEE sur la machine reelle (Spoolman v0.26.1 via le proxy
+       Moonraker), pas inventee d'apres la doc. */
+    const char *json =
+        "{\"jsonrpc\":\"2.0\",\"result\":[{"
+        "\"id\":1,\"registered\":\"2026-08-15T16:42:02Z\","
+        "\"filament\":{\"id\":1,\"name\":\"Galaxy Black\","
+        "\"vendor\":{\"id\":1,\"name\":\"Prusament\"},"
+        "\"material\":\"PETG\",\"density\":1.27,\"diameter\":1.75,"
+        "\"weight\":1000.0,\"color_hex\":\"1A1A2E\"},"
+        "\"remaining_weight\":820.5,\"used_weight\":179.5,"
+        "\"location\":\"Etagere A\",\"archived\":false}],\"id\":9}";
+
+    spoolman_liste_t liste;
+    memset(&liste, 0xFF, sizeof(liste));
+    VERIFIER(rpc_lire_spoolman_liste(&liste, json, strlen(json)));
+    VERIFIER(liste.nb == 1);
+    VERIFIER(liste.connue);
+    VERIFIER(!liste.tronquee);
+    VERIFIER(liste.bobines[0].id == 1);
+    VERIFIER_TEXTE(liste.bobines[0].filament, "Galaxy Black");
+    VERIFIER_TEXTE(liste.bobines[0].fabricant, "Prusament");
+    VERIFIER_TEXTE(liste.bobines[0].matiere, "PETG");
+    VERIFIER(liste.bobines[0].couleur_connue);
+    VERIFIER(liste.bobines[0].couleur == 0x1A1A2Eu);
+    VERIFIER(liste.bobines[0].restant_connu);
+    VERIFIER(liste.bobines[0].restant_g > 820.4f && liste.bobines[0].restant_g < 820.6f);
+    VERIFIER(liste.bobines[0].total_g > 999.9f && liste.bobines[0].total_g < 1000.1f);
+
+    /* Bobine archivee IGNOREE ; bobine sans remaining_weight gardee mais
+       marquee inconnue ; couleur invalide -> inconnue, jamais inventee ;
+       couleur RRGGBBAA -> alpha ignore. */
+    const char *melange =
+        "{\"result\":["
+        "{\"id\":2,\"archived\":true,\"filament\":{\"name\":\"Archivee\"}},"
+        "{\"id\":3,\"filament\":{\"name\":\"SansPoids\",\"color_hex\":\"zzz\"}},"
+        "{\"id\":4,\"filament\":{\"name\":\"Alpha\",\"color_hex\":\"11223344\"},"
+        "\"remaining_weight\":100.0},"
+        "{\"filament\":{\"name\":\"SansId\"}}"
+        "]}";
+    VERIFIER(rpc_lire_spoolman_liste(&liste, melange, strlen(melange)));
+    VERIFIER(liste.nb == 2); /* l'archivee ET la sans-id sont ecartees */
+    VERIFIER(liste.bobines[0].id == 3);
+    VERIFIER(!liste.bobines[0].restant_connu);
+    VERIFIER(!liste.bobines[0].couleur_connue); /* "zzz" n'est pas une couleur */
+    VERIFIER(liste.bobines[1].id == 4);
+    VERIFIER(liste.bobines[1].couleur_connue);
+    VERIFIER(liste.bobines[1].couleur == 0x112233u); /* l'alpha 0x44 est ignore */
+
+    /* Au-dela de SPOOLMAN_BOBINES_MAX : troncature SIGNALEE. */
+    char gros[4096];
+    size_t pos = 0;
+    pos += (size_t)snprintf(gros + pos, sizeof(gros) - pos, "{\"result\":[");
+    for (int i = 0; i < SPOOLMAN_BOBINES_MAX + 3; i++) {
+        pos += (size_t)snprintf(gros + pos, sizeof(gros) - pos,
+                                "%s{\"id\":%d,\"filament\":{\"name\":\"B%d\"}}",
+                                i ? "," : "", i + 1, i + 1);
+    }
+    (void)snprintf(gros + pos, sizeof(gros) - pos, "]}");
+    VERIFIER(rpc_lire_spoolman_liste(&liste, gros, strlen(gros)));
+    VERIFIER(liste.nb == SPOOLMAN_BOBINES_MAX);
+    VERIFIER(liste.tronquee);
+
+    /* Enveloppes cassees : false, destination INTACTE. */
+    liste.nb = 42;
+    const char *pas_un_tableau = "{\"result\":{\"oops\":1}}";
+    VERIFIER(!rpc_lire_spoolman_liste(&liste, pas_un_tableau, strlen(pas_un_tableau)));
+    VERIFIER(liste.nb == 42);
+    VERIFIER(!rpc_lire_spoolman_liste(&liste, "pas du json", 11));
+    VERIFIER(!rpc_lire_spoolman_liste(NULL, json, strlen(json)));
+
+    /* --- statut --- */
+    spoolman_etat_t etat;
+    const char *statut =
+        "{\"result\":{\"spoolman_connected\":true,\"pending_reports\":[],\"spool_id\":7}}";
+    VERIFIER(rpc_lire_spoolman_statut(&etat, statut, strlen(statut)));
+    VERIFIER(etat.connecte);
+    VERIFIER(etat.statut_connu);
+    VERIFIER(etat.id_actif == 7);
+
+    const char *aucune =
+        "{\"result\":{\"spoolman_connected\":false,\"spool_id\":null}}";
+    VERIFIER(rpc_lire_spoolman_statut(&etat, aucune, strlen(aucune)));
+    VERIFIER(!etat.connecte);
+    VERIFIER(etat.id_actif == SPOOLMAN_AUCUNE_BOBINE); /* null, PAS 0 */
+
+    etat.id_actif = 99;
+    const char *sans_result = "{\"params\":[]}";
+    VERIFIER(!rpc_lire_spoolman_statut(&etat, sans_result, strlen(sans_result)));
+    VERIFIER(etat.id_actif == 99);
+
+    /* --- notification notify_active_spool_set --- */
+    uint32_t id_msg = 123;
+    const char *notif =
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notify_active_spool_set\","
+        "\"params\":[{\"spool_id\":5}]}";
+    VERIFIER(rpc_classifier(notif, strlen(notif), &id_msg) == RPC_MSG_SPOOL_ACTIF);
+    VERIFIER(id_msg == 0); /* une notification n'a pas d'id correle */
+    int32_t actif = 0;
+    VERIFIER(rpc_lire_notif_spool_actif(&actif, notif, strlen(notif)));
+    VERIFIER(actif == 5);
+
+    const char *notif_nulle =
+        "{\"method\":\"notify_active_spool_set\",\"params\":[{\"spool_id\":null}]}";
+    VERIFIER(rpc_lire_notif_spool_actif(&actif, notif_nulle, strlen(notif_nulle)));
+    VERIFIER(actif == SPOOLMAN_AUCUNE_BOBINE);
+
+    /* Cle absente : false, et `actif` garde sa valeur -- mieux vaut ne rien
+       apprendre que d'effacer la bobine active sur un message incomplet. */
+    actif = 77;
+    const char *notif_vide = "{\"method\":\"notify_active_spool_set\",\"params\":[{}]}";
+    VERIFIER(!rpc_lire_notif_spool_actif(&actif, notif_vide, strlen(notif_vide)));
+    VERIFIER(actif == 77);
+}
+
 void suite_moonraker_rpc(void)
 {
     printf("suite : protocole moonraker (JSON-RPC / WebSocket)\n");
@@ -1614,4 +1732,5 @@ void suite_moonraker_rpc(void)
     section_lire_methode();
     section_methode_commande();
     section_profils_bed_mesh();
+    section_spoolman();
 }
