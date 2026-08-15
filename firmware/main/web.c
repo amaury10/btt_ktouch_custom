@@ -254,10 +254,24 @@ static esp_err_t gestion_status(httpd_req_t *req)
  * correspond pas au contenu qu'il vient de lire. */
 static esp_err_t gestion_state(httpd_req_t *req)
 {
-    etat_klipper_t etat;
+    /* JAMAIS un etat_klipper_t local (coredump du 2026-08-15, PANIC
+     * LoadProhibited via listes de taches corrompues) : ~1,8 Ko sur la pile
+     * httpd (4-6 Kio) SOUS la serialisation cJSON complete -- le
+     * debordement sautait le canari et ecrasait le TCB voisin, panic differe
+     * dans l'ordonnanceur, uniquement imprimante EN LIGNE (generation != 0
+     * = chemin profond). Scratch PSRAM paresseux, meme patron que le tampon
+     * de gestion_log() : serveur mono-tache, une requete a la fois. */
+    static etat_klipper_t *etat_scratch;
+    if (etat_scratch == NULL) {
+        etat_scratch = (etat_klipper_t *)heap_caps_malloc(sizeof(*etat_scratch), MALLOC_CAP_SPIRAM);
+        if (etat_scratch == NULL) {
+            return httpd_resp_send_500(req);
+        }
+    }
+    etat_klipper_t *etat_ptr = etat_scratch;
     uint32_t generation = 0;
     liaison_etat_t liaison = LIAISON_CONNEXION;
-    bool copie_reussie = boucle_instantane(&etat, sizeof(etat), &generation, &liaison);
+    bool copie_reussie = boucle_instantane(etat_ptr, sizeof(*etat_ptr), &generation, &liaison);
 
     /* Ni `copie_reussie` ni `generation != 0` ne suffisent seuls.
      * `copie_reussie` est faux si la boucle n'a jamais démarré (hôte non
@@ -297,7 +311,7 @@ static esp_err_t gestion_state(httpd_req_t *req)
     if (etat_disponible) {
         cJSON *etat_json = cJSON_AddObjectToObject(racine, "etat");
         if (etat_json != NULL) {
-            cJSON_AddStringToObject(etat_json, "etat", etat.etat);
+            cJSON_AddStringToObject(etat_json, "etat", etat_ptr->etat);
 
             /* v2 (tache 1, jalon 3a) : `extrudeurs` est un tableau des SEULS
              * chauffeurs presents -- un client ne doit jamais avoir a
@@ -314,7 +328,7 @@ static esp_err_t gestion_state(httpd_req_t *req)
             cJSON *extrudeurs = cJSON_AddArrayToObject(etat_json, "extrudeurs");
             if (extrudeurs != NULL) {
                 for (uint8_t i = 0; i < KLIPPER_EXTRUDEURS_MAX; i++) {
-                    if (!etat.extrudeurs[i].presente) {
+                    if (!etat_ptr->extrudeurs[i].presente) {
                         continue;
                     }
                     cJSON *item = cJSON_CreateObject();
@@ -322,25 +336,25 @@ static esp_err_t gestion_state(httpd_req_t *req)
                         continue;
                     }
                     cJSON_AddNumberToObject(item, "index", i);
-                    cJSON_AddNumberToObject(item, "actuelle", (double)etat.extrudeurs[i].actuelle);
-                    cJSON_AddNumberToObject(item, "consigne", (double)etat.extrudeurs[i].consigne);
+                    cJSON_AddNumberToObject(item, "actuelle", (double)etat_ptr->extrudeurs[i].actuelle);
+                    cJSON_AddNumberToObject(item, "consigne", (double)etat_ptr->extrudeurs[i].consigne);
                     cJSON_AddItemToArray(extrudeurs, item);
                 }
             }
-            cJSON_AddNumberToObject(etat_json, "nb_extrudeurs", etat.nb_extrudeurs);
-            cJSON_AddNumberToObject(etat_json, "outil_actif", etat.outil_actif);
+            cJSON_AddNumberToObject(etat_json, "nb_extrudeurs", etat_ptr->nb_extrudeurs);
+            cJSON_AddNumberToObject(etat_json, "outil_actif", etat_ptr->outil_actif);
 
             cJSON *plateau = cJSON_AddObjectToObject(etat_json, "plateau");
             if (plateau != NULL) {
-                cJSON_AddBoolToObject(plateau, "presente", etat.plateau.presente);
-                cJSON_AddNumberToObject(plateau, "actuelle", (double)etat.plateau.actuelle);
-                cJSON_AddNumberToObject(plateau, "consigne", (double)etat.plateau.consigne);
+                cJSON_AddBoolToObject(plateau, "presente", etat_ptr->plateau.presente);
+                cJSON_AddNumberToObject(plateau, "actuelle", (double)etat_ptr->plateau.actuelle);
+                cJSON_AddNumberToObject(plateau, "consigne", (double)etat_ptr->plateau.consigne);
             }
 
             cJSON *ventilateurs = cJSON_AddArrayToObject(etat_json, "ventilateurs");
             if (ventilateurs != NULL) {
                 for (uint8_t i = 0; i < KLIPPER_VENTILATEURS_MAX; i++) {
-                    if (!etat.ventilateurs[i].present) {
+                    if (!etat_ptr->ventilateurs[i].present) {
                         continue;
                     }
                     cJSON *item = cJSON_CreateObject();
@@ -348,18 +362,18 @@ static esp_err_t gestion_state(httpd_req_t *req)
                         continue;
                     }
                     cJSON_AddNumberToObject(item, "index", i);
-                    cJSON_AddNumberToObject(item, "vitesse", (double)etat.ventilateurs[i].vitesse);
+                    cJSON_AddNumberToObject(item, "vitesse", (double)etat_ptr->ventilateurs[i].vitesse);
                     cJSON_AddItemToArray(ventilateurs, item);
                 }
             }
 
-            cJSON_AddItemToObject(etat_json, "position", cJSON_CreateFloatArray(etat.position, 3));
-            cJSON_AddNumberToObject(etat_json, "axes_references", etat.axes_references);
-            cJSON_AddBoolToObject(etat_json, "deplacement_absolu", etat.deplacement_absolu);
+            cJSON_AddItemToObject(etat_json, "position", cJSON_CreateFloatArray(etat_ptr->position, 3));
+            cJSON_AddNumberToObject(etat_json, "axes_references", etat_ptr->axes_references);
+            cJSON_AddBoolToObject(etat_json, "deplacement_absolu", etat_ptr->deplacement_absolu);
 
-            cJSON_AddNumberToObject(etat_json, "vitesse_pct", etat.vitesse_pct);
-            cJSON_AddNumberToObject(etat_json, "flux_pct", etat.flux_pct);
-            cJSON_AddNumberToObject(etat_json, "babystep_z_um", etat.babystep_z_um);
+            cJSON_AddNumberToObject(etat_json, "vitesse_pct", etat_ptr->vitesse_pct);
+            cJSON_AddNumberToObject(etat_json, "flux_pct", etat_ptr->flux_pct);
+            cJSON_AddNumberToObject(etat_json, "babystep_z_um", etat_ptr->babystep_z_um);
 
             /* Tache 5 (panneau Limits, sous-projet "panneaux KlipperScreen") :
              * les quatre limites toolhead, memes noms de cle que les champs
@@ -369,19 +383,19 @@ static esp_err_t gestion_state(httpd_req_t *req)
              * faire via `generation` (voir plus haut), meme convention que
              * vitesse_pct/flux_pct ci-dessus (0 = pas recu, publie sans
              * traitement special). */
-            cJSON_AddNumberToObject(etat_json, "limite_velocity", (double)etat.limite_velocity);
-            cJSON_AddNumberToObject(etat_json, "limite_accel", (double)etat.limite_accel);
-            cJSON_AddNumberToObject(etat_json, "limite_square_corner", (double)etat.limite_square_corner);
-            cJSON_AddNumberToObject(etat_json, "limite_accel_to_decel", (double)etat.limite_accel_to_decel);
+            cJSON_AddNumberToObject(etat_json, "limite_velocity", (double)etat_ptr->limite_velocity);
+            cJSON_AddNumberToObject(etat_json, "limite_accel", (double)etat_ptr->limite_accel);
+            cJSON_AddNumberToObject(etat_json, "limite_square_corner", (double)etat_ptr->limite_square_corner);
+            cJSON_AddNumberToObject(etat_json, "limite_accel_to_decel", (double)etat_ptr->limite_accel_to_decel);
 
             /* Tache 6 (panneau Retraction, sous-projet "panneaux
              * KlipperScreen") : les quatre champs firmware_retraction, meme
              * convention que limite_* ci-dessus (0 = pas encore recu ou
              * objet absent de la machine, publie tel quel). */
-            cJSON_AddNumberToObject(etat_json, "retr_length", (double)etat.retr_length);
-            cJSON_AddNumberToObject(etat_json, "retr_speed", (double)etat.retr_speed);
-            cJSON_AddNumberToObject(etat_json, "retr_unretract_extra", (double)etat.retr_unretract_extra);
-            cJSON_AddNumberToObject(etat_json, "retr_unretract_speed", (double)etat.retr_unretract_speed);
+            cJSON_AddNumberToObject(etat_json, "retr_length", (double)etat_ptr->retr_length);
+            cJSON_AddNumberToObject(etat_json, "retr_speed", (double)etat_ptr->retr_speed);
+            cJSON_AddNumberToObject(etat_json, "retr_unretract_extra", (double)etat_ptr->retr_unretract_extra);
+            cJSON_AddNumberToObject(etat_json, "retr_unretract_speed", (double)etat_ptr->retr_unretract_speed);
 
             /* `macros` en tableau de chaines : le nom de macro Klipper est
              * la seule information utile a un client, l'index dans le
@@ -392,7 +406,7 @@ static esp_err_t gestion_state(httpd_req_t *req)
              * un producteur amont (voir web_macros.h) et n'est PAS garanti
              * <= KLIPPER_MACROS_MAX a ce point -- c'est exactement le cas
              * que `macros_tronquees` existe pour signaler. Passer
-             * `etat.nb_macros` non borne a cJSON_CreateStringArray() ferait
+             * `etat_ptr->nb_macros` non borne a cJSON_CreateStringArray() ferait
              * lire ce dernier au-dela des KLIPPER_MACROS_MAX entrees
              * remplies de `noms_macros` ci-dessous, dereferencant de la
              * memoire de pile non initialisee comme autant de pointeurs de
@@ -401,13 +415,13 @@ static esp_err_t gestion_state(httpd_req_t *req)
              * valeur bornee (`n`) alimente a la fois la boucle de
              * remplissage et le compte passe a cJSON : aucune chance que les
              * deux divergent a nouveau. */
-            uint8_t n = web_nb_macros_serialisables(etat.nb_macros);
+            uint8_t n = web_nb_macros_serialisables(etat_ptr->nb_macros);
             const char *noms_macros[KLIPPER_MACROS_MAX];
             for (uint8_t i = 0; i < n; i++) {
-                noms_macros[i] = etat.macros[i];
+                noms_macros[i] = etat_ptr->macros[i];
             }
             cJSON_AddItemToObject(etat_json, "macros", cJSON_CreateStringArray(noms_macros, n));
-            cJSON_AddBoolToObject(etat_json, "macros_tronquees", etat.macros_tronquees);
+            cJSON_AddBoolToObject(etat_json, "macros_tronquees", etat_ptr->macros_tronquees);
 
             /* Tache 2, jalon "browser de fichiers" : `fichiers` en tableau de
              * chaines, exactement comme `macros` ci-dessus. La liste ne vit
@@ -430,11 +444,11 @@ static esp_err_t gestion_state(httpd_req_t *req)
             cJSON_AddItemToObject(etat_json, "fichiers", cJSON_CreateStringArray(noms_fichiers, n_fichiers));
             cJSON_AddBoolToObject(etat_json, "fichiers_tronques", fics.tronques);
 
-            cJSON_AddStringToObject(etat_json, "fichier", etat.fichier);
-            cJSON_AddNumberToObject(etat_json, "progression", (double)etat.progression);
-            cJSON_AddNumberToObject(etat_json, "temps_restant_s", (double)etat.temps_restant_s);
-            cJSON_AddBoolToObject(etat_json, "impression_en_cours", etat.impression_en_cours);
-            cJSON_AddBoolToObject(etat_json, "impression_en_pause", etat.impression_en_pause);
+            cJSON_AddStringToObject(etat_json, "fichier", etat_ptr->fichier);
+            cJSON_AddNumberToObject(etat_json, "progression", (double)etat_ptr->progression);
+            cJSON_AddNumberToObject(etat_json, "temps_restant_s", (double)etat_ptr->temps_restant_s);
+            cJSON_AddBoolToObject(etat_json, "impression_en_cours", etat_ptr->impression_en_cours);
+            cJSON_AddBoolToObject(etat_json, "impression_en_pause", etat_ptr->impression_en_pause);
         }
     } else {
         /* `null`, jamais un objet rempli de zéros : dit honnêtement "rien à
@@ -999,6 +1013,14 @@ esp_err_t web_start(void)
        en host-test (echec d'EXECUTION). 16 laisse de la marge pour de futures
        routes sans re-toucher ceci. */
     config.max_uri_handlers = 16;
+    /* Pile relevée (coredump du 2026-08-15, débordement dans gestion_state
+       imprimante EN LIGNE) : le défaut (4096) ne laissait aucune marge sous
+       la sérialisation cJSON complète de /state -- l'etat_klipper_t local a
+       été sorti de la pile (scratch PSRAM, voir gestion_state), ce relevé
+       assume le RESTE (récursion cJSON, snprintf, TLS de send). 8 Kio en RAM
+       interne : coût unique et borné, tâche pérenne. s_marge_pile_min (/log)
+       continue de surveiller le minimum réel. */
+    config.stack_size = 8192;
 
     httpd_handle_t serveur = NULL;
     esp_err_t erreur = httpd_start(&serveur, &config);
