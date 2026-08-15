@@ -469,6 +469,15 @@ void suite_ecran_accueil_hub(void)
 
     ECRAN_ACCUEIL_HUB.mettre_a_jour(&etat, false, ctx);
     VERIFIER(ctx->serie[3] != NULL);
+
+    /* Echelle verticale du graphe : du haut (300) vers le bas (0), la
+       demande utilisateur etant de VOIR l'echelle, pas seulement de l'avoir
+       (2026-08-15). */
+    VERIFIER_TEXTE(lv_label_get_text(ctx->echelle[0]), "300");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->echelle[1]), "200");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->echelle[2]), "100");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->echelle[3]), "0");
+
     int16_t dernier_t3 = -1;
     VERIFIER(klipper_temp_historique_dernier(3, &dernier_t3));
     VERIFIER(dernier_t3 == 77);
@@ -505,11 +514,15 @@ void suite_ecran_accueil_hub(void)
     /* 1 zone_chauffants (le pool entier de lignes-boutons vit DEDANS, voir
      * plus bas) + 1 ligne de statut (position/outil/vitesse-flux/progression
      * consolides, tache de suivi refinement 2 -- remplace les TROIS lignes de
-     * l'ancien resume) + 1 chart + 1 zone_menu = 4 -- depuis la tache de
-     * suivi "chauffants en boutons scrollables", les lignes de chauffants ne
-     * sont PLUS des enfants directs de `conteneur` (elles l'etaient quand
-     * nom/valeur etaient des lv_label_t nus). */
-    VERIFIER(lv_obj_get_child_count(conteneur) == 4u);
+     * l'ancien resume) + 1 chart + ECRAN_ACCUEIL_HUB_ECHELLE_NB libelles
+     * d'echelle verticale + 1 zone_menu -- depuis la tache de suivi
+     * "chauffants en boutons scrollables", les lignes de chauffants ne sont
+     * PLUS des enfants directs de `conteneur` (elles l'etaient quand
+     * nom/valeur etaient des lv_label_t nus). Les libelles d'echelle sont
+     * poses sur le conteneur plutot que dans le lv_chart (2026-08-15, voir
+     * echelle_creer()) -- d'ou leur presence dans ce compte, et zone_menu
+     * qui reste le DERNIER enfant (relu juste en dessous par index). */
+    VERIFIER(lv_obj_get_child_count(conteneur) == 4u + ECRAN_ACCUEIL_HUB_ECHELLE_NB);
     lv_obj_t *zone_chauffants = lv_obj_get_child(conteneur, 0);
     VERIFIER(zone_chauffants != NULL);
     /* (ECRAN_ACCUEIL_HUB_HEATER_LIGNES * 2) boutons nom+valeur, pool entier

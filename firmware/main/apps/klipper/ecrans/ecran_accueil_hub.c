@@ -276,6 +276,11 @@ static const uint32_t COULEURS_SERIE[KLIPPER_HISTO_SERIES] = {
 #define CHART_Y_MIN 0
 #define CHART_Y_MAX 300
 
+/* Largeur reservee aux chiffres de l'echelle, a l'interieur du graphe :
+ * "300" en police 14 fait ~26 px, plus une gouttiere. */
+#define ECHELLE_LARGEUR 34
+#define ECHELLE_HAUTEUR_TEXTE 16 /* hauteur approchee d'une ligne en police 14 */
+
 /* Cree la serie `i` sur le chart (couleur COULEURS_SERIE[i]) et la backfille
  * depuis le store -- factorisee entre construire() ET mettre_a_jour() : au
  * BOOT REEL (app_main.c), navigation_empiler(&ECRAN_ACCUEIL_HUB) tourne
@@ -685,6 +690,46 @@ static const struct {
     [ECRAN_ACCUEIL_HUB_MENU_USB]           = { "USB",           ouvrir_usb_cb },
 };
 
+/* Echelle verticale du graphe : ECRAN_ACCUEIL_HUB_ECHELLE_NB chiffres du
+ * HAUT (CHART_Y_MAX) vers le BAS (CHART_Y_MIN), poses en absolu sur le
+ * parent plutot qu'en enfants du lv_chart -- lv_chart gere sa propre zone de
+ * trace, y greffer des enfants exposerait a ses reglages internes de
+ * padding/clipping pour rien.
+ *
+ * Placement vertical : la valeur v est a la fraction (MAX - v)/(MAX - MIN)
+ * de la hauteur. Les deux extremes sont RABATTUS dans le graphe (le haut
+ * colle en haut, le bas remonte d'une hauteur de texte) au lieu d'etre
+ * centres sur leur ligne : centre, "300" deborderait a moitie au-dessus du
+ * graphe et "0" a moitie en dessous. */
+static void echelle_creer(ecran_accueil_hub_ctx_t *ctx, lv_obj_t *parent)
+{
+    for (uint8_t i = 0; i < ECRAN_ACCUEIL_HUB_ECHELLE_NB; i++) {
+        int valeur = CHART_Y_MAX -
+                     (int)((long)i * (CHART_Y_MAX - CHART_Y_MIN) /
+                           (ECRAN_ACCUEIL_HUB_ECHELLE_NB - 1));
+        lv_coord_t y = (lv_coord_t)(CHART_Y +
+                                    (long)i * CHART_HAUTEUR / (ECRAN_ACCUEIL_HUB_ECHELLE_NB - 1));
+        if (i == 0) {
+            y = CHART_Y + 2;
+        } else if (i == ECRAN_ACCUEIL_HUB_ECHELLE_NB - 1) {
+            y = (lv_coord_t)(CHART_Y + CHART_HAUTEUR - ECHELLE_HAUTEUR_TEXTE - 2);
+        } else {
+            y = (lv_coord_t)(y - ECHELLE_HAUTEUR_TEXTE / 2);
+        }
+
+        lv_obj_t *label = lv_label_create(parent);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_width(label, ECHELLE_LARGEUR - 6);
+        lv_obj_set_pos(label, GAUCHE_X + 2, y);
+        char texte[8];
+        snprintf(texte, sizeof(texte), "%d", valeur);
+        lv_label_set_text(label, texte);
+        ctx->echelle[i] = label;
+    }
+}
+
 static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
 {
     ecran_accueil_hub_ctx_t *ctx = contexte;
@@ -800,7 +845,16 @@ static void ecran_accueil_hub_construire(lv_obj_t *parent, void *contexte)
     lv_chart_set_point_count(ctx->chart, KLIPPER_HISTO_POINTS);
     lv_chart_set_update_mode(ctx->chart, LV_CHART_UPDATE_MODE_SHIFT);
     lv_chart_set_range(ctx->chart, LV_CHART_AXIS_PRIMARY_Y, CHART_Y_MIN, CHART_Y_MAX);
-    lv_chart_set_div_line_count(ctx->chart, 3, 0);
+    /* 2 lignes de division (et non 3) depuis l'ajout de l'echelle chiffree :
+       avec la plage 0-300, elles tombent sur 100 et 200 -- donc EXACTEMENT
+       sous deux des quatre graduations. Trois lignes donnaient 75/150/225,
+       qu'aucun chiffre affiche n'aurait explique. */
+    lv_chart_set_div_line_count(ctx->chart, 2, 0);
+    /* Marge gauche DANS le graphe : la zone de trace commence apres, les
+       courbes ne passent donc jamais sous les chiffres de l'echelle. */
+    lv_obj_set_style_pad_left(ctx->chart, ECHELLE_LARGEUR, 0);
+
+    echelle_creer(ctx, parent);
 
     for (uint8_t i = 0; i < KLIPPER_HISTO_SERIES; i++) {
         if (klipper_temp_historique_serie_presente(i)) {

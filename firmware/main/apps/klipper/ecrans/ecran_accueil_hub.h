@@ -138,6 +138,12 @@ typedef struct {
     uint16_t consigne_courante;
 } ecran_accueil_hub_chauffant_info_t;
 
+/* Graduations de l'echelle verticale du graphe : 4 = les bornes plus deux
+ * intermediaires, ce qui tombe sur des centaines rondes avec la plage par
+ * defaut 0-300 C (300/200/100/0) et laisse le graphe lisible sans le
+ * surcharger de chiffres. */
+#define ECRAN_ACCUEIL_HUB_ECHELLE_NB 4
+
 typedef struct ecran_accueil_hub_ctx_s {
     /* --- colonne gauche : lignes de chauffants -- `chauffant_nom[i]`/
      * `chauffant_valeur[i]` sont TOUJOURS la paire de BOUTONS de la ligne `i`
@@ -190,6 +196,12 @@ typedef struct ecran_accueil_hub_ctx_s {
      * garde-fou de rafraichissement (spec) : mettre_a_jour() ne touche au
      * chart QUE quand klipper_temp_historique_generation() a change depuis
      * cette valeur. */
+    /* Echelle verticale du graphe (demande utilisateur : « afficher
+       l'echelle verticale de temperature dans le graph ») : ECHELLE_NB
+       libelles fixes, du HAUT (CHART_Y_MAX) vers le BAS (CHART_Y_MIN),
+       alignes sur les lignes de division. Exposes pour que host-test lise
+       les valeurs affichees plutot que de deviner. */
+    lv_obj_t *echelle[ECRAN_ACCUEIL_HUB_ECHELLE_NB];
     lv_obj_t          *chart;
     lv_chart_series_t *serie[KLIPPER_HISTO_SERIES];
     uint32_t            derniere_gen;
