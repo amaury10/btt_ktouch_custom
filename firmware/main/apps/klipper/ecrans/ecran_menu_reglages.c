@@ -11,7 +11,7 @@
  * reprend neanmoins l'idiome de grille a cases fixes (position calculee,
  * `_Static_assert` de non-debordement + clearance du bandeau).
  *
- * BOUTONS(X) liste les onze cases (indice, libelle, symbole ECRAN_*) -- X()
+ * BOUTONS(X) liste les douze cases (indice, libelle, symbole ECRAN_*) -- X()
  * est instanciee deux fois plus bas : une premiere pour generer les onze
  * rappels de clic `menu_reglages_cb_<symbole>()` (chacun ferme sur son propre
  * `navigation_empiler(&<symbole>)`, meme X-macro que STUBS() dans
@@ -20,6 +20,8 @@
  * `mettre_a_jour = NULL` (rien a rafraichir), `detruire = NULL` (rien a
  * liberer au-dela du contexte -- voir ecran.h). */
 #include "ecran_menu_reglages.h"
+
+#include "ecran_parc.h" /* ECRAN_PARC -- gestion de parc (2026-08-15) */
 
 #include "ecran_console.h"       /* ECRAN_CONSOLE (feature "Console gcode", tache B) */
 #include "ecran_limites.h"       /* ECRAN_LIMITES */
@@ -102,7 +104,8 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + GRILLE_Y + GRILLE_HAUTEUR <= BANDEAU_Y_ECRA
     X(ECRAN_MENU_REGLAGES_CASE_INPUT_SHAPER, "Input Shaper", ECRAN_INPUT_SHAPER)                                      \
     X(ECRAN_MENU_REGLAGES_CASE_SPOOLMAN, "Spoolman", ECRAN_SPOOLMAN)                                                  \
     X(ECRAN_MENU_REGLAGES_CASE_UPDATER, "Updater", ECRAN_UPDATER)                                                     \
-    X(ECRAN_MENU_REGLAGES_CASE_CONSOLE, "Console", ECRAN_CONSOLE)
+    X(ECRAN_MENU_REGLAGES_CASE_CONSOLE, "Console", ECRAN_CONSOLE)                                                     \
+    X(ECRAN_MENU_REGLAGES_CASE_PRINTERS, "Printers", ECRAN_PARC)
 
 /* Un rappel de clic par case -- signature imposee par lv_obj_add_event_cb(),
  * chacun ferme sur son propre `navigation_empiler(&<symbole>)`. Echec

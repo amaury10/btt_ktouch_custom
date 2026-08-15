@@ -57,7 +57,9 @@
 #define ECRAN_MENU_REGLAGES_CASE_SPOOLMAN      8
 #define ECRAN_MENU_REGLAGES_CASE_UPDATER       9
 #define ECRAN_MENU_REGLAGES_CASE_CONSOLE      10
-#define ECRAN_MENU_REGLAGES_NB                11
+/* Gestion de parc (2026-08-15) : navigation vers l'ecran Parc. */
+#define ECRAN_MENU_REGLAGES_CASE_PRINTERS     11
+#define ECRAN_MENU_REGLAGES_NB                12
 
 typedef struct ecran_menu_reglages_ctx_s {
     lv_obj_t *zone_grille;

@@ -49,6 +49,7 @@ static const struct {
     const char *libelle;
     const char *id_cible;
 } CASES_ATTENDUES[ECRAN_MENU_REGLAGES_NB] = {
+    [ECRAN_MENU_REGLAGES_CASE_PRINTERS]      = { "Printers",      "parc" },
     [ECRAN_MENU_REGLAGES_CASE_ZCALIBRATE]    = { "Z Calibrate",   "zcalibrate" },
     [ECRAN_MENU_REGLAGES_CASE_BED_LEVEL]     = { "Bed Level",     "niveau_lit" },
     [ECRAN_MENU_REGLAGES_CASE_LIMITS]        = { "Limits",        "limites" },

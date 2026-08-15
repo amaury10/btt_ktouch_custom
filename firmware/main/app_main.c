@@ -33,6 +33,7 @@
 #include "pandatouch_display.h"
 
 #include "accueil_choix.h"
+#include "parc_imprimantes.h" /* parc_charger -- gestion de parc (2026-08-15) */
 #include "usb_fichiers.h" /* usb_fichiers_generation -- canal de génération externe de l'habillage */
 #include "backend.h"
 #include "backend_factice.h"
@@ -85,6 +86,17 @@ static const char *raison_reset_nom(esp_reset_reason_t raison)
     case ESP_RST_SDIO:      return "SDIO";
     default:                return "INCONNUE";
     }
+}
+
+/* Somme des générations des stores INDÉPENDANTS de l'imprimante (contrat
+ * habillage.h : « plusieurs stores : additionner leurs compteurs ») --
+ * fichiers USB + parc (revue du 2026-08-15, L1 : le parc seul n'était pas
+ * raccordé, l'écran Parc restait figé imprimante hors ligne, précisément le
+ * cas d'usage de la bascule). Des compteurs monotones dont la somme change
+ * dès que l'un bouge. */
+static uint32_t generation_externe_klipper(void)
+{
+    return usb_fichiers_generation() + parc_generation();
 }
 
 /* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,
@@ -461,6 +473,11 @@ void app_main(void)
                        esp_err_to_name(erreur_reglages));
     }
 
+    /* Gestion de parc (2026-08-15) : APRÈS reglages_charger() -- la
+     * migration de parc_charger() lit l'hôte historique pour peupler
+     * l'entrée 0 d'un appareil déjà configuré (voir parc_imprimantes.h). */
+    parc_charger();
+
     if (!reglages_configures()) {
         /* Premier démarrage, ou réglages jamais saisis : normal, pas une
          * erreur. L'écran de première configuration (ECRAN_CONFIGURATION,
@@ -665,7 +682,7 @@ void app_main(void)
              * (revue du 2026-08-14, L2 ; voir habillage.h). Même motif
              * d'injection que les hooks ci-dessus : l'habillage ne connaît
              * pas usb_fichiers.h, l'application branche. */
-            habillage_definir_generation_externe(usb_fichiers_generation);
+            habillage_definir_generation_externe(generation_externe_klipper);
             esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_HUB);
             if (erreur_accueil != ESP_OK) {
                 JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
