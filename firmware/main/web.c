@@ -99,6 +99,9 @@
 #include "liaison.h"
 #include "netlog.h"
 #include "ota.h"
+#include "parc_imprimantes.h"   /* routes /parc et /parc-hote (2026-08-15) */
+#include "ecran_configuration.h" /* ecran_configuration_valider() -- validation de /parc-hote */
+#include "source_reglages.h"     /* ui_reglages_definir_hote() -- entree active de /parc-hote */
 #include "pandatouch_display.h"
 #include "rescue.h"
 #include "web_macros.h"
@@ -154,6 +157,7 @@ static esp_err_t gestion_racine(httpd_req_t *req)
         "<li><a href=\"/backup-btt\">/backup-btt</a> — sauvegarde du firmware BTT vers spiffs</li>"
         "<li><a href=\"/ota\">/ota</a> — mise a jour OTA (panneau : etat + verification a blanc + flash reel)</li>"
         "<li><a href=\"/restore-btt\">/restore-btt</a> — restauration du firmware BTT depuis la sauvegarde</li>"
+        "<li><a href=\"/parc\">/parc</a> — configuration + etats du parc (JSON)</li>"
         "<li><a href=\"/coredump\">/coredump</a> — dump du dernier crash (404 si aucun)</li>"
         "</ul></body></html>";
     httpd_resp_set_type(req, "text/html; charset=utf-8");
@@ -523,6 +527,99 @@ static esp_err_t gestion_log(httpd_req_t *req)
  * avec l'ELF du build dont l'empreinte (/status, champ "sha") correspond.
  * Un GET est sûr ici (lecture seule, même principe que /log) ; le dump n'est
  * jamais effacé par cette route, le prochain crash l'écrase de lui-même. */
+/* GET /parc : configuration + états sondés du parc, en JSON -- outil de
+ * diagnostic né le 2026-08-15, quand une adresse mal enregistrée était
+ * indevinable depuis l'extérieur (le journal ne montre que l'hôte de boot).
+ * Lecture seule, même sûreté que /status. */
+static esp_err_t gestion_parc(httpd_req_t *req)
+{
+    parc_config_t config;
+    parc_config_lire(&config);
+    parc_etat_t etats[PARC_MAX];
+    parc_etats_lire(etats);
+
+    /* Statique (~1 Ko max), même raison que le tampon de gestion_log() :
+       serveur mono-tâche, jamais sur la pile httpd. */
+    static char reponse[1024];
+    size_t pos = 0;
+    pos += (size_t)snprintf(reponse + pos, sizeof(reponse) - pos,
+                            "{\"nb\":%u,\"actif\":%u,\"entrees\":[",
+                            (unsigned)config.nb, (unsigned)config.actif);
+    for (uint8_t i = 0; i < config.nb && pos < sizeof(reponse) - 1; i++) {
+        pos += (size_t)snprintf(reponse + pos, sizeof(reponse) - pos,
+                                "%s{\"nom\":\"%s\",\"adresse\":\"%s\",\"port\":%u,"
+                                "\"sonde\":%s,\"atteignable\":%s,\"etat\":\"%s\"}",
+                                i > 0 ? "," : "",
+                                config.entrees[i].nom, config.entrees[i].hote.adresse,
+                                (unsigned)config.entrees[i].hote.port,
+                                etats[i].sonde ? "true" : "false",
+                                etats[i].atteignable ? "true" : "false", etats[i].etat);
+    }
+    if (pos < sizeof(reponse) - 3) {
+        pos += (size_t)snprintf(reponse + pos, sizeof(reponse) - pos, "]}");
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, reponse, pos);
+}
+
+/* POST /parc-hote?i=N : remplace l'hôte de l'entrée N du parc (corps de
+ * requête = "adresse:port", validé par ecran_configuration_valider --
+ * jamais un second analyseur). Né le 2026-08-15 : deux saisies d'adresse
+ * perdues à l'écran (clavier + crashs pendant l'enregistrement) -- une
+ * dalle de parc doit pouvoir être réparée depuis le PC. Si N est l'entrée
+ * ACTIVE, l'hôte de boot est aussi mis à jour (mêmes règles que la bascule
+ * de ecran_parc.c) -- SANS redémarrage automatique : le client le
+ * déclenche via /revert ou physiquement, même philosophie que /ota. */
+static esp_err_t gestion_parc_hote(httpd_req_t *req)
+{
+    char parametre[8] = "";
+    char requete[32];
+    if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) == ESP_OK) {
+        (void)httpd_query_key_value(requete, "i", parametre, sizeof(parametre));
+    }
+    int indice = (parametre[0] != '\0') ? atoi(parametre) : -1;
+
+    char corps[96];
+    int longueur = httpd_req_recv(req, corps, sizeof(corps) - 1);
+    if (longueur <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "corps attendu : adresse:port\n");
+    }
+    corps[longueur] = '\0';
+    /* CR/LF de fin (curl --data ajoute parfois un \n) : retirés. */
+    while (longueur > 0 && (corps[longueur - 1] == '\n' || corps[longueur - 1] == '\r')) {
+        corps[--longueur] = '\0';
+    }
+
+    parc_config_t config;
+    parc_config_lire(&config);
+    if (indice < 0 || indice >= (int)config.nb) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "parametre i invalide (0..nb-1)\n");
+    }
+
+    backend_hote_t hote;
+    char erreur[64];
+    if (!ecran_configuration_valider(corps, &hote, erreur, sizeof(erreur))) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, erreur);
+        return httpd_resp_sendstr(req, "\n");
+    }
+
+    config.entrees[indice].hote = hote;
+    if (parc_config_definir(&config) != ESP_OK) {
+        return httpd_resp_send_500(req);
+    }
+    if ((uint8_t)indice == config.actif) {
+        if (ui_reglages_definir_hote(&hote) != ESP_OK) {
+            return httpd_resp_send_500(req);
+        }
+    }
+    JOURNAL_INFO(TAG, "parc-hote : entree %d -> %s:%u%s", indice, hote.adresse,
+                 (unsigned)hote.port, ((uint8_t)indice == config.actif) ? " (active, hote de boot maj)" : "");
+    return httpd_resp_sendstr(req, "ok -- redemarrer pour appliquer si entree active\n");
+}
+
 static esp_err_t gestion_coredump(httpd_req_t *req)
 {
     size_t adresse = 0;
@@ -1012,7 +1109,7 @@ esp_err_t web_start(void)
        GET/POST /ota et GET/POST /restore-btt. Invisible a la compilation comme
        en host-test (echec d'EXECUTION). 16 laisse de la marge pour de futures
        routes sans re-toucher ceci. */
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 20; /* 15 routes au 2026-08-15 (+/parc, +/parc-hote), marge relevée */
     /* Pile relevée (coredump du 2026-08-15, débordement dans gestion_state
        imprimante EN LIGNE) : le défaut (4096) ne laissait aucune marge sous
        la sérialisation cJSON complète de /state -- l'etat_klipper_t local a
@@ -1065,6 +1162,12 @@ esp_err_t web_start(void)
         .uri = "/restore-btt", .method = HTTP_POST, .handler = gestion_restore_btt, .user_ctx = NULL,
     };
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    static const httpd_uri_t route_parc = {
+        .uri = "/parc", .method = HTTP_GET, .handler = gestion_parc, .user_ctx = NULL,
+    };
+    static const httpd_uri_t route_parc_hote = {
+        .uri = "/parc-hote", .method = HTTP_POST, .handler = gestion_parc_hote, .user_ctx = NULL,
+    };
     static const httpd_uri_t route_coredump = {
         .uri = "/coredump", .method = HTTP_GET, .handler = gestion_coredump, .user_ctx = NULL,
     };
@@ -1083,6 +1186,8 @@ esp_err_t web_start(void)
     enregistrer_route(serveur, &route_restore_btt_page);
     enregistrer_route(serveur, &route_restore_btt);
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
+    enregistrer_route(serveur, &route_parc);
+    enregistrer_route(serveur, &route_parc_hote);
     enregistrer_route(serveur, &route_coredump);
 #endif
 
