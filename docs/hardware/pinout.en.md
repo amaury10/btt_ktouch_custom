@@ -28,7 +28,7 @@ chosen so that every wiring fault shows up.
 | Red, green, blue, white bars **in that order** | The 16 data pins are in the right order; no channel swap |
 | Four markers visible **at all four corners** | The full 800 × 480 is scanned; resolution and porches correct |
 | Crisp text, no offset and no tearing | Correct synchronisation; DE mode operational |
-| **Stable image, no flicker** | Pixel clock and porches viable at 23 MHz |
+| **Stable image, no flicker and no tearing** | Pixel clock and porches viable (see "Validated timings") |
 | Backlight lit | `GPIO21` and the LEDC configuration correct |
 
 Reversibility was demonstrated in two distinct ways, and it is worth not
@@ -59,19 +59,30 @@ Data pins, in `DATA0` to `DATA15` order:
 
 ## Validated timings
 
-| Parameter | Value |
-|---|---|
-| Resolution | 800 × 480 |
-| Pixel clock | **23 MHz** |
-| HSYNC: pulse / back porch / front porch | 4 / 8 / 8 |
-| VSYNC: pulse / back porch / front porch | 4 / 16 / 16 |
+| Parameter | Value chosen | First attempt (26 July) |
+|---|---|---|
+| Resolution | 800 × 480 | 800 × 480 |
+| Pixel clock | **14.8 MHz** | 23 MHz |
+| HSYNC: pulse / back porch / front porch | **4 / 16 / 16** | 4 / 8 / 8 |
+| VSYNC: pulse / back porch / front porch | **4 / 32 / 32** | 4 / 16 / 16 |
 
-> The upstream component also defines `PT_LCD_PCLK_HZ_MIN` as 14 MHz. The 23 MHz
-> value is the one from BTT's official repository and it is the one validated
-> here. Take care if you start from a third-party copy: the one shipped with
-> Prusa-Connect-Touch was lowered to 17 MHz by its authors, to reduce contention
-> on the PSRAM bus. Both probably work, but only the 23 MHz value is confirmed by
-> this test.
+**Both columns ran on the device; the first one is the one kept.** The first
+attempt (23 MHz, short porches) gives a stable image, with no flicker and no
+artefact — that is what was measured during the 49 minutes of continuous
+operation described above. But as soon as a real UI redraws continuously, that
+setting **tears**: the refresh band becomes visible on movement.
+
+Moving to 14.8 MHz with porches twice as wide removes that tearing, by giving
+the RGB controller enough headroom to absorb PSRAM bus contention. It is the
+`PT_LCD_PCLK_HZ` value of the upstream component; the firmware does not touch
+it.
+
+> The component also defines `PT_LCD_PCLK_HZ_MIN` as 14 MHz: 14.8 MHz therefore
+> sits just above the floor BTT intends. To place the other copies in
+> circulation, the one shipped with Prusa-Connect-Touch runs at 17 MHz, lowered
+> by its authors for the same PSRAM contention reason. Three values do work,
+> then, but only the one kept here is confirmed **tear-free on an animated UI**,
+> which is the only criterion that counts beyond a static test pattern.
 
 ## Backlight
 

@@ -89,8 +89,10 @@ zip archive, etc.).
 runs the `tests` executable. It propagates the exit code of `tests`:
 non-zero as soon as a check fails.
 
-Expected output (seven suites at the time of writing; this number grows as
-new `tests/test_*.c` files are added):
+The output lists one line per suite, then a final count. As of 16 August 2026:
+**87 suites, 4352 checks, 0 failures** — these numbers grow with every
+`tests/test_*.c` file added, so do not take them for a contract; only the
+`0 echec(s)` is one. The first and last lines look like this:
 
 ```
 suite : harnais
@@ -98,11 +100,12 @@ suite : contrat
 suite : analyseur moonraker
 suite : magasin d'etat
 suite : liaison
-suite : backend factice
-suite : analyseur d'hote (adresse:port)
-suite : boucle_cycle
+...
+suite : parc d'imprimantes (config + etats + parseur de sonde)
+suite : bed mesh (store + parseur du sous-objet Moonraker)
+suite : ecran spoolman (liste de bobines + selection de l'active)
 
-168 verification(s), 0 echec(s)
+4352 verification(s), 0 echec(s)
 ```
 
 (A few `I backend_factice: ...` / `W backend_factice: ...` lines are

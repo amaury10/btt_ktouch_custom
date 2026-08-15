@@ -1,7 +1,11 @@
+*Cette page est également disponible en [anglais](licence-du-composant-btt.en.md).*
+
 # La licence manquante de `PandaTouch_IDF`
 
 Ce document consigne le constat de licence qui a déterminé l'architecture du
-dépôt, et conserve un texte de signalement rédigé mais **non envoyé**.
+dépôt — architecture depuis abandonnée sans décision, voir plus bas — et
+reproduit le signalement **posté chez BIGTREETECH**
+([`PandaTouch_IDF#1`](https://github.com/bigtreetech/PandaTouch_IDF/issues/1)).
 
 ## Le constat
 

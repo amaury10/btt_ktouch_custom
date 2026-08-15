@@ -78,6 +78,12 @@ both modes displayed a throwaway demo screen — no longer the case now that
 
 - `--capture <chemin>`: offscreen mode, writes a PNG to `<chemin>` then
   exits (exit code 0). Without this option: interactive SDL window mode.
+- `--app <accueil|jouet>`: selects the application mounted on the core —
+  `accueil` (the Klipper client, **this is the default**) or `jouet`
+  (`exemples/backend_jouet/`, the demonstration that a third-party
+  application hooks onto the same core). Any other value falls back to
+  `accueil` rather than failing, the same defensive policy as `--scenario`
+  facing an unknown number.
 - `--scenario <n>`: selects the fake backend's scenario (see
   `backend_factice_scenario()` in `firmware/main/core/backend_factice.h`, the
   only source of truth for this numbering — it has already changed once

@@ -78,6 +78,12 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
 
 - `--capture <chemin>` : mode hors écran, écrit un PNG à `<chemin>` puis
   quitte (code de sortie 0). Sans cette option : mode fenêtre SDL interactif.
+- `--app <accueil|jouet>` : choisit l'application montée sur le socle —
+  `accueil` (le client Klipper, **c'est le défaut**) ou `jouet`
+  (`exemples/backend_jouet/`, la démonstration qu'une application tierce
+  s'accroche au même socle). Toute autre valeur retombe sur `accueil` plutôt
+  que d'échouer, même politique défensive que `--scenario` face à un numéro
+  inconnu.
 - `--scenario <n>` : choisit le scénario du backend factice (voir
   `backend_factice_scenario()` dans `firmware/main/core/backend_factice.h`,
   la seule source de vérité pour cette numérotation — elle a déjà changé une

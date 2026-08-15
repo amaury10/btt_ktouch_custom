@@ -90,8 +90,11 @@ transfert (partage réseau, archive zip, etc.).
 lance l'exécutable `tests`. Il rend le code de sortie de `tests` : non nul
 dès qu'une vérification échoue.
 
-Sortie attendue (sept suites au moment d'écrire ceci ; ce nombre grandit à
-mesure que de nouveaux fichiers `tests/test_*.c` s'ajoutent) :
+La sortie liste une ligne par suite, puis un décompte final. Au 16 août 2026 :
+**87 suites, 4352 vérifications, 0 échec** — ces nombres grandissent à chaque
+fichier `tests/test_*.c` ajouté, donc ne les prenez pas pour un contrat, seul
+le `0 echec(s)` en est un. Les premières et les dernières lignes ressemblent à
+ceci :
 
 ```
 suite : harnais
@@ -99,11 +102,12 @@ suite : contrat
 suite : analyseur moonraker
 suite : magasin d'etat
 suite : liaison
-suite : backend factice
-suite : analyseur d'hote (adresse:port)
-suite : boucle_cycle
+...
+suite : parc d'imprimantes (config + etats + parseur de sonde)
+suite : bed mesh (store + parseur du sous-objet Moonraker)
+suite : ecran spoolman (liste de bobines + selection de l'active)
 
-168 verification(s), 0 echec(s)
+4352 verification(s), 0 echec(s)
 ```
 
 (Quelques lignes `I backend_factice: ...` / `W backend_factice: ...`
