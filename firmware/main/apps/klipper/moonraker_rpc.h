@@ -61,7 +61,11 @@ bool rpc_construire_requete(char *sortie, size_t taille, uint32_t id,
 /* 384 -> 448 (modules Bed Mesh + Input Shaper, 2026-08-15 : +2 objets dans
  * la liste d'abonnement, ~+32 octets ; le test host au tampon minimal --
  * garde-fou C8 -- verifie que cette valeur SUFFIT reellement). */
-#define RPC_ABONNEMENT_TAILLE_MIN 448
+/* 448 -> 512 (fix mesh absent, 2026-08-15) : bed_mesh est passe de `null` a
+ * une liste d'attributs cibles (~+50 octets) pour que l'instantane
+ * d'abonnement tienne dans le tampon RX de 16 Ko -- voir le commentaire
+ * PARAMS dans rpc_construire_abonnement(). */
+#define RPC_ABONNEMENT_TAILLE_MIN 512
 
 /* Requête `printer.objects.subscribe` (nom de méthode JSON-RPC Moonraker :
  * des POINTS, jamais de '/' — Moonraker dérive ses méthodes par

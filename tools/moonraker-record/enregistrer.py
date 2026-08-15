@@ -81,7 +81,8 @@ SUBSCRIBE_PARAMS = (
     # manquait depuis le panneau Retraction, et les deux ci-dessous arrivent
     # avec les modules Bed Mesh / Input Shaper.
     '"firmware_retraction":null,'
-    '"bed_mesh":null,"input_shaper":null'
+    '"bed_mesh":["profile_name","mesh_min","mesh_max","probed_matrix"],'
+    '"input_shaper":null'
     "}}"
 )
 

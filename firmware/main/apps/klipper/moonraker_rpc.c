@@ -69,7 +69,18 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
         "\"heater_bed\":null,\"fan\":null,"
         "\"print_stats\":null,\"virtual_sdcard\":null,\"webhooks\":null,"
         "\"firmware_retraction\":null,"
-        "\"bed_mesh\":null,\"input_shaper\":null"
+        /* bed_mesh : abonnement CIBLE (liste d'attributs), jamais `null`.
+         * L'objet entier embarque `mesh_matrix` (matrice interpolee) et
+         * `profiles` (TOUS les profils sauvegardes avec leurs matrices) :
+         * sur une imprimante reelle, l'instantane d'abonnement depassait
+         * MOONRAKER_WS_TAMPON_OCTETS (16 Ko) et etait abandonne en bloc --
+         * l'etat se re-remplissait via les notifications suivantes, mais le
+         * mesh, immuable au repos, ne revenait JAMAIS (constate sur la
+         * CR-10 S5, 2026-08-15 : "message WS au-dela de 16383 octets ;
+         * ignore"). On ne demande que ce que bed_mesh_fusionner_json()
+         * consomme. */
+        "\"bed_mesh\":[\"profile_name\",\"mesh_min\",\"mesh_max\",\"probed_matrix\"],"
+        "\"input_shaper\":null"
         "}}";
     return rpc_construire_requete(sortie, taille, id, "printer.objects.subscribe", PARAMS);
 }

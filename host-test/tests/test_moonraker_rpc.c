@@ -53,7 +53,9 @@ static void section_construire_abonnement(void)
     /* Modules Bed Mesh + Input Shaper (spec 2026-08-15) : leurs objets
      * doivent etre abonnes, sinon leurs ecrans restent vides pour toujours
      * (meme piege que firmware_retraction, voir le commentaire plus haut). */
-    VERIFIER(strstr(tampon, "\"bed_mesh\":null") != NULL);
+    VERIFIER(strstr(tampon,
+                    "\"bed_mesh\":[\"profile_name\",\"mesh_min\",\"mesh_max\",\"probed_matrix\"]")
+             != NULL);
     VERIFIER(strstr(tampon, "\"input_shaper\":null") != NULL);
     VERIFIER(strstr(tampon, "\"heater_bed\":null") != NULL);
     VERIFIER(strstr(tampon, "\"fan\":null") != NULL);
