@@ -36,6 +36,7 @@
 #include "parc_imprimantes.h" /* parc_charger -- gestion de parc (2026-08-15) */
 #include "usb_fichiers.h" /* usb_fichiers_generation -- canal de génération externe de l'habillage */
 #include "backend.h"
+#include "boite_noire.h"
 #include "backend_factice.h"
 #include "backend_moonraker.h"
 #include "boucle.h"
@@ -347,6 +348,17 @@ void app_main(void)
     const char *raison_reset_texte = raison_reset_nom(raison_reset);
     ESP_LOGW(TAG, "raison du reset precedent : %s (%d)", raison_reset_texte, (int)raison_reset);
     web_set_reset_reason(raison_reset_texte);
+
+    /* Boîte noire RTC (chasse aux WDT(7) muets du 2026-08-15, voir
+     * boite_noire.h) : les zones suspectes actives A L'INSTANT du dernier
+     * reset. 0 = aucune ; bit0 = sonde HTTP du parc, bit1 = clavier ouvert,
+     * bit2 = traitement d'un message WS. Journalisée seulement si non nulle
+     * OU si le reset est un crash -- un boot propre reste silencieux. */
+    uint32_t boite_noire = boite_noire_relever();
+    if (boite_noire != 0 || raison_reset == ESP_RST_PANIC || raison_reset == ESP_RST_WDT ||
+        raison_reset == ESP_RST_INT_WDT || raison_reset == ESP_RST_TASK_WDT) {
+        ESP_LOGW(TAG, "boite noire au reset : 0x%02" PRIx32 " (1=sonde 2=clavier 4=ws_rx)", boite_noire);
+    }
 
     /* Empreinte ELF (SHA-256 tronqué) : deux builds peuvent porter la MÊME
      * version git (constaté : un binaire par slot, tous deux estampillés

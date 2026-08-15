@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "app_main.c" "rescue.c" "wifi.c" "netlog.c" "web.c" "web_macros.c" "ota_image.c" "ota.c"
+    SRCS "app_main.c" "boite_noire.c" "rescue.c" "wifi.c" "netlog.c" "web.c" "web_macros.c" "ota_image.c" "ota.c"
          "core/etat_store.c" "core/liaison.c" "core/backend_factice.c" "core/hote_parse.c" "core/reglages.c"
          "core/boucle.c" "core/boucle_cycle.c" "core/plateforme.c" "core/plateforme_esp.c"
          "apps/klipper/moonraker_parse.c" "apps/klipper/moonraker_rpc.c" "apps/klipper/moonraker_boite.c" "apps/klipper/klipper_fichiers.c" "apps/klipper/power_devices.c" "apps/klipper/console_log.c" "apps/klipper/json_util.c" "apps/klipper/klipper_temp_historique.c" "apps/klipper/miniature.c" "apps/klipper/miniature_fetch.c"

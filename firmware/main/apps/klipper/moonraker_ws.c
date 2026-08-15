@@ -46,6 +46,7 @@
 
 #include "cJSON.h"
 #include "console_log.h"
+#include "boite_noire.h" /* chasse aux WDT muets, voir boite_noire.h */
 #include "journal.h"
 #include "klipper_fichiers.h"
 #include "miniature.h"       /* feature "Miniatures gcode", tache B */
@@ -960,6 +961,7 @@ static void traiter_message_complet(const char *json, size_t longueur)
  *     preuve qu'un serveur réel fragmente ainsi). */
 static void traiter_data(const esp_websocket_event_data_t *data)
 {
+    boite_noire_lever(BOITE_NOIRE_WS_RX); /* chasse aux WDT muets, voir boite_noire.h */
     if (data->payload_offset == 0) {
         /* Premiere partie (ou totalite) d'une trame : reinitialise le tampon
          * de reassemblage. `g_tampon_texte` n'accepte QUE les trames TEXTE
@@ -975,12 +977,14 @@ static void traiter_data(const esp_websocket_event_data_t *data)
     }
 
     if (!g_tampon_texte || data->data_len <= 0) {
+        boite_noire_rabattre(BOITE_NOIRE_WS_RX);
         return;
     }
     if (g_tampon_deborde) {
         /* Message deja abandonne : on continue d'ignorer ses fragments
          * suivants sans les recopier, jusqu'a la resynchronisation naturelle
          * au prochain payload_offset==0. */
+        boite_noire_rabattre(BOITE_NOIRE_WS_RX);
         return;
     }
 
@@ -991,6 +995,7 @@ static void traiter_data(const esp_websocket_event_data_t *data)
          * (meme politique que le tampon HTTP de backend_moonraker.c). */
         g_tampon_deborde = true;
         journaliser_debordement();
+        boite_noire_rabattre(BOITE_NOIRE_WS_RX);
         return;
     }
 
@@ -1039,6 +1044,7 @@ static void traiter_data(const esp_websocket_event_data_t *data)
             envoyer_requete_miniature(g_fichier_a_demander_miniature);
         }
     }
+    boite_noire_rabattre(BOITE_NOIRE_WS_RX);
 }
 
 /* Callback de la minuterie de reconnexion (esp_timer, tourne dans la tache

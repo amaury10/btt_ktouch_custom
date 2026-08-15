@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "boite_noire.h" /* chasse aux WDT muets pendant la saisie, voir boite_noire.h */
 #include "journal.h"
 #include "lvgl.h"
 
@@ -154,6 +155,7 @@ static void evenement_clavier(lv_event_t *e)
     g_clavier.clavier  = NULL;
     g_clavier.rappel   = NULL;
     g_clavier.contexte = NULL;
+    boite_noire_rabattre(BOITE_NOIRE_CLAVIER); /* chasse aux WDT muets, voir boite_noire.h */
 
     /* lv_obj_delete_async() : jamais lv_obj_delete() ici. Cet événement est
      * en train d'être distribué PAR l'objet qu'on détruirait (le clavier
@@ -190,6 +192,7 @@ void clavier_ouvrir(const char *titre, const char *valeur_initiale,
      * est garantie au-dessus de l'écran actif entier, quel que soit l'ordre
      * de construction de ce dernier — pas de dépendance fragile sur le fait
      * que ce fichier soit construit après l'habillage. */
+    boite_noire_lever(BOITE_NOIRE_CLAVIER); /* chasse aux WDT muets (2 crashs en saisie), voir boite_noire.h */
     g_clavier.racine = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(g_clavier.racine);
     lv_obj_set_size(g_clavier.racine, LARGEUR_ECRAN, HAUTEUR_ECRAN);

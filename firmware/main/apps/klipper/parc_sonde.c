@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "boite_noire.h"
 #include "journal.h"
 #include "parc_imprimantes.h"
 #include "parc_parse.h"
@@ -72,8 +73,10 @@ static void sonder_une(uint8_t indice, const parc_entree_t *entree)
         .timeout_ms = PARC_SONDE_TIMEOUT_MS,
         .method = HTTP_METHOD_GET,
     };
+    boite_noire_lever(BOITE_NOIRE_SONDE_HTTP); /* chasse aux WDT muets, voir boite_noire.h */
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (client == NULL) {
+        boite_noire_rabattre(BOITE_NOIRE_SONDE_HTTP);
         parc_etat_publier(indice, &etat);
         return;
     }
@@ -91,6 +94,7 @@ static void sonder_une(uint8_t indice, const parc_entree_t *entree)
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    boite_noire_rabattre(BOITE_NOIRE_SONDE_HTTP);
 
     if (longueur > 0) {
         s_reponse[longueur] = '\0';
