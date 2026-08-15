@@ -49,13 +49,18 @@ désormais indépendamment, vérifiés sur matériel. Le reste n'est qu'une couc
 collage au-dessus de `esp_lcd_rgb_panel` et `esp_lcd_touch_gt911`, tous deux
 publiés par Espressif sous Apache-2.0.
 
-## Signalement rédigé, non envoyé
+## Signalement envoyé
 
-Le texte ci-dessous a été préparé pour une issue chez BIGTREETECH, puis mis de
-côté ; il a été **corrigé le 2026-08-16** (il affirmait encore que ce dépôt ne
-redistribuait rien, et portait un lien resté à l'état d'espace réservé). Il est conservé au cas où la question redeviendrait d'actualité — par
-exemple si l'on souhaitait un jour intégrer le composant plutôt que le
-référencer. **Rien n'a été publié chez un tiers.**
+Le texte ci-dessous a été **posté chez BIGTREETECH** :
+[`bigtreetech/PandaTouch_IDF#1`](https://github.com/bigtreetech/PandaTouch_IDF/issues/1).
+Il demande l'ajout d'un fichier `LICENSE` et propose une PR avec le texte MIT
+standard. Il avait été rédigé bien plus tôt puis mis de côté ; il a été
+**corrigé juste avant l'envoi** — il affirmait encore que ce dépôt ne
+redistribuait rien du composant, ce qui n'est plus vrai (voir la section
+précédente), et portait un lien resté à l'état d'espace réservé.
+
+**Tant qu'il n'y a pas de réponse, rien ne change** : le dépôt redistribue du
+code sans licence, et la question reste à trancher avant publication.
 
 ---
 
