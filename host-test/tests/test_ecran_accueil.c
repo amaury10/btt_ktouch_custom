@@ -90,6 +90,33 @@ void suite_ecran_accueil(void)
     VERIFIER_TEXTE(lv_label_get_text(ctx->buse.valeur), "--");
     VERIFIER_TEXTE(lv_label_get_text(ctx->plateau.valeur), "--");
 
+    /* --- multi-tetes (constate sur la Snapmaker U1, 2026-08-15) : la tuile
+     * suit l'OUTIL ACTIF, jamais l'extrudeur 0 en dur -- en pleine
+     * impression sur l'outil 3 (indice 2), l'ecran affichait la buse froide
+     * de l'outil 1. Le libelle devient "Nozzle N" (1-base, comme l'usage
+     * humain) des que la machine a plusieurs tetes ; il reste "Nozzle" sur
+     * une mono-tete. */
+    etat.extrudeurs[0].actuelle = 30.0f;
+    etat.extrudeurs[0].consigne = 0.0f;
+    etat.extrudeurs[2].actuelle = 199.0f;
+    etat.extrudeurs[2].consigne = 205.0f;
+    etat.plateau.actuelle = 60.0f;
+    etat.nb_extrudeurs = 4;
+    etat.outil_actif = 2;
+    VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx), true));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->buse.valeur), "199.0");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->buse.consigne), "205.0");
+    VERIFIER_TEXTE(lv_label_get_text(ctx->buse.libelle), "Nozzle 3");
+    /* outil_actif hors bornes (donnee farfelue) : repli defensif sur 0. */
+    etat.outil_actif = 9;
+    VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx), true));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->buse.valeur), "30.0");
+    /* Retour mono-tete : libelle redevient "Nozzle" tout court. */
+    etat.nb_extrudeurs = 1;
+    etat.outil_actif = 0;
+    VERIFIER((ECRAN_ACCUEIL.mettre_a_jour(&etat, false, ctx), true));
+    VERIFIER_TEXTE(lv_label_get_text(ctx->buse.libelle), "Nozzle");
+
     /* --- nom de fichier occupant tout le champ SANS octet nul : le cas de
      * securite memoire.
      *

@@ -644,13 +644,26 @@ static void ecran_accueil_mettre_a_jour(const void *etat, bool donnees_perimees,
     char consigne[16];
     char temps[16];
 
-    /* Palier 1 tete (voir spec jalon 3 §6) : l'accueil affiche l'extrudeur 0
-     * quel que soit nb_extrudeurs -- les grilles multi-tetes arrivent avec
-     * les taches qui les consomment reellement, pas ici. */
-    ui_format_temperature(valeur, sizeof(valeur), e->extrudeurs[0].actuelle);
-    ui_format_temperature(consigne, sizeof(consigne), e->extrudeurs[0].consigne);
+    /* La tuile suit l'OUTIL ACTIF (fix du 2026-08-15, constate sur la
+     * Snapmaker U1 en pleine impression : l'outil 3 chauffait a 205 degres
+     * pendant que la tuile affichait la buse froide de l'outil 1 -- l'ancien
+     * "palier 1 tete" lisait extrudeurs[0] en dur). Borne defensive : un
+     * outil_actif farfelu retombe sur 0, jamais une lecture hors tableau.
+     * Le libelle devient "Nozzle N" (1-base, l'usage humain) des que la
+     * machine a plusieurs tetes -- reevalue a chaque appel, comme le reste
+     * (un toolchange en cours d'impression doit se voir immediatement). */
+    uint8_t outil = (e->outil_actif < e->nb_extrudeurs) ? e->outil_actif : 0;
+    ui_format_temperature(valeur, sizeof(valeur), e->extrudeurs[outil].actuelle);
+    ui_format_temperature(consigne, sizeof(consigne), e->extrudeurs[outil].consigne);
     tuile_definir_valeur(&ctx->buse, valeur);
     tuile_definir_consigne(&ctx->buse, consigne);
+    if (e->nb_extrudeurs > 1) {
+        char libelle_buse[16];
+        snprintf(libelle_buse, sizeof(libelle_buse), "Nozzle %u", (unsigned)(outil + 1));
+        lv_label_set_text(ctx->buse.libelle, libelle_buse);
+    } else {
+        lv_label_set_text(ctx->buse.libelle, "Nozzle");
+    }
 
     ui_format_temperature(valeur, sizeof(valeur), e->plateau.actuelle);
     ui_format_temperature(consigne, sizeof(consigne), e->plateau.consigne);
