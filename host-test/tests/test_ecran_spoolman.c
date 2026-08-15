@@ -194,7 +194,10 @@ void suite_ecran_spoolman(void)
     VERIFIER_TEXTE(arguments, "{\"spool_id\":1}");
     source_etat_sim_cycle();
 
-    /* Clear active -> {"spool_id":null}. */
+    /* Clear active -> {} : la cle est OMISE, jamais nulle. Moonraker rend
+     * HTTP 400 sur {"spool_id":null} (verifie sur machine reelle le
+     * 2026-08-15) et la bobine restait active -- ce VERIFIER_TEXTE est le
+     * garde-fou contre la reintroduction du null. */
     avant = source_etat_sim_file_taille();
     lv_obj_send_event(ctx->bouton_effacer, LV_EVENT_CLICKED, NULL);
     confirmer_dialogue("Clear active spool?");
@@ -203,7 +206,7 @@ void suite_ecran_spoolman(void)
     VERIFIER(source_etat_sim_derniere_commande(action, sizeof(action), arguments,
                                                sizeof(arguments)) == true);
     VERIFIER_TEXTE(action, BACKEND_ACTION_SPOOLMAN);
-    VERIFIER_TEXTE(arguments, "{\"spool_id\":null}");
+    VERIFIER_TEXTE(arguments, "{}");
     source_etat_sim_cycle();
 
     /* Refresh : declenche VRAIMENT une redemande de la liste (le mock

@@ -74,20 +74,25 @@ _Static_assert(BARRE_HAUTEUR_ECRAN + PIED_Y + PIED_HAUTEUR <= BANDEAU_Y_ECRAN,
  * Envoi de la selection
  * ---------------------------------------------------------------------- */
 
-/* {"spool_id":N} / {"spool_id":null} -- construit par cJSON plutot qu'un
+/* {"spool_id":N} / {} -- construit par cJSON plutot qu'un
  * snprintf, meme politique que les autres ecrans (voir
  * construire_arguments_gcode() dans rail_actions.c). */
 #define SPOOLMAN_ARGS_MAX 48
 
+/* `aucune` : la cle spool_id est OMISE, jamais mise a null (constate sur
+ * machine reelle le 2026-08-15, Moonraker v0.9.3) -- son handler fait
+ * `web_request.get_int("spool_id", None)`, qui tente `int(None)` des que la
+ * cle est PRESENTE : {"spool_id":null} rend HTTP 400 "Unable to convert
+ * argument [spool_id] to <class 'int'>" et la bobine reste active, sans que
+ * l'ecran n'en sache rien. Cle absente = le defaut None du handler = bobine
+ * desactivee. NE PAS "reparer" ce {} en null. */
 static void envoyer_selection(int32_t id, bool aucune)
 {
     cJSON *racine = cJSON_CreateObject();
     if (racine == NULL) {
         return;
     }
-    cJSON *valeur = aucune ? cJSON_AddNullToObject(racine, "spool_id")
-                           : cJSON_AddNumberToObject(racine, "spool_id", (double)id);
-    if (valeur == NULL) {
+    if (!aucune && cJSON_AddNumberToObject(racine, "spool_id", (double)id) == NULL) {
         cJSON_Delete(racine);
         return;
     }

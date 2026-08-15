@@ -42,7 +42,7 @@ faut (vérifié sur la machine réelle, Moonraker v0.9.3) :
 | --- | --- | --- |
 | Liste des bobines | `server.spoolman.proxy` | `{"request_method":"GET","path":"/v1/spool","query":"allow_archived=false"}` → `result` = tableau de bobines |
 | Bobine active + état | `server.spoolman.status` | `result.spool_id` (ou `null`), `result.spoolman_connected` |
-| Désigner l'active | `server.spoolman.spool_id` | `{"spool_id": N}` — `null` pour effacer |
+| Désigner l'active | `server.spoolman.spool_id` | `{"spool_id": N}` — **`{}`, clé omise**, pour effacer (voir ci-dessous) |
 | Changement d'active | notification `notify_active_spool_set` | `params[0].spool_id` |
 
 **Pourquoi `server.spoolman.spool_id` et pas la macro gcode
@@ -50,6 +50,13 @@ faut (vérifié sur la machine réelle, Moonraker v0.9.3) :
 dépend pas de `printer.cfg`, ne traverse pas la file gcode, et fonctionne
 même si Klippy est en erreur — trois raisons pour lesquelles un panneau
 d'écran ne doit pas emprunter le chemin gcode ici.
+
+**Piège vérifié sur la machine (2026-08-15)** : pour désactiver la bobine,
+la clé `spool_id` doit être **absente**, pas à `null`. Le handler Moonraker
+fait `web_request.get_int("spool_id", None)`, qui tente `int(None)` dès que
+la clé est présente : `{"spool_id": null}` répond `HTTP 400 — Unable to
+convert argument [spool_id] to <class 'int'>` et la bobine reste active.
+Clé omise = le défaut `None` du handler = désactivation.
 
 Forme réelle d'une bobine (relevée sur la machine, ~540 octets) : `id`,
 `filament.name`, `filament.vendor.name`, `filament.material`,
@@ -122,8 +129,8 @@ F1/F6, détection par sous-chaîne supprimée).
 
 ### Action backend
 
-`BACKEND_ACTION_SPOOLMAN` — `arguments_json` = `{"spool_id":N}` ou
-`{"spool_id":null}`, relayé tel quel à `server.spoolman.spool_id` : copie
+`BACKEND_ACTION_SPOOLMAN` — `arguments_json` = `{"spool_id":N}` ou `{}`
+(clé omise, voir le piège ci-dessus), relayé tel quel à `server.spoolman.spool_id` : copie
 exacte du patron `BACKEND_ACTION_POWER` (pas de repli HTTP, WS hors ligne =
 refus honnête).
 

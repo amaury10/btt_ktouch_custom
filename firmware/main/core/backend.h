@@ -99,8 +99,10 @@ typedef struct {
 #define BACKEND_ACTION_POWER      "power"
 
 /* Feature Spoolman (spec 2026-08-15) : designe la bobine chargee.
- * arguments_json = {"spool_id":N} ou {"spool_id":null} (aucune) — deja
- * construit par l'ecran (ecran_spoolman.c), relaye tel quel comme
+ * arguments_json = {"spool_id":N}, ou {} pour n'en designer AUCUNE — la cle
+ * est omise, jamais mise a null : Moonraker rejette {"spool_id":null} par un
+ * HTTP 400 (voir envoyer_selection() dans ecran_spoolman.c pour le detail,
+ * constate sur machine reelle). Deja construit par l'ecran, relaye tel quel comme
  * params_json de server.spoolman.spool_id : meme esprit que
  * BACKEND_ACTION_POWER juste au-dessus.
  *
