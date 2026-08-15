@@ -35,17 +35,17 @@ actual ESP-IDF version:
 git -C "<path to esp-idf>" describe --tags
 ```
 
-## Initialising the BSP submodule
+## The BSP is in the tree
 
-The `PandaTouch_IDF` component is a git submodule (never copied — the upstream
-repository has no LICENSE file, so we do not redistribute its code):
+The `PandaTouch_IDF` component is **present in this repository**
+(`firmware/components/PandaTouch_IDF/`): a plain clone is enough, there is no
+submodule to initialise for it.
 
-```bash
-git submodule update --init --recursive
-```
-
-Then check that `firmware/components/PandaTouch_IDF/include/pandatouch_display.h`
-exists.
+That was not the case originally, and the difference matters: the upstream
+repository has no `LICENSE` file, so the component used to be referenced as a
+submodule in order to redistribute none of it. The question is open — see
+[`../docs/licence-du-composant-btt.md`](../docs/licence-du-composant-btt.md)
+(French only).
 
 ## Setting the WiFi network
 
@@ -101,5 +101,8 @@ English.
 
 ## Do not modify
 
-`firmware/components/PandaTouch_IDF/` is BTT's code, imported as a submodule: do
-not touch it. Any necessary adaptation is done on the `firmware/main/` side.
+`firmware/components/PandaTouch_IDF/` is BTT's code: touch it only as a last
+resort, since adaptation normally belongs on the `firmware/main/` side. Two
+local fixes were nevertheless applied to it (VFS remount on SCSI unit
+attention, and one board constant); keeping them listed here matters, as they
+would diverge from any return to a submodule.

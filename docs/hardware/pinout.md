@@ -131,7 +131,9 @@ fuite mémoire observable.
 ## Sources
 
 Les valeurs de broches proviennent de `bigtreetech/PandaTouch_IDF`, publié par
-BIGTREETECH. Ce dépôt ne contient aucun fichier de licence ; il est référencé ici
-en sous-module et n'est pas redistribué. Les numéros de broches et les timings
-sont des faits matériels, non protégeables — c'est leur **vérification sur la
-K-Touch 5 pouces** qui constitue l'apport de ce document.
+BIGTREETECH. Ce dépôt ne contient aucun fichier de licence, et le composant est
+aujourd'hui présent dans cet arbre — une situation ouverte, détaillée dans
+[`../licence-du-composant-btt.md`](../licence-du-composant-btt.md). Les numéros
+de broches et les timings sont, eux, des faits matériels non protégeables :
+c'est leur **vérification sur la K-Touch 5 pouces** qui constitue l'apport de ce
+document, et elle ne dépend d'aucune licence.

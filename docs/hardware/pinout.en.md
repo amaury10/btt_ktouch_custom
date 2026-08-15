@@ -130,7 +130,9 @@ leak.
 ## Sources
 
 The pin values come from `bigtreetech/PandaTouch_IDF`, published by BIGTREETECH.
-That repository contains no licence file; it is referenced here as a submodule
-and is not redistributed. Pin numbers and timings are hardware facts, not
-protectable — it is their **verification on the 5-inch K-Touch** that constitutes
-the contribution of this document.
+That repository contains no licence file, and the component is currently present
+in this tree — an open situation, detailed in
+[`../licence-du-composant-btt.md`](../licence-du-composant-btt.md) (French
+only). Pin numbers and timings are, for their part, hardware facts and not
+protectable: it is their **verification on the 5-inch K-Touch** that constitutes
+the contribution of this document, and it depends on no licence.

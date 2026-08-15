@@ -91,10 +91,19 @@ MIT pour le code de ce dépôt.
 
 Le support matériel provient du composant
 [`bigtreetech/PandaTouch_IDF`](https://github.com/bigtreetech/PandaTouch_IDF),
-référencé en sous-module et **jamais redistribué ici**. Cette précaution n'est
-pas de forme : ce dépôt affiche un badge « License: MIT » pointant vers un
-fichier `LICENSE` qui n'existe pas, et l'API de licence de GitHub n'y détecte
-aucune licence. Du code publié sans licence reste sous droit d'auteur plein.
+**dont la licence est un problème ouvert**. Ce dépôt affiche un badge
+« License: MIT » pointant vers un fichier `LICENSE` qui n'existe pas, son README
+dit lui-même « provided under the MIT License (*assumed*) », et l'API de licence
+de GitHub n'y détecte aucune licence. Du code publié sans licence reste sous
+droit d'auteur plein.
+
+Le composant était initialement référencé en sous-module, précisément pour n'en
+rien redistribuer. Depuis le 31 juillet 2026 il est **présent dans cet arbre**
+(`firmware/components/PandaTouch_IDF/`, 1 826 lignes, avec deux correctifs
+locaux) : ce dépôt redistribue donc du code sans licence. La question est
+ouverte et doit être tranchée avant toute publication — voir
+[`docs/licence-du-composant-btt.md`](docs/licence-du-composant-btt.md), qui
+détaille le constat, les options et le signalement rédigé pour BIGTREETECH.
 
 Trois autres dépendances tierces, vendorisées pour compiler sans matériel :
 

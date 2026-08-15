@@ -34,14 +34,16 @@ version réelle d'ESP-IDF :
 git -C "<chemin vers esp-idf>" describe --tags
 ```
 
-## Initialiser le sous-module BSP
+## Le BSP est dans l'arbre
 
-Le composant `PandaTouch_IDF` est un sous-module git (jamais copié — le dépôt
-amont n'a pas de fichier LICENSE, donc on ne redistribue pas son code) :
+Le composant `PandaTouch_IDF` est **présent dans ce dépôt**
+(`firmware/components/PandaTouch_IDF/`) : un clone suffit, il n'y a aucun
+sous-module à initialiser pour lui.
 
-```bash
-git submodule update --init --recursive
-```
+Ce n'était pas le cas au départ, et ce n'est pas anodin : le dépôt amont n'a
+pas de fichier `LICENSE`, ce composant était donc référencé en sous-module pour
+n'en rien redistribuer. Cette question est ouverte — voir
+[`../docs/licence-du-composant-btt.md`](../docs/licence-du-composant-btt.md).
 
 Vérifier ensuite que `firmware/components/PandaTouch_IDF/include/pandatouch_display.h`
 existe.
@@ -101,6 +103,8 @@ est en anglais.
 
 ## Ne pas modifier
 
-`firmware/components/PandaTouch_IDF/` est le code de BTT, importé en
-sous-module : ne pas y toucher. Toute adaptation nécessaire se fait côté
-`firmware/main/`.
+`firmware/components/PandaTouch_IDF/` est le code de BTT : n'y toucher qu'en
+dernier recours, toute adaptation se faisant normalement côté `firmware/main/`.
+Deux correctifs locaux y ont malgré tout été appliqués (reprise du montage VFS
+sur unit-attention SCSI, et une constante de carte) ; les garder recensés ici
+importe, puisqu'ils s'écarteraient d'un éventuel retour au sous-module.
