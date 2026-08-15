@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](klipper-simule.en.md).*
+
 # Klipper simulé (virtual-klipper-printer) pour les fixtures Moonraker
 
 ## Pourquoi

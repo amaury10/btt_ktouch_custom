@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](flashing.en.md).*
+
 # Flasher et récupérer la K-Touch sans câble série
 
 ## Contexte : ce qui a été perdu, et pourquoi

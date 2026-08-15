@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](README.en.md).*
+
 # Simulateur PC (LVGL + SDL)
 
 ## À quoi ça sert

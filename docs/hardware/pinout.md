@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](pinout.en.md).*
+
 # Pinout de la BIGTREETECH K-Touch — vérifié sur matériel
 
 **Statut : affichage et tactile confirmés sur matériel le 26 juillet 2026.**

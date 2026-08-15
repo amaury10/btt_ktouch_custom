@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](README.en.md).*
+
 # Harnais de test hôte
 
 ## À quoi ça sert

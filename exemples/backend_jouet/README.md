@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](README.en.md).*
+
 # Backend et écran jouets — mode d'emploi du fork
 
 Ce répertoire est la preuve, et le modèle, que le socle (`firmware/main/core/`

@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](partitions.en.md).*
+
 # Partitionnement de la flash K-Touch
 
 ## Vue d'ensemble

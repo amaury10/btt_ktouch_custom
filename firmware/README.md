@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](README.en.md).*
+
 # Firmware K-Touch custom
 
 Firmware ESP-IDF pour la BIGTREETECH K-Touch (ESP32-S3, PSRAM octale 8 Mio,

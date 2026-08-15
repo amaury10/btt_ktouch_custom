@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](README.en.md).*
+
 # Enregistreur de transcripts Moonraker (tâche 4, jalon 3a)
 
 `enregistrer.py` se connecte à un vrai Moonraker (voir
