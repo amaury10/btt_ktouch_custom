@@ -769,7 +769,7 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
     /* Feature "Power devices Moonraker", tache B : ECART DELIBERE par
      * rapport a est_macro/est_gcode ci-dessus -- ni extraction ni
      * reconstruction du JSON ici, `arguments_json` EST deja les params
-     * attendus par machine.device_power.set_device
+     * attendus par machine.device_power.post_device
      * ({"device":"...","action":"toggle"}, construits par l'ecran,
      * ecran_power.c) et lui est relaye tel quel (voir BACKEND_ACTION_POWER,
      * core/backend.h). Seule verification : un appelant qui invoque cette
@@ -781,7 +781,7 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
     }
 
     /* Feature Spoolman : meme contrat que power juste au-dessus --
-     * `arguments_json` EST deja les params de server.spoolman.spool_id
+     * `arguments_json` EST deja les params de server.spoolman.post_spool_id
      * ({"spool_id":N} ou {"spool_id":null}), construits par l'ecran. */
     bool est_spoolman = (strcmp(action, BACKEND_ACTION_SPOOLMAN) == 0);
     if (est_spoolman && arguments_json == NULL) {
@@ -899,7 +899,15 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
             bool succes = false;
             char erreur[128];
             erreur[0] = '\0';
-            esp_err_t erreur_ws = moonraker_ws_commande("server.spoolman.spool_id", arguments_json,
+            /* post_spool_id, PAS spool_id (constate sur machine reelle le
+             * 2026-08-15) : Moonraker prefixe le VERBE au dernier segment
+             * quand un endpoint accepte plusieurs verbes (voir
+             * APIDefinition.create() dans moonraker/common.py).
+             * /server/spoolman/spool_id etant GET|POST, les methodes JSON-RPC
+             * sont get_spool_id et post_spool_id -- "server.spoolman.spool_id"
+             * n'existe pas et rendait -32601 "Method not found". Les endpoints
+             * a verbe UNIQUE (status, proxy) gardent leur nom tel quel. */
+            esp_err_t erreur_ws = moonraker_ws_commande("server.spoolman.post_spool_id", arguments_json,
                                                           MOONRAKER_WS_COMMANDE_TIMEOUT_MS, &succes,
                                                           erreur, sizeof(erreur));
             if (erreur_ws != ESP_OK) {
@@ -927,7 +935,13 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
             bool succes = false;
             char erreur[128];
             erreur[0] = '\0';
-            esp_err_t erreur_ws = moonraker_ws_commande("machine.device_power.set_device", arguments_json,
+            /* post_device, PAS set_device (audit du 2026-08-15 contre un vrai
+             * Moonraker : "machine.device_power.set_device" n'existe pas, il
+             * rendait -32601). L'endpoint est /machine/device_power/device,
+             * GET|POST -> methodes get_device et post_device ; meme regle de
+             * prefixe que pour Spoolman juste au-dessus. Les params
+             * ({"device":..,"action":"toggle"}) etaient deja les bons. */
+            esp_err_t erreur_ws = moonraker_ws_commande("machine.device_power.post_device", arguments_json,
                                                           MOONRAKER_WS_COMMANDE_TIMEOUT_MS, &succes, erreur,
                                                           sizeof(erreur));
             if (erreur_ws != ESP_OK) {
@@ -938,7 +952,7 @@ static esp_err_t backend_moonraker_commande(void *etat, const char *action,
                 JOURNAL_ALERTE(TAG, "power refusee par Moonraker (%s)", erreur);
                 return ESP_FAIL;
             }
-            JOURNAL_INFO(TAG, "commande power -> WS machine.device_power.set_device");
+            JOURNAL_INFO(TAG, "commande power -> WS machine.device_power.post_device");
             return ESP_OK;
         }
 

@@ -42,14 +42,23 @@ faut (vérifié sur la machine réelle, Moonraker v0.9.3) :
 | --- | --- | --- |
 | Liste des bobines | `server.spoolman.proxy` | `{"request_method":"GET","path":"/v1/spool","query":"allow_archived=false"}` → `result` = tableau de bobines |
 | Bobine active + état | `server.spoolman.status` | `result.spool_id` (ou `null`), `result.spoolman_connected` |
-| Désigner l'active | `server.spoolman.spool_id` | `{"spool_id": N}` — **`{}`, clé omise**, pour effacer (voir ci-dessous) |
+| Désigner l'active | `server.spoolman.post_spool_id` | `{"spool_id": N}` — **`{}`, clé omise**, pour effacer (voir ci-dessous) |
 | Changement d'active | notification `notify_active_spool_set` | `params[0].spool_id` |
 
-**Pourquoi `server.spoolman.spool_id` et pas la macro gcode
+**Pourquoi `server.spoolman.post_spool_id` et pas la macro gcode
 `SET_ACTIVE_SPOOL`** (installée sur le Pi pour Mainsail/slicers) : elle ne
 dépend pas de `printer.cfg`, ne traverse pas la file gcode, et fonctionne
 même si Klippy est en erreur — trois raisons pour lesquelles un panneau
 d'écran ne doit pas emprunter le chemin gcode ici.
+
+**Deuxième piège, même endpoint (2026-08-15)** : le nom JSON-RPC n'est PAS
+`server.spoolman.spool_id` mais **`server.spoolman.post_spool_id`**. Moonraker
+préfixe le verbe au dernier segment du chemin dès qu'un endpoint accepte
+plusieurs verbes (`APIDefinition.create()`, `moonraker/common.py`) ;
+`/server/spoolman/spool_id` étant GET|POST, il expose `get_spool_id` et
+`post_spool_id`. Le nom sans préfixe répond `-32601 Method not found`. Les
+endpoints à verbe unique (`status`, `proxy`) gardent leur nom tel quel — c'est
+pourquoi la liste s'affichait alors que la sélection échouait.
 
 **Piège vérifié sur la machine (2026-08-15)** : pour désactiver la bobine,
 la clé `spool_id` doit être **absente**, pas à `null`. Le handler Moonraker

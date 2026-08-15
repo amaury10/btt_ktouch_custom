@@ -93,7 +93,7 @@ typedef struct {
  * prise pilotée par Moonraker (API machine.device_power.*). arguments_json =
  * {"device":"<nom>","action":"toggle"} — déjà construit par l'écran
  * (ecran_power.c), relayé tel quel au backend comme params_json de
- * machine.device_power.set_device (voir backend_moonraker.c) : même esprit
+ * machine.device_power.post_device (voir backend_moonraker.c) : même esprit
  * que BACKEND_ACTION_GCODE, l'appelant a déjà construit le JSON attendu par
  * Moonraker, le backend ne fait que le transmettre. */
 #define BACKEND_ACTION_POWER      "power"
@@ -103,7 +103,7 @@ typedef struct {
  * est omise, jamais mise a null : Moonraker rejette {"spool_id":null} par un
  * HTTP 400 (voir envoyer_selection() dans ecran_spoolman.c pour le detail,
  * constate sur machine reelle). Deja construit par l'ecran, relaye tel quel comme
- * params_json de server.spoolman.spool_id : meme esprit que
+ * params_json de server.spoolman.post_spool_id : meme esprit que
  * BACKEND_ACTION_POWER juste au-dessus.
  *
  * POURQUOI cette methode plutot que la macro gcode SET_ACTIVE_SPOOL
