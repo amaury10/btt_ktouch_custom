@@ -43,7 +43,11 @@
 
 #define GRILLE_Y        (ENTETE_Y + ENTETE_HAUTEUR + 8)
 #define GRILLE_HAUTEUR  300
-#define GRILLE_LARGEUR  430
+/* 430 -> 320 (retour utilisateur 2026-08-15) : la hauteur borne de toute
+ * facon les cellules carrees (~292 px utiles pour un 21x21), la zone large
+ * ne faisait que pousser le panneau d'infos -- resserree pour lui rendre
+ * ~120 px. */
+#define GRILLE_LARGEUR  320
 #define GRILLE_ECART    2 /* liseré entre cellules (le fond du conteneur transparaît) */
 
 #define LEGENDE_X        (MARGE + GRILLE_LARGEUR + 12)
@@ -51,7 +55,9 @@
 #define LEGENDE_SEGMENTS 25 /* 25 x 12 px = les 300 px de la grille */
 #define LEGENDE_ETIQ_X   (LEGENDE_X + LEGENDE_LARGEUR + 6)
 
-#define INFOS_X       560
+/* 560 -> 440 : suit le resserrement de la grille ; le panneau gagne en
+ * largeur ce qu'il faut pour la police 20 (lisibilite dalle 5"). */
+#define INFOS_X       440
 #define INFOS_LARGEUR (LARGEUR_CONTENU - INFOS_X - MARGE)
 
 #define BOUTONS_Y       (GRILLE_Y + GRILLE_HAUTEUR + 10)
@@ -216,18 +222,23 @@ static void remplir_infos(lv_obj_t *etiquette, const bed_mesh_t *mesh)
     bool positions_ok = bed_mesh_position_point(mesh, ligne_max, colonne_max, &x_max, &y_max) &&
                         bed_mesh_position_point(mesh, ligne_min, colonne_min, &x_min, &y_min);
 
+    /* Format compact "libellé : valeur", une ligne par info (retour
+       utilisateur 2026-08-15 : le format exact importe moins que de VOIR
+       les valeurs -- en police 20, une ligne par info tient dans la
+       largeur, deux n'y tiendraient plus en hauteur). %.4g sur les
+       positions : "162.5" reste "162.5", "420.0" devient "420". */
     char infos[256];
     if (positions_ok) {
         snprintf(infos, sizeof(infos),
-                 "Name\n %s\nSize\n %ux%u\nMax [%.1f, %.1f]\n %.3f mm\nMin [%.1f, %.1f]\n %.3f mm\nRange\n %.3f mm",
+                 "%s\n%ux%u\n\nMax  %.3f\n[%.4g, %.4g]\n\nMin  %.3f\n[%.4g, %.4g]\n\nRange  %.3f",
                  mesh->profil[0] != '\0' ? mesh->profil : "(none)",
                  (unsigned)mesh->nb_x, (unsigned)mesh->nb_y,
-                 (double)x_max, (double)y_max, (double)z_max,
-                 (double)x_min, (double)y_min, (double)z_min,
+                 (double)z_max, (double)x_max, (double)y_max,
+                 (double)z_min, (double)x_min, (double)y_min,
                  (double)(z_max - z_min));
     } else {
         snprintf(infos, sizeof(infos),
-                 "Name\n %s\nSize\n %ux%u\nMax\n %.3f mm\nMin\n %.3f mm\nRange\n %.3f mm",
+                 "%s\n%ux%u\n\nMax  %.3f\n\nMin  %.3f\n\nRange  %.3f",
                  mesh->profil[0] != '\0' ? mesh->profil : "(none)",
                  (unsigned)mesh->nb_x, (unsigned)mesh->nb_y,
                  (double)z_max, (double)z_min, (double)(z_max - z_min));
@@ -405,7 +416,10 @@ static void modal_ouvrir(ecran_bed_mesh_ctx_t *ctx)
     lv_obj_add_flag(voile, LV_OBJ_FLAG_CLICKABLE); /* absorbe les taps hors panneau */
     ctx->modal = voile;
 
-    lv_coord_t rangee_h = 46;
+    /* Rangées au MÊME gabarit que la liste de fichiers (ecran_fichiers.c :
+       hauteur 52, écart 6, rayon 8, texte 14 aligné à gauche, points de
+       suspension) -- retour utilisateur 2026-08-15 : "homogène". */
+    lv_coord_t rangee_h = 52;
     lv_coord_t nb_rangees = (profils.nb > 0) ? profils.nb : 1; /* 1 = "No saved profiles" */
     lv_coord_t panneau_h = (lv_coord_t)(52 + nb_rangees * (rangee_h + 6) + 56);
     if (panneau_h > HAUTEUR_CONTENU - 16) {
@@ -413,7 +427,7 @@ static void modal_ouvrir(ecran_bed_mesh_ctx_t *ctx)
     }
     lv_obj_t *panneau = lv_obj_create(voile);
     lv_obj_remove_style_all(panneau);
-    lv_obj_set_size(panneau, 430, panneau_h);
+    lv_obj_set_size(panneau, 500, panneau_h);
     lv_obj_align(panneau, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(panneau, lv_color_hex(COULEUR_MODAL_FOND), 0);
     lv_obj_set_style_bg_opa(panneau, LV_OPA_COVER, 0);
@@ -437,15 +451,23 @@ static void modal_ouvrir(ecran_bed_mesh_ctx_t *ctx)
     }
     for (uint8_t i = 0; i < profils.nb; i++) {
         lv_obj_t *rangee = lv_button_create(panneau);
-        lv_obj_set_size(rangee, 430 - 32, rangee_h);
+        lv_coord_t rangee_l = 500 - 32;
+        lv_obj_set_size(rangee, rangee_l, rangee_h);
         lv_obj_set_pos(rangee, 16, y);
         lv_obj_set_style_bg_color(rangee, lv_color_hex(COULEUR_BOUTON), 0);
+        lv_obj_set_style_border_width(rangee, 0, 0);
+        lv_obj_set_style_shadow_width(rangee, 0, 0);
+        lv_obj_set_style_radius(rangee, 8, 0);
         lv_obj_t *etiquette = lv_label_create(rangee);
-        lv_obj_set_style_text_font(etiquette, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(etiquette, &lv_font_montserrat_14, 0);
         lv_obj_set_style_text_color(etiquette, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
         bool actif = (profil_actif[0] != '\0') && (strcmp(profils.noms[i], profil_actif) == 0);
         char texte[40];
         snprintf(texte, sizeof(texte), "%s%s", profils.noms[i], actif ? "  (active)" : "");
+        lv_label_set_long_mode(etiquette, LV_LABEL_LONG_DOT);
+        lv_obj_set_style_text_align(etiquette, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_width(etiquette, rangee_l - 12);
+        lv_obj_update_layout(etiquette); /* meme piege de largeur que ecran_fichiers.c */
         lv_label_set_text(etiquette, texte);
         lv_obj_center(etiquette);
         /* Le rappel retrouve le nom en coupant le texte du label au premier
@@ -460,6 +482,9 @@ static void modal_ouvrir(ecran_bed_mesh_ctx_t *ctx)
     lv_obj_set_size(fermer, 140, 40);
     lv_obj_align(fermer, LV_ALIGN_BOTTOM_MID, 0, -8);
     lv_obj_set_style_bg_color(fermer, lv_color_hex(COULEUR_BOUTON), 0);
+    lv_obj_set_style_border_width(fermer, 0, 0);
+    lv_obj_set_style_shadow_width(fermer, 0, 0);
+    lv_obj_set_style_radius(fermer, 8, 0);
     lv_obj_t *etiquette_fermer = lv_label_create(fermer);
     lv_obj_set_style_text_color(etiquette_fermer, lv_color_hex(COULEUR_TEXTE_BOUTON), 0);
     lv_label_set_text(etiquette_fermer, "Close");
@@ -549,7 +574,7 @@ static void ecran_bed_mesh_construire(lv_obj_t *parent, void *contexte)
     lv_label_set_text(ctx->etiquette_z_bas, "");
 
     ctx->panneau_infos = lv_label_create(parent);
-    lv_obj_set_style_text_font(ctx->panneau_infos, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ctx->panneau_infos, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(ctx->panneau_infos, lv_color_hex(COULEUR_TEXTE_SECONDAIRE), 0);
     lv_obj_set_pos(ctx->panneau_infos, INFOS_X, GRILLE_Y);
     lv_obj_set_width(ctx->panneau_infos, INFOS_LARGEUR);
