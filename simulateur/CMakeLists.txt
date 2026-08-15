@@ -121,6 +121,8 @@ add_executable(ktouch-sim
     ${ECRANS_DIR}/ecran_fichiers.c
     ${ECRANS_DIR}/ecran_usb.c
     ${ECRANS_DIR}/ecran_parc.c
+    ${ECRANS_DIR}/ecran_bed_mesh.c
+    ${ECRANS_DIR}/ecran_input_shaper.c
     ${ECRANS_DIR}/ecran_reglages_wifi.c
     ${ECRANS_DIR}/ecran_menu_reglages.c
     ${ECRANS_DIR}/ecran_actions.c
@@ -134,6 +136,8 @@ add_executable(ktouch-sim
     ${KLIPPER_DIR}/klipper_fichiers.c
     ${KLIPPER_DIR}/usb_fichiers.c
     ${KLIPPER_DIR}/parc_imprimantes.c
+    ${KLIPPER_DIR}/bed_mesh_store.c
+    ${KLIPPER_DIR}/bed_mesh_parse.c
     ${KLIPPER_DIR}/parc_parse.c
     ${KLIPPER_DIR}/parc_sonde.c
     ${KLIPPER_DIR}/usb_scan.c

@@ -595,3 +595,44 @@ bool klipper_gcode_retraction_vitesse(char *sortie, size_t taille, klipper_retr_
     memcpy(sortie, tampon, (size_t)ecrit + 1);
     return true;
 }
+
+bool klipper_gcode_input_shaper_type(char *sortie, size_t taille, char axe, const char *type)
+{
+    if (sortie == NULL || taille == 0 || (axe != 'X' && axe != 'Y')) {
+        return false;
+    }
+    if (type == NULL || type[0] == '\0') {
+        return false;
+    }
+    size_t longueur = strlen(type);
+    if (longueur > 16) {
+        return false;
+    }
+    /* Meme barriere anti-injection que klipper_gcode_consigne_temp() : un
+       nom de shaper Klipper n'est QUE alphanumerique + underscore. */
+    for (size_t i = 0; i < longueur; i++) {
+        char c = type[i];
+        bool valide = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9') || c == '_';
+        if (!valide) {
+            return false;
+        }
+    }
+    int ecrit = snprintf(sortie, taille, "SET_INPUT_SHAPER SHAPER_TYPE_%c=%s", axe, type);
+    return ecrit > 0 && (size_t)ecrit < taille;
+}
+
+bool klipper_gcode_input_shaper_freq(char *sortie, size_t taille, char axe, float freq)
+{
+    if (sortie == NULL || taille == 0 || (axe != 'X' && axe != 'Y')) {
+        return false;
+    }
+    /* Bornes physiques raisonnables (spec) : sous 10 Hz un shaper detruit
+       la vitesse, au-dela de 150 Hz il ne corrige plus rien de reel --
+       validees ICI pour etre host-testees, l'ecran ne duplique pas. */
+    if (!(freq >= 10.0f && freq <= 150.0f)) {
+        return false;
+    }
+    int ecrit = snprintf(sortie, taille, "SET_INPUT_SHAPER SHAPER_FREQ_%c=%.1f", axe, (double)freq);
+    return ecrit > 0 && (size_t)ecrit < taille;
+}

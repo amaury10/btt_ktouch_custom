@@ -73,9 +73,10 @@ void suite_ecran_stub(void)
 {
     printf("suite : ecrans stub (backend absent)\n");
 
+    /* Bed Mesh et Input Shaper ne sont plus des stubs depuis le 2026-08-15
+     * (vrais ecrans, voir ecran_bed_mesh.c / ecran_input_shaper.c) :
+     * Spoolman reste le dernier. */
     static const stub_attendu_t STUBS_ATTENDUS[] = {
-        { &ECRAN_BED_MESH, "bed_mesh", "Bed Mesh" },
-        { &ECRAN_INPUT_SHAPER, "input_shaper", "Input Shaper" },
         { &ECRAN_SPOOLMAN, "spoolman", "Spoolman" },
     };
 

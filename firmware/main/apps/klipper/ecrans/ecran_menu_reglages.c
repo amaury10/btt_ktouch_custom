@@ -29,7 +29,9 @@
 #include "ecran_power.h"         /* ECRAN_POWER (feature "Power devices Moonraker", tache B) */
 #include "ecran_reglages_wifi.h" /* ECRAN_REGLAGES_WIFI */
 #include "ecran_retraction.h"    /* ECRAN_RETRACTION */
-#include "ecran_stub.h"          /* ECRAN_BED_MESH/ECRAN_INPUT_SHAPER/ECRAN_SPOOLMAN */
+#include "ecran_bed_mesh.h"      /* ECRAN_BED_MESH -- plus un stub (2026-08-15) */
+#include "ecran_input_shaper.h"  /* ECRAN_INPUT_SHAPER -- plus un stub (2026-08-15) */
+#include "ecran_stub.h"          /* ECRAN_SPOOLMAN (dernier stub) */
 #include "ecran_updater.h"       /* ECRAN_UPDATER (Task 2, jalon OTA firmware -- plus un stub) */
 #include "ecran_zcalibrate.h"    /* ECRAN_ZCALIBRATE */
 #include "navigation.h"          /* navigation_empiler() */

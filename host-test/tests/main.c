@@ -61,6 +61,7 @@ void suite_json_util(void);
 void suite_miniature(void);
 void suite_usb_upload(void);
 void suite_parc(void);
+void suite_bed_mesh(void);
 
 /* Taille de l'afficheur hors écran utilisé par les tests LVGL : aucun pixel
  * n'y est jamais examiné (suite_navigation ne fait que compter des appels de
@@ -425,6 +426,7 @@ int main(void)
     /* Gestion de parc (2026-08-15) : store + parseur purs, aucune contrainte
      * d'ordre (le store parc est independant des singletons habillage/boucle). */
     suite_parc();
+    suite_bed_mesh();
 
     printf("\n%d verification(s), %d echec(s)\n", tests_lances, tests_echoues);
     return tests_echoues == 0 ? 0 : 1;

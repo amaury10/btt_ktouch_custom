@@ -53,6 +53,15 @@ bool klipper_gcode_consigne_temp(char *sortie, size_t taille,
  * Fonction simple sans paramètres. */
 bool klipper_gcode_arret_urgence(char *sortie, size_t taille);
 
+/* Module Input Shaper (spec 2026-08-15) : SET_INPUT_SHAPER, un champ a la
+ * fois -- meme contrat "faux SANS toucher sortie" que le reste du fichier.
+ * `axe` : 'X' ou 'Y' uniquement. `type` : uniquement alphanumerique +
+ * underscore (meme barriere anti-injection que klipper_gcode_consigne_temp),
+ * non vide, <= 16 octets. `freq` : bornes 10.0-150.0 Hz VALIDEES ICI (le
+ * point host-testable, l'ecran ne fait que notifier sur faux). */
+bool klipper_gcode_input_shaper_type(char *sortie, size_t taille, char axe, const char *type);
+bool klipper_gcode_input_shaper_freq(char *sortie, size_t taille, char axe, float freq);
+
 /* Extrusion ou rétraction d'une distance donnée, en mode relatif, avec bordure
  * SAVE/RESTORE_GCODE_STATE pour ne jamais laisser la machine en mode absolu :
  *   SAVE_GCODE_STATE NAME=ktouch_extrude

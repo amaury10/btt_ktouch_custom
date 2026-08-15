@@ -3,6 +3,36 @@
 #include "core/etat_klipper.h"
 
 #include <math.h>
+#include <string.h> /* strcpy -- temoin "sortie intacte" de section_input_shaper() */
+
+/* --- SET_INPUT_SHAPER (module Input Shaper, 2026-08-15) ------------------ */
+
+static void section_input_shaper(void)
+{
+    char sortie[64];
+
+    VERIFIER(klipper_gcode_input_shaper_type(sortie, sizeof(sortie), 'X', "mzv"));
+    VERIFIER_TEXTE(sortie, "SET_INPUT_SHAPER SHAPER_TYPE_X=mzv");
+    VERIFIER(klipper_gcode_input_shaper_type(sortie, sizeof(sortie), 'Y', "2hump_ei"));
+    VERIFIER_TEXTE(sortie, "SET_INPUT_SHAPER SHAPER_TYPE_Y=2hump_ei");
+    /* Refus SANS toucher sortie : axe invalide, type vide/NULL, injection. */
+    strcpy(sortie, "temoin");
+    VERIFIER(!klipper_gcode_input_shaper_type(sortie, sizeof(sortie), 'Z', "mzv"));
+    VERIFIER(!klipper_gcode_input_shaper_type(sortie, sizeof(sortie), 'X', ""));
+    VERIFIER(!klipper_gcode_input_shaper_type(sortie, sizeof(sortie), 'X', NULL));
+    VERIFIER(!klipper_gcode_input_shaper_type(sortie, sizeof(sortie), 'X', "mzv\nM112"));
+    VERIFIER_TEXTE(sortie, "temoin");
+
+    VERIFIER(klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'X', 41.6f));
+    VERIFIER_TEXTE(sortie, "SET_INPUT_SHAPER SHAPER_FREQ_X=41.6");
+    /* Bornes 10-150 : refusees dehors, acceptees aux limites. */
+    strcpy(sortie, "temoin");
+    VERIFIER(!klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'X', 9.9f));
+    VERIFIER(!klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'Y', 150.1f));
+    VERIFIER_TEXTE(sortie, "temoin");
+    VERIFIER(klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'Y', 10.0f));
+    VERIFIER(klipper_gcode_input_shaper_freq(sortie, sizeof(sortie), 'Y', 150.0f));
+}
 
 void suite_klipper_gcode(void)
 {
@@ -269,4 +299,5 @@ void suite_klipper_gcode(void)
     VERIFIER(klipper_gcode_retraction_vitesse(g, sizeof(g), KLIPPER_RETR_SPEED, 1001) == false);
     /* tampon trop court : false */
     VERIFIER(klipper_gcode_retraction_vitesse(court, sizeof(court), KLIPPER_RETR_SPEED, 40) == false);
+    section_input_shaper();
 }

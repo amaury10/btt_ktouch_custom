@@ -52,6 +52,6 @@
 
 #include "ecran.h"
 
-extern const ecran_desc_t ECRAN_BED_MESH;
-extern const ecran_desc_t ECRAN_INPUT_SHAPER;
+/* ECRAN_BED_MESH et ECRAN_INPUT_SHAPER ne sont plus des stubs depuis le
+ * 2026-08-15 -- voir ecran_bed_mesh.h / ecran_input_shaper.h. */
 extern const ecran_desc_t ECRAN_SPOOLMAN;

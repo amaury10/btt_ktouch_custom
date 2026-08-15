@@ -167,6 +167,7 @@ add_executable(tests
     tests/test_miniature.c
     tests/test_usb_upload.c
     tests/test_parc.c
+    tests/test_bed_mesh.c
     tests/usb_upload_http_mock.c
     ${MAIN_DIR}/web_macros.c
     ${MAIN_DIR}/ota_image.c
@@ -179,6 +180,8 @@ add_executable(tests
     ${KLIPPER_DIR}/usb_upload.c
     ${KLIPPER_DIR}/usb_fichiers.c
     ${KLIPPER_DIR}/parc_imprimantes.c
+    ${KLIPPER_DIR}/bed_mesh_store.c
+    ${KLIPPER_DIR}/bed_mesh_parse.c
     ${KLIPPER_DIR}/parc_parse.c
     ${KLIPPER_DIR}/parc_sonde.c
     ${KLIPPER_DIR}/usb_scan.c
@@ -224,6 +227,8 @@ add_executable(tests
     ${ECRANS_DIR}/ecran_fichiers.c
     ${ECRANS_DIR}/ecran_usb.c
     ${ECRANS_DIR}/ecran_parc.c
+    ${ECRANS_DIR}/ecran_bed_mesh.c
+    ${ECRANS_DIR}/ecran_input_shaper.c
     ${ECRANS_DIR}/ecran_reglages_wifi.c
     ${ECRANS_DIR}/ecran_menu_reglages.c
     ${ECRANS_DIR}/ecran_actions.c

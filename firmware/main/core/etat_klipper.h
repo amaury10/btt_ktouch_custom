@@ -80,6 +80,18 @@ typedef struct {
     float limite_square_corner;   /* mm/s, toolhead.square_corner_velocity */
     float limite_accel_to_decel;  /* mm/s^2, toolhead.max_accel_to_decel */
 
+    /* Input shaper (module Input Shaper, spec 2026-08-15) -- objet
+     * input_shaper : type + frequence par axe, fusionnes par
+     * fusionner_input_shaper() (moonraker_rpc.c). +32 octets : derogation
+     * DOCUMENTEE a la regle "ne pas grossir cet etat" (voir la memoire du
+     * projet, etat vs piles) -- 32 o sur ~1870 restent negligeables sur
+     * chaque copie/pile, contrairement a une matrice de mesh (qui vit, elle,
+     * dans bed_mesh_store.h). */
+    char  shaper_type_x[12];      /* "mzv", "ei", ... ("" si jamais recu) */
+    char  shaper_type_y[12];
+    float shaper_freq_x;          /* Hz, 0 si jamais recu */
+    float shaper_freq_y;
+
     /* Retraction firmware (panneau Retraction, tache 6, sous-projet
      * "panneaux KlipperScreen") -- firmware_retraction.retract_length/
      * retract_speed/unretract_extra_length/unretract_speed, lues par

@@ -58,7 +58,10 @@ bool rpc_construire_requete(char *sortie, size_t taille, uint32_t id,
  * l'abonnement avec id = UINT32_MAX dans ce tampon exact). Marge incluse
  * pour un futur objet ajouté à la liste sans avoir à recalculer cette
  * constante à la main à chaque fois. */
-#define RPC_ABONNEMENT_TAILLE_MIN 384
+/* 384 -> 448 (modules Bed Mesh + Input Shaper, 2026-08-15 : +2 objets dans
+ * la liste d'abonnement, ~+32 octets ; le test host au tampon minimal --
+ * garde-fou C8 -- verifie que cette valeur SUFFIT reellement). */
+#define RPC_ABONNEMENT_TAILLE_MIN 448
 
 /* Requête `printer.objects.subscribe` (nom de méthode JSON-RPC Moonraker :
  * des POINTS, jamais de '/' — Moonraker dérive ses méthodes par

@@ -80,7 +80,10 @@ static bool   g_tampon_deborde = false;
  * la tâche appelante (WS ou boucle_klipper selon le site), jamais statique
  * -- contrairement au tampon de réception ci-dessus, ce tampon n'a pas
  * besoin de survivre entre deux appels. */
-#define MOONRAKER_WS_REQUETE_OCTETS 512
+/* 512 -> 640 (modules Bed Mesh/Input Shaper, 2026-08-15) : l'abonnement
+ * frole desormais ~420 octets une fois enveloppe -- 640 garde une marge
+ * franche pour les prochains objets sans re-toucher ceci. */
+#define MOONRAKER_WS_REQUETE_OCTETS 640
 
 /* Délai de l'opération d'envoi elle-même (mise en file d'attente par
  * esp_websocket_client, PAS le temps d'attendre une réponse -- voir

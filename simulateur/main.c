@@ -61,6 +61,7 @@
 #include "confirmation.h"
 #include "ecran_accueil.h"
 #include "ecran_accueil_hub.h"
+#include "ecran_bed_mesh.h"     /* plus un stub (2026-08-15) */
 #include "ecran_actions.h"
 #include "ecran_configuration.h"
 #include "ecran_console.h"
@@ -68,6 +69,7 @@
 #include "ecran_extruder.h"
 #include "ecran_fichiers.h"
 #include "ecran_homing.h"
+#include "ecran_input_shaper.h" /* plus un stub (2026-08-15) */
 #include "ecran_jouet.h"
 #include "ecran_limites.h"
 #include "ecran_macros.h"

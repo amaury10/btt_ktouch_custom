@@ -33,6 +33,7 @@
 #include "pandatouch_display.h"
 
 #include "accueil_choix.h"
+#include "bed_mesh_store.h"   /* bed_mesh_generation -- generation externe (2026-08-15) */
 #include "parc_imprimantes.h" /* parc_charger -- gestion de parc (2026-08-15) */
 #include "usb_fichiers.h" /* usb_fichiers_generation -- canal de génération externe de l'habillage */
 #include "backend.h"
@@ -97,7 +98,7 @@ static const char *raison_reset_nom(esp_reset_reason_t raison)
  * dès que l'un bouge. */
 static uint32_t generation_externe_klipper(void)
 {
-    return usb_fichiers_generation() + parc_generation();
+    return usb_fichiers_generation() + parc_generation() + bed_mesh_generation();
 }
 
 /* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,

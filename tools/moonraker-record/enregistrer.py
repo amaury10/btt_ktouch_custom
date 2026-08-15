@@ -76,7 +76,12 @@ SUBSCRIBE_PARAMS = (
     '"extruder":null,"extruder1":null,"extruder2":null,"extruder3":null,'
     '"extruder4":null,"extruder5":null,"extruder6":null,"extruder7":null,'
     '"heater_bed":null,"fan":null,'
-    '"print_stats":null,"virtual_sdcard":null,"webhooks":null'
+    '"print_stats":null,"virtual_sdcard":null,"webhooks":null,'
+    # Dérive résorbée à la revue du 2026-08-15 (L8) : firmware_retraction
+    # manquait depuis le panneau Retraction, et les deux ci-dessous arrivent
+    # avec les modules Bed Mesh / Input Shaper.
+    '"firmware_retraction":null,'
+    '"bed_mesh":null,"input_shaper":null'
     "}}"
 )
 

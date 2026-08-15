@@ -56,7 +56,21 @@ static usb_fichiers_t *store_obtenir(void)
         return NULL;
     }
     memset(tampon, 0, sizeof(*tampon));
-    g_store = tampon;
+    /* Publication SOUS verrou (revue du 2026-08-15, L3) : deux taches
+       peuvent atteindre ce point ensemble a la toute premiere utilisation
+       (ex. tache WS qui publie pendant que la tache LVGL lit) -- sans ce
+       verrou, chacune installait SON tampon et l'un des deux (avec sa
+       premiere donnee deposee) etait perdu, plus une fuite PSRAM. Le
+       perdant libere son tampon et repart sur celui du gagnant. */
+    VERROU_PRENDRE();
+    if (g_store == NULL) {
+        g_store = tampon;
+        tampon = NULL;
+    }
+    VERROU_RENDRE();
+    if (tampon != NULL) {
+        heap_caps_free(tampon);
+    }
     return g_store;
 }
 #else

@@ -1,5 +1,14 @@
 #include "moonraker_rpc.h"
 
+#include "bed_mesh_parse.h" /* fusion hors-etat du sous-objet bed_mesh (2026-08-15) */
+
+/* Defini plus bas (section macros/fichiers) ; utilise des la fusion du
+ * statut depuis la revue 2026-08-15 L9. */
+static void copier_texte_utf8_borne(const char *source, char *sortie, size_t taille);
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h" /* scratch PSRAM de fusionner_bed_mesh_hors_etat() */
+#endif
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,7 +68,8 @@ bool rpc_construire_abonnement(char *sortie, size_t taille, uint32_t id)
         "\"extruder4\":null,\"extruder5\":null,\"extruder6\":null,\"extruder7\":null,"
         "\"heater_bed\":null,\"fan\":null,"
         "\"print_stats\":null,\"virtual_sdcard\":null,\"webhooks\":null,"
-        "\"firmware_retraction\":null"
+        "\"firmware_retraction\":null,"
+        "\"bed_mesh\":null,\"input_shaper\":null"
         "}}";
     return rpc_construire_requete(sortie, taille, id, "printer.objects.subscribe", PARAMS);
 }
@@ -348,6 +358,35 @@ static void fusionner_ventilateur(klipper_ventilateur_t *v, const cJSON *obj)
     }
 }
 
+/* Module Input Shaper (spec 2026-08-15) : type + frequence par axe, fusion
+ * PAR CHAMP (absent = inchange), memes idiomes que fusionner_toolhead()
+ * ci-dessous (nombre_fini pour les floats, copie bornee pour les types). */
+static void fusionner_input_shaper(etat_klipper_t *e, const cJSON *objet)
+{
+    if (!cJSON_IsObject(objet)) {
+        return;
+    }
+    /* copier_texte_utf8_borne() (plus bas dans ce fichier) : coupe UTF-8
+       propre, une seule implementation de copie bornee dans ce TU (revue
+       2026-08-15 L9). Les types Klipper sont ASCII, mais la regle vaut pour
+       toute chaine venue du reseau. */
+    const cJSON *champ = cJSON_GetObjectItemCaseSensitive(objet, "shaper_type_x");
+    if (cJSON_IsString(champ) && champ->valuestring != NULL) {
+        copier_texte_utf8_borne(champ->valuestring, e->shaper_type_x, sizeof(e->shaper_type_x));
+    }
+    champ = cJSON_GetObjectItemCaseSensitive(objet, "shaper_type_y");
+    if (cJSON_IsString(champ) && champ->valuestring != NULL) {
+        copier_texte_utf8_borne(champ->valuestring, e->shaper_type_y, sizeof(e->shaper_type_y));
+    }
+    float v;
+    if (nombre_fini(objet, "shaper_freq_x", &v)) {
+        e->shaper_freq_x = v;
+    }
+    if (nombre_fini(objet, "shaper_freq_y", &v)) {
+        e->shaper_freq_y = v;
+    }
+}
+
 static void fusionner_toolhead(etat_klipper_t *e, const cJSON *toolhead)
 {
     if (!cJSON_IsObject(toolhead)) {
@@ -537,6 +576,36 @@ static void fusionner_virtual_sdcard(etat_klipper_t *e, const cJSON *obj)
  * Fix round 1 (revue, C5) : cette extraction est CE QUI PERMET a
  * rpc_fusionner_instantane() de reutiliser exactement le meme moteur, sans
  * dupliquer la moindre regle de fusion. */
+/* Module Bed Mesh (revue du 2026-08-15, L1) : consommateur HORS-ETAT du
+ * meme parse VALIDE que le reste du statut -- jamais un second parse du
+ * message brut (l'ancienne version de moonraker_ws.c re-extrayait
+ * l'enveloppe sans la politique poison de ce module, et un message rejete
+ * en bloc pouvait quand meme mutiler le store). La matrice (~1 Ko) passe
+ * par un scratch PSRAM paresseux, JAMAIS la pile ni le .bss interne
+ * (revue L6). Course de premiere allocation : publication sous verrou
+ * cote store (voir store_obtenir() de bed_mesh_store.c) ; ICI un seul
+ * appelant (la tache WS), pas de course. */
+static void fusionner_bed_mesh_hors_etat(const cJSON *objet)
+{
+#ifdef ESP_PLATFORM
+    static bed_mesh_t *s_scratch;
+    if (s_scratch == NULL) {
+        s_scratch = (bed_mesh_t *)heap_caps_malloc(sizeof(*s_scratch), MALLOC_CAP_SPIRAM);
+        if (s_scratch == NULL) {
+            return; /* PSRAM epuisee : retente au prochain message */
+        }
+    }
+    bed_mesh_t *scratch = s_scratch;
+#else
+    static bed_mesh_t s_scratch_hote;
+    bed_mesh_t *scratch = &s_scratch_hote;
+#endif
+    bed_mesh_lire(scratch);
+    if (bed_mesh_fusionner_json(scratch, objet)) {
+        bed_mesh_definir(scratch);
+    }
+}
+
 static void fusionner_objet_statut(etat_klipper_t *local, const cJSON *statut)
 {
     bool duree_vue = false;
@@ -567,6 +636,13 @@ static void fusionner_objet_statut(etat_klipper_t *local, const cJSON *statut)
             fusionner_print_stats(local, item, &duree_vue, &duree);
         } else if (strcmp(nom, "virtual_sdcard") == 0) {
             fusionner_virtual_sdcard(local, item);
+        } else if (strcmp(nom, "input_shaper") == 0) {
+            fusionner_input_shaper(local, item);
+        } else if (strcmp(nom, "bed_mesh") == 0) {
+            /* Hors-etat : part dans bed_mesh_store.h, jamais dans
+               etat_klipper_t (une matrice 15x15 y reproduirait la maladie
+               etat-vs-piles). */
+            fusionner_bed_mesh_hors_etat(item);
         }
         /* Tout autre nom (webhooks, mcu, configfile, un objet inconnu ou un
          * "extruderN" hors bornes deja ecarte ci-dessus par idx_extrudeur ==

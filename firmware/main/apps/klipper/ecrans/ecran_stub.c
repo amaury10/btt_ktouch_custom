@@ -61,8 +61,6 @@ static void ecran_stub_peindre(lv_obj_t *parent, const char *titre, const char *
  * depuis la feature "Console gcode" (tache B) -- voir ecran_console.c pour
  * son remplacant reel. */
 #define STUBS(X)                                                                                                     \
-    X(ECRAN_BED_MESH, "bed_mesh", "Bed Mesh", "Requires bed mesh data - not yet available")                          \
-    X(ECRAN_INPUT_SHAPER, "input_shaper", "Input Shaper", "Requires resonance testing - not yet available")          \
     X(ECRAN_SPOOLMAN, "spoolman", "Spoolman", "Requires a Spoolman server - not yet available")
 
 /* Un `<symbole>_construire()` par stub -- signature imposee par

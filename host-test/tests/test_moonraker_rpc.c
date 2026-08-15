@@ -50,6 +50,11 @@ static void section_construire_abonnement(void)
     VERIFIER(strstr(tampon, "\"gcode_move\":null") != NULL);
     VERIFIER(strstr(tampon, "\"extruder\":null") != NULL);
     VERIFIER(strstr(tampon, "\"extruder7\":null") != NULL);
+    /* Modules Bed Mesh + Input Shaper (spec 2026-08-15) : leurs objets
+     * doivent etre abonnes, sinon leurs ecrans restent vides pour toujours
+     * (meme piege que firmware_retraction, voir le commentaire plus haut). */
+    VERIFIER(strstr(tampon, "\"bed_mesh\":null") != NULL);
+    VERIFIER(strstr(tampon, "\"input_shaper\":null") != NULL);
     VERIFIER(strstr(tampon, "\"heater_bed\":null") != NULL);
     VERIFIER(strstr(tampon, "\"fan\":null") != NULL);
     VERIFIER(strstr(tampon, "\"print_stats\":null") != NULL);
@@ -223,6 +228,28 @@ static void section_fusionner_status(void)
         VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
         VERIFIER_FLOAT(e.plateau.actuelle, 50.0f, 0.01f);
         VERIFIER(e.nb_extrudeurs == 0);
+    }
+
+    /* --- input_shaper (module Input Shaper, spec 2026-08-15) : type + freq
+     * par axe, fusion par champ (absent = inchange, meme politique que les
+     * limite_*). --- */
+    {
+        etat_klipper_t e;
+        memset(&e, 0, sizeof(e));
+        enveloppe(msg, sizeof(msg),
+            "{\"input_shaper\":{\"shaper_type_x\":\"mzv\",\"shaper_freq_x\":41.6,"
+            "\"shaper_type_y\":\"ei\",\"shaper_freq_y\":52.2}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_TEXTE(e.shaper_type_x, "mzv");
+        VERIFIER_TEXTE(e.shaper_type_y, "ei");
+        VERIFIER_FLOAT(e.shaper_freq_x, 41.6f, 0.01f);
+        VERIFIER_FLOAT(e.shaper_freq_y, 52.2f, 0.01f);
+
+        /* Notify partiel : seul freq_x bouge, le reste reste. */
+        enveloppe(msg, sizeof(msg), "{\"input_shaper\":{\"shaper_freq_x\":45.0}}");
+        VERIFIER(rpc_fusionner_status(&e, msg, strlen(msg)));
+        VERIFIER_FLOAT(e.shaper_freq_x, 45.0f, 0.01f);
+        VERIFIER_TEXTE(e.shaper_type_x, "mzv");
     }
 
     /* --- homed_axes : "xyz" => masque 7, "" => masque 0 --- */
