@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](README.en.md).*
+
 # BTT K-Touch Custom
 
 Firmware ouvert et outillage de rétro-ingénierie pour la **BIGTREETECH K-Touch**,
@@ -9,14 +11,37 @@ Le projet poursuit deux buts sur une base technique commune : redonner un
 firmware vivant et compilable aux possesseurs de l'appareil, et détourner
 celui-ci pour piloter un tracker astrophotographique.
 
-## État — jalon 1 atteint
+## État — client Klipper complet, validé sur imprimantes réelles
 
-Un firmware maison a tourné sur du matériel réel, depuis le slot OTA `app1`,
-sans jamais toucher au firmware d'origine, et l'appareil est revenu au stock sur
-commande. Rien n'est encore utilisable au quotidien : c'est une preuve de vie,
-pas une interface.
+L'appareil fait tourner un firmware maison depuis un slot OTA, sans jamais
+toucher au firmware d'origine, et revient au stock sur commande. Au-dessus de ce
+socle, l'interface est aujourd'hui un **client Moonraker complet**, utilisé pour
+imprimer pour de vrai sur deux machines : une Creality CR-10 S5 et une Snapmaker
+U1 multi-têtes.
 
-Le résultat qui a de la valeur au-delà de ce dépôt est
+Ce que l'écran sait faire :
+
+- **Accueil** : températures de tous les chauffants, graphe d'historique à
+  échelle verticale chiffrée, position, outil actif, progression d'impression et
+  miniature du gcode en cours.
+- **Impression** : liste des fichiers Moonraker, macros, actions (pause,
+  reprise, annulation, arrêt d'urgence), console gcode, réglage fin en cours
+  d'impression.
+- **Réglages machine** : déplacement et prise d'origine, températures avec
+  cibles cochables et préréglages PLA/PETG/ABS/TPU, extrudeur, ventilateurs,
+  calibration Z, niveau du lit, limites, rétraction, **carte de niveau du lit**
+  (heatmap, calibration, profils enregistrés) et **input shaper**.
+- **Périphériques** : clé USB (navigation dossier par dossier, envoi vers
+  Moonraker), prises pilotées, **Spoolman** (bobines et bobine chargée).
+- **Exploitation** : parc de plusieurs imprimantes avec bascule séquentielle,
+  réglages WiFi à l'écran, et **mise à jour du firmware par WiFi** avec slot A/B
+  et retour arrière.
+
+Le tout reste vérifiable sans matériel : **[`simulateur/`](simulateur/)**
+(LVGL + SDL sur PC, captures PNG à l'appui) et [`host-test/`](host-test/) (suite
+C, voir son README pour le compte à jour).
+
+Le résultat qui a de la valeur au-delà de ce dépôt reste
 **[`docs/hardware/pinout.md`](docs/hardware/pinout.md)** : la première
 vérification publique du pinout de la K-Touch 5 pouces, affichage et tactile.
 Le seul pinout disponible jusqu'ici était celui du Panda Touch 7 pouces, et le
@@ -24,14 +49,18 @@ projet `nomadsgalaxy/Prusa-Connect-Touch` notait que la K-Touch « may differ on
 a few panel GPIOs or timings ». Cette réserve est levée : il fonctionne tel
 quel, sans adaptation.
 
-Vérifié sur matériel le 26 juillet 2026 :
+Vérifié sur matériel :
 
-- panneau RGB 800×480 en mode DE, horloge pixel 23 MHz — couleurs, géométrie et
-  stabilité conformes ;
+- panneau RGB 800×480 en mode DE — couleurs, géométrie et stabilité conformes,
+  et 49 minutes de fonctionnement continu sans redémarrage ni fuite mémoire dès
+  le premier essai, le 26 juillet 2026 ;
+- les timings **tear-free sur une interface animée** (14,8 MHz, porches larges)
+  sont documentés à part de ceux qui suffisaient à une mire fixe : la différence
+  ne se voit qu'en mouvement, et c'est précisément ce que les autres portages
+  n'avaient pas de quoi mesurer ;
 - tactile GT911 à l'adresse I²C `0x5D`, correspondance directe avec l'affichage,
   sans rotation ni miroir ;
-- PSRAM octale à 80 MHz opérationnelle ;
-- 49 minutes de fonctionnement continu sans redémarrage ni fuite mémoire.
+- PSRAM octale à 80 MHz opérationnelle.
 
 ## Comment ce firmware peut être réversible sans câble
 
@@ -55,13 +84,22 @@ au stock tout seul, deux fois.
 | Chemin | Rôle |
 |---|---|
 | [`firmware/`](firmware/) | Le firmware ESP-IDF et ses instructions de compilation — voir [`firmware/README.md`](firmware/README.md) |
+| [`host-test/`](host-test/) | Tests unitaires (C, sur PC) du code « non visuel » ET des écrans, sans matériel ni ESP-IDF — voir [`host-test/README.md`](host-test/README.md) |
+| [`simulateur/`](simulateur/) | Interface LVGL faisant tourner l'écran sur PC (fenêtre SDL ou capture PNG hors écran), sans matériel K-Touch — voir [`simulateur/README.md`](simulateur/README.md) |
+| [`exemples/backend_jouet/`](exemples/backend_jouet/) | Backend et écran jouets minimalistes : la preuve, et le modèle, qu'une application tierce s'accroche au même socle que Klipper sans le modifier — voir [`exemples/backend_jouet/README.md`](exemples/backend_jouet/README.md) |
+| [`shim/`](shim/) | En-têtes de substitution pour compiler `firmware/main/core/` côté PC (`host-test/`, `simulateur/`) sans ESP-IDF |
 | [`tools/ktouch/`](tools/ktouch/) | Bibliothèque Python (standard uniquement) : images ESP32, table de partitions, `otadata` |
+| [`tools/moonraker-record/`](tools/moonraker-record/) | Enregistreur de sessions Moonraker réelles, qui alimente les fixtures de rejeu des tests — voir [`tools/moonraker-record/README.md`](tools/moonraker-record/README.md) |
 | `ktouch-cli.py` | Lanceur : `verify`, `otadata`, `make-otadata`, `image` |
 | [`docs/hardware/`](docs/hardware/) | Pinout vérifié, partitionnement, procédure d'installation et de retour |
+| [`docs/dev/`](docs/dev/) | Notes de développement, dont la mise en place d'un Klipper simulé pour les tests |
+| [`CHANGELOG.md`](CHANGELOG.md) | Notes de version : ce que fait le firmware, ce qui est vérifié, et ses limites connues |
 
 Pour compiler, il faut ESP-IDF v5.5.5 et renseigner son réseau WiFi ; tout est
 dans [`firmware/README.md`](firmware/README.md). Pour l'outillage Python,
 `python -m pip install -r tools/requirements.txt` puis `python -m pytest`.
+Pour la suite de tests C (aucun besoin de matériel ni d'ESP-IDF, quelques
+secondes sous WSL), voir [`host-test/README.md`](host-test/README.md).
 
 ## Avertissement
 
@@ -78,7 +116,31 @@ MIT pour le code de ce dépôt.
 
 Le support matériel provient du composant
 [`bigtreetech/PandaTouch_IDF`](https://github.com/bigtreetech/PandaTouch_IDF),
-référencé en sous-module et **jamais redistribué ici**. Cette précaution n'est
-pas de forme : ce dépôt affiche un badge « License: MIT » pointant vers un
-fichier `LICENSE` qui n'existe pas, et l'API de licence de GitHub n'y détecte
-aucune licence. Du code publié sans licence reste sous droit d'auteur plein.
+**dont la licence est un problème ouvert**. Ce dépôt affiche un badge
+« License: MIT » pointant vers un fichier `LICENSE` qui n'existe pas, son README
+dit lui-même « provided under the MIT License (*assumed*) », et l'API de licence
+de GitHub n'y détecte aucune licence. Du code publié sans licence reste sous
+droit d'auteur plein.
+
+Le composant était initialement référencé en sous-module, précisément pour n'en
+rien redistribuer. Depuis le 31 juillet 2026 il est **présent dans cet arbre**
+(`firmware/components/PandaTouch_IDF/`, 1 826 lignes, avec deux correctifs
+locaux) : ce dépôt redistribue donc du code sans licence. Un signalement a été
+ouvert chez BIGTREETECH
+([`PandaTouch_IDF#1`](https://github.com/bigtreetech/PandaTouch_IDF/issues/1)) ;
+la question reste ouverte et doit être tranchée avant toute publication — voir
+[`docs/licence-du-composant-btt.md`](docs/licence-du-composant-btt.md), qui
+détaille le constat, les options et le signalement rédigé pour BIGTREETECH.
+
+Trois autres dépendances tierces, vendorisées pour compiler sans matériel :
+
+- **LVGL** — MIT. Sous-module Git (`simulateur/lvgl`, épinglé `v9.2.2`, voir
+  `.gitmodules`) pour `simulateur/` et `host-test/`, et composant du registre
+  ESP-IDF (`firmware/managed_components/lvgl__lvgl`) pour la cible — même
+  bibliothèque, deux mécanismes de récupération selon le contexte de
+  compilation.
+- `simulateur/vendor/stb_image_write.h` — MIT ou domaine public (double
+  licence au choix), Sean Barrett. Sert uniquement à écrire les captures PNG
+  du mode hors écran.
+- `host-test/vendor/cJSON.c` — MIT. Analyseur JSON utilisé par la suite de
+  tests hôte.

@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](partitions.en.md).*
+
 # Partitionnement de la flash K-Touch
 
 ## Vue d'ensemble
@@ -6,7 +8,7 @@ La K-Touch dispose d'une flash de 16 Mio (0x1000000 octets) partitionnée selon 
 
 ## Table de partitions
 
-| Partition | Type | Sous-type | Offset | Taille | Fins |
+| Partition | Type | Sous-type | Offset | Taille | Rôle |
 |-----------|------|-----------|--------|--------|------|
 | nvs | data | nvs | 0x9000 | 0x5000 (20 Kio) | Stockage clé-valeur NVS |
 | otadata | data | ota | 0xE000 | 0x2000 (8 Kio) | Métadonnées OTA |

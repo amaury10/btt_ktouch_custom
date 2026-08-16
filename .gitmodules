@@ -1,3 +1,4 @@
-[submodule "firmware/components/PandaTouch_IDF"]
-	path = firmware/components/PandaTouch_IDF
-	url = https://github.com/bigtreetech/PandaTouch_IDF.git
+[submodule "simulateur/lvgl"]
+	path = simulateur/lvgl
+	url = https://github.com/lvgl/lvgl.git
+	shallow = true

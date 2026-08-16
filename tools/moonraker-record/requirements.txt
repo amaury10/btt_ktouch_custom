@@ -1,0 +1,5 @@
+# Dependance du seul enregistreur (enregistrer.py) -- volontairement isolee
+# dans un venv local a ce repertoire plutot que melangee a
+# tools/requirements.txt (celui-ci sert l'outillage de test de ktouch/, une
+# bibliotheque stdlib-only ; websockets n'a rien a y faire).
+websockets>=12

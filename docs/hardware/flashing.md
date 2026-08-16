@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](flashing.en.md).*
+
 # Flasher et récupérer la K-Touch sans câble série
 
 ## Contexte : ce qui a été perdu, et pourquoi
@@ -70,21 +72,50 @@ le redémarrage.
 
 ### 4. Constater
 
-Laisser une minute, puis lire l'écran. La ligne d'état en bas indique le slot,
-le compteur de démarrages, la source des identifiants WiFi et l'adresse IP une
-fois connectée :
+Laisser une minute, puis lire l'écran. Depuis la tâche 10 du sous-jalon 2b,
+l'écran affiche l'interface Klipper réelle par-dessus la mire de diagnostic du
+jalon 1, pas la mire elle-même :
 
-```
-app1 | boot 1 | cfg:MonReseau
-wifi: 192.168.1.42
-```
+- **Appareil jamais configuré (aucun hôte Moonraker enregistré)** : écran
+  « Settings » (`ecran_configuration.c`) empilé par-dessus l'écran d'accueil —
+  champs « Printer address » et « Machine type », valeur « Not configured »
+  tant que rien n'a été saisi, bouton « Save ». C'est l'état normal d'un
+  premier démarrage, pas une panne.
+- **Appareil déjà configuré** : écran d'accueil Klipper directement — l'accueil
+  IMPRESSION (tuiles de température, progression, boutons Pause/Cancel/E-STOP)
+  si une impression est en cours au démarrage, sinon l'ACCUEIL-HUB (tuiles de
+  température par palier d'outils, grille de menu, dont Déplacer pour le
+  jog/homing) quand la machine est au repos — c'est ce dernier que rencontrera
+  l'utilisateur au démarrage dans l'immense majorité des cas (voir
+  `accueil_choix.h` pour le critère, et `ecran_accueil_hub.c` pour l'écran
+  lui-même). Sans l'écran de configuration par-dessus dans les deux cas.
+- **Écran ou tactile en panne** (`pt_display_init()` en échec, ou GT911
+  muet) : l'appareil reste diagnosticable à distance (WiFi, `/log`, `/state`,
+  `/revert`) même sans rien afficher — voir le commentaire en tête
+  d'`app_main()`.
+
+La ligne d'état de la mire du jalon 1 (slot, compteur de démarrages, source
+des identifiants WiFi, adresse IP) n'est plus visible dans le cas normal :
+l'habillage (bande d'état 44 px) et le fond opaque de chaque écran empilé la
+recouvrent entièrement. Elle ne refait surface que si l'empilement de l'écran
+de départ a lui-même échoué (voir les `JOURNAL_ERREUR` correspondants dans
+`app_main.c`) — un repli dégradé mais lisible, pas un défaut à corriger.
 
 Puis, à distance :
 
 ```powershell
 curl.exe -s http://<ip-de-la-k-touch>/status
+curl.exe -s http://<ip-de-la-k-touch>/state
 curl.exe -s http://<ip-de-la-k-touch>/log
 ```
+
+`/state` (voir le tableau de routes plus bas) reste disponible exactement
+comme avant, EN PARALLÈLE de l'interface graphique : l'écran est une
+présentation visuelle du même état que celui exposé en JSON, pas un canal
+séparé — les deux peuvent être consultés indépendamment, y compris quand
+l'écran est en panne. `/revert` n'est pas affecté par l'arrivée de
+l'interface : il continue de basculer immédiatement sur le firmware d'origine
+quel que soit l'écran affiché au moment de l'appel.
 
 > Si rien ne répond au bout de deux minutes, **ne rien faire** : le sauvetage
 > automatique décrit plus bas ramène l'appareil au firmware d'origine tout seul.
@@ -128,18 +159,70 @@ Le serveur écoute sur le port 80, à l'adresse IP journalisée au démarrage
 |---|---|---|
 | `/` | GET | page d'état minimale, avec liens vers les autres routes |
 | `/status` | GET | JSON : slot en cours, version, adresse IP, temps depuis le démarrage, mémoire libre, tactile disponible ou non, compteur de démarrages |
+| `/state` | GET | JSON : état de la liaison avec l'hôte Klipper, génération de l'état, et le dernier état connu — `extrudeurs` (jusqu'à 8, tableau des seuls présents avec leur `index` d'origine), `nb_extrudeurs`, `outil_actif`, `plateau`, `ventilateurs`, position XYZ et axes référencés, vitesse/flux en %, décalage Z (babystep), `macros` (tableau de noms) et `macros_tronquees`, fichier, progression, temps restant, impression en cours/en pause |
 | `/log` | GET | texte brut, contenu du journal réseau en RAM (dernières lignes de log) |
+| `/revert` | GET | page HTML avec un bouton « Redémarrer » (déclenche le POST) — pratique depuis un navigateur |
 | `/revert` | POST | bascule vers l'autre slot OTA et redémarre |
 
-`/revert` est en **POST** délibérément : en GET, n'importe quelle requête d'un
-navigateur, d'un aspirateur de liens ou d'un scanner réseau redémarrerait
-l'appareil.
+La **bascule** (`/revert`) est en **POST** délibérément : en GET, n'importe
+quelle requête d'un navigateur (préchargement d'URL, restauration d'onglet),
+d'un aspirateur de liens ou d'un scanner réseau redémarrerait l'appareil. Le
+**GET `/revert`** ne redémarre donc rien lui-même : il sert une petite page avec
+un bouton « Redémarrer » qui, lui, envoie le POST — ce qui permet de déclencher
+la bascule depuis un simple navigateur (Firefox : ouvrir `http://<ip>/revert`
+puis cliquer) sans outil capable de POST, tout en gardant la protection
+ci-dessus contre les redémarrages accidentels.
 
 Le compteur de démarrages rapporté par `/status` est un instantané pris une
 seule fois au démarrage (juste après `rescue_count_boot()`), pas une valeur
 relue en direct : il ne change pas entre deux requêtes sur un même
 démarrage, même si une connexion WiFi réussit entre-temps et le remet à zéro
 en coulisse pour le prochain démarrage.
+
+Dans la réponse de `/state`, `"generation":0` signifie précisément « aucun
+relevé n'a encore été validé » — hôte non configuré, boucle pas encore
+démarrée, démarrée mais aucun cycle réussi depuis, ou hôte configuré mais
+injoignable (Moonraker down : `boucle_demarrer()` réussit dès que
+`demarrer()` du backend réussit — pour Moonraker, cela ne fait que créer un
+client HTTP, sans contacter la machine, voir `backend_moonraker.c`). C'est le
+seul signal qui distingue cet état de « la machine existe et tous ses champs
+valent authentiquement zéro » : tant que `generation` vaut 0, `"etat":null`
+dans la même réponse et rien sous cette clé ne doit être interprété comme une
+lecture réelle de la machine. Une fois qu'un premier cycle a réussi,
+`generation` avance à chaque nouveau relevé validé (voir `boucle_generation()`
+dans `firmware/main/core/boucle.h`) et `etat` cesse d'être `null`.
+
+**Zéro honnête, indépendamment de `generation`.** Les champs riches de `etat`
+(v2, jalon 3a — `position`, `vitesse_pct`, `flux_pct`, `babystep_z_um`, la
+liste des macros) sont remplis par la **souscription WebSocket** quand elle
+est en ligne (`printer.objects.subscribe` pour l'état, `printer.objects.list`
+pour les macros — voir `moonraker_ws.c` et `backend_moonraker.c`) ; en repli
+HTTP, seuls les champs que le GET connaît sont mis à jour et les autres
+restent à `0`/`[]`/`false`. Un champ à zéro peut donc signifier « jamais
+reçu » plutôt que « mesuré à zéro » : un client qui lit `"vitesse_pct":0` ne
+doit pas l'afficher comme « vitesse à l'arrêt » sans autre moyen de
+distinguer les deux (voir le commentaire de chaque champ dans
+`firmware/main/core/etat_klipper.h`, qui documente ce que sa valeur zéro
+signifie). Pour les chauffeurs, `/state` n'émet un extrudeur dans le tableau
+`extrudeurs` que s'il est présent (la présence est signalée par
+l'**inclusion dans le tableau**, chaque entrée portant `index`/`actuelle`/
+`consigne`) ; seul `plateau` porte un drapeau `presente` explicite. Le
+tableau `macros` est une liste de noms, accompagnée du seul booléen
+`macros_tronquees` (`/state` n'émet pas de champ `nb_macros`).
+
+**`generation` n'est PAS un signal de vivacité de la boucle.** Il n'avance
+QUE lorsque le contenu de l'état change réellement d'un cycle à l'autre
+(comparaison mémoire dans `etat_store_valider()`) — une imprimante au repos,
+dont chaque relevé Klipper est identique au précédent, laisse `generation`
+figée indéfiniment alors même que la boucle interroge Moonraker avec succès
+une fois par seconde. Pour savoir si la boucle est en train de fonctionner,
+c'est le champ `liaison` qu'il faut lire : `"en ligne"` signifie que le
+dernier cycle a réussi (que son contenu ait changé ou non), `"degradee"` ou
+`"hors ligne"` signalent des échecs consécutifs, et `"connexion"` veut dire
+qu'aucun cycle n'a encore abouti depuis le démarrage. `generation` répond à
+« l'affichage doit-il se redessiner ? », `liaison` répond à « la liaison
+fonctionne-t-elle en ce moment ? » — deux questions différentes, à ne pas
+confondre.
 
 ## Revenir au firmware d'origine (le WiFi marche, l'affichage est raté)
 

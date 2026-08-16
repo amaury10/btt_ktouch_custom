@@ -1,3 +1,5 @@
+*Cette page est également disponible en [anglais](pinout.en.md).*
+
 # Pinout de la BIGTREETECH K-Touch — vérifié sur matériel
 
 **Statut : affichage et tactile confirmés sur matériel le 26 juillet 2026.**
@@ -26,7 +28,7 @@ affiche une mire choisie pour que chaque défaut de câblage se voie.
 | Bandes rouge, vert, bleu, blanc **dans cet ordre** | Les 16 broches de données sont dans le bon ordre ; aucune inversion de canal |
 | Quatre repères visibles **aux quatre coins** | Les 800 × 480 sont balayés en entier ; résolution et porches corrects |
 | Texte net, sans décalage ni déchirement | Synchronisation correcte ; mode DE opérationnel |
-| Image **stable, sans scintillement** | Horloge pixel et porches viables à 23 MHz |
+| Image **stable, sans scintillement ni déchirement** | Horloge pixel et porches viables (voir « Timings validés ») |
 | Rétroéclairage allumé | `GPIO21` et la configuration LEDC corrects |
 
 La réversibilité a été démontrée de deux façons distinctes, et il vaut la peine
@@ -57,19 +59,32 @@ Broches de données, dans l'ordre `DATA0` à `DATA15` :
 
 ## Timings validés
 
-| Paramètre | Valeur |
-|---|---|
-| Résolution | 800 × 480 |
-| Horloge pixel | **23 MHz** |
-| HSYNC : impulsion / back porch / front porch | 4 / 8 / 8 |
-| VSYNC : impulsion / back porch / front porch | 4 / 16 / 16 |
+| Paramètre | Valeur retenue | Premier essai (26/07) |
+|---|---|---|
+| Résolution | 800 × 480 | 800 × 480 |
+| Horloge pixel | **14,8 MHz** | 23 MHz |
+| HSYNC : impulsion / back porch / front porch | **4 / 16 / 16** | 4 / 8 / 8 |
+| VSYNC : impulsion / back porch / front porch | **4 / 32 / 32** | 4 / 16 / 16 |
 
-> Le composant amont définit aussi `PT_LCD_PCLK_HZ_MIN` à 14 MHz. La valeur de
-> 23 MHz est celle du dépôt officiel de BTT et c'est celle qui a été validée ici.
-> Attention si vous partez d'une copie tierce : celle vendue avec
-> Prusa-Connect-Touch a été ramenée à 17 MHz par ses auteurs, pour réduire la
-> contention sur le bus PSRAM. Les deux fonctionnent probablement, mais seule la
-> valeur de 23 MHz est confirmée par ce test.
+**Les deux colonnes ont tourné sur l'appareil ; c'est la première qui est
+retenue.** Le premier essai (23 MHz, porches courts) donne une image stable,
+sans scintillement ni artefact — c'est ce qui a été mesuré pendant les
+49 minutes de fonctionnement continu décrites plus haut. Mais dès qu'une
+interface réelle redessine en continu, ce réglage **déchire** : la bande de
+rafraîchissement devient visible sur les mouvements.
+
+Le passage à 14,8 MHz avec des porches deux fois plus larges supprime ce
+déchirement, en donnant au contrôleur RGB assez de marge pour absorber la
+contention sur le bus PSRAM. C'est la valeur `PT_LCD_PCLK_HZ` du composant
+amont ; le firmware n'y touche pas.
+
+> Le composant définit aussi `PT_LCD_PCLK_HZ_MIN` à 14 MHz : 14,8 MHz est donc
+> juste au-dessus du plancher prévu par BTT. Pour situer les autres copies en
+> circulation, celle vendue avec Prusa-Connect-Touch tourne à 17 MHz, ramenée
+> par ses auteurs pour la même raison de contention PSRAM. Trois valeurs
+> fonctionnent donc, mais seule celle retenue ici est confirmée **tear-free sur
+> une interface animée**, ce qui est le seul critère qui compte au-delà d'une
+> mire fixe.
 
 ## Rétroéclairage
 
@@ -129,7 +144,9 @@ fuite mémoire observable.
 ## Sources
 
 Les valeurs de broches proviennent de `bigtreetech/PandaTouch_IDF`, publié par
-BIGTREETECH. Ce dépôt ne contient aucun fichier de licence ; il est référencé ici
-en sous-module et n'est pas redistribué. Les numéros de broches et les timings
-sont des faits matériels, non protégeables — c'est leur **vérification sur la
-K-Touch 5 pouces** qui constitue l'apport de ce document.
+BIGTREETECH. Ce dépôt ne contient aucun fichier de licence, et le composant est
+aujourd'hui présent dans cet arbre — une situation ouverte, détaillée dans
+[`../licence-du-composant-btt.md`](../licence-du-composant-btt.md). Les numéros
+de broches et les timings sont, eux, des faits matériels non protégeables :
+c'est leur **vérification sur la K-Touch 5 pouces** qui constitue l'apport de ce
+document, et elle ne dépend d'aucune licence.

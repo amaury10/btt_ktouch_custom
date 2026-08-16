@@ -13,16 +13,45 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+/* DATA_FORMAT_ELF requis en plus de ENABLE_TO_FLASH (revue du 2026-08-14,
+ * L5) : esp_core_dump_summary_t et esp_core_dump_get_summary() n'existent
+ * que sous les DEUX options (vérifié dans esp_core_dump.h d'IDF 5.5.5) --
+ * un passage au format BIN casserait la compilation avec la garde simple. */
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+#include "esp_core_dump.h"
+#define KTOUCH_COREDUMP_RESUME 1
+#endif
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "nvs_flash.h"
 #include "pandatouch_display.h"
 
+#include "accueil_choix.h"
+#include "bed_mesh_store.h"   /* bed_mesh_generation -- generation externe (2026-08-15) */
+#include "parc_imprimantes.h" /* parc_charger -- gestion de parc (2026-08-15) */
+#include "usb_fichiers.h" /* usb_fichiers_generation -- canal de génération externe de l'habillage */
+#include "backend.h"
+#include "boite_noire.h"
+#include "backend_factice.h"
+#include "backend_moonraker.h"
+#include "boucle.h"
+#include "ecran_accueil.h"
+#include "ecran_accueil_hub.h"
+#include "ecran_configuration.h"
+#include "ecran_macros.h"
+#include "habillage.h"
+#include "journal.h"
+#include "klipper_temp_historique.h"
+#include "navigation.h"
 #include "netlog.h"
+#include "rail_actions.h"
+#include "reglages.h"
 #include "rescue.h"
 #include "web.h"
 #include "wifi.h"
@@ -37,6 +66,41 @@ static const char *TAG = "preuve_de_vie";
 static char partition_label_globale[17] = "?";
 static uint32_t compteur_demarrages_global;
 
+/* Nom court de la raison du reset précédent -- diagnostic des reboots en
+ * boucle (épisode clé USB, 2026-08-14) : sans port série, le texte de panique
+ * est invisible (il ne part que sur l'UART, jamais par netlog dont le tampon
+ * RAM meurt avec le redémarrage) ; cette raison-là, elle, SURVIT au reboot et
+ * discrimine à elle seule un défaut d'alimentation (BROWNOUT) d'un crash
+ * logiciel (PANIC, TASK_WDT, INT_WDT). Chaînes statiques : web.c les garde
+ * par pointeur (voir web_set_reset_reason()). */
+static const char *raison_reset_nom(esp_reset_reason_t raison)
+{
+    switch (raison) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT";
+    case ESP_RST_SW:        return "SW";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "INCONNUE";
+    }
+}
+
+/* Somme des générations des stores INDÉPENDANTS de l'imprimante (contrat
+ * habillage.h : « plusieurs stores : additionner leurs compteurs ») --
+ * fichiers USB + parc (revue du 2026-08-15, L1 : le parc seul n'était pas
+ * raccordé, l'écran Parc restait figé imprimante hors ligne, précisément le
+ * cas d'usage de la bascule). Des compteurs monotones dont la somme change
+ * dès que l'un bouge. */
+static uint32_t generation_externe_klipper(void)
+{
+    return usb_fichiers_generation() + parc_generation() + bed_mesh_generation();
+}
+
 /* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,
  * ou avant que build_test_pattern() ne s'exécute) : rafraichir_etat_ecran()
  * s'abstient dans ce cas plutôt que de déréférencer un pointeur nul. */
@@ -47,6 +111,40 @@ static void on_touch(lv_event_t *event)
     lv_point_t point;
     lv_indev_get_point(lv_indev_active(), &point);
     ESP_LOGI(TAG, "appui a x=%d y=%d", (int)point.x, (int)point.y);
+}
+
+/* Rappel du minuteur récurrent (tâche 10) : par construction, un lv_timer
+ * s'exécute déjà sur le fil LVGL — pt_lvgl_task (pandatouch_display.c)
+ * est le seul appelant de lv_timer_handler(), qui dispatche tous les
+ * rappels de minuteurs, et il l'exécute DÉJÀ sous PT_LVGL_SCOPE_LOCK().
+ * C'est la vraie raison de ne pas reprendre le verrou ici : ce fil le
+ * détient déjà pendant tout le rappel. (Le reprendre serait d'ailleurs
+ * inoffensif, pas un interblocage : pt_lvgl_mutex est un
+ * xSemaphoreCreateRecursiveMutex, voir pandatouch_display.c:57 — précision
+ * de la revue tâche 10, la première version de ce commentaire supposait
+ * l'inverse sans avoir lu le .c.) habillage_pomper() est un no-op si
+ * habillage_construire() n'a pas encore tourné (voir habillage.c), donc rien
+ * à garder ici en plus de l'appel. Ni réseau ni NVS : uniquement le
+ * rafraîchissement visuel (bandeau de notification qui expire, barre d'état)
+ * que la boucle de sondage à 1 Hz ne couvre pas assez vite. */
+static void interface_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    habillage_pomper();
+}
+
+/* Echantillonneur d'historique de temperature : toutes les 5 s, copie l'etat
+ * courant (meme accesseur verrouille que habillage_pomper) et pousse un point.
+ * Tourne en continu sur le fil LVGL, independamment de l'ecran affiche, pour
+ * que la courbe se remplisse meme hors accueil. */
+static void echantillon_temp_cb(lv_timer_t *t)
+{
+    (void)t;
+    etat_klipper_t e;                 /* ~1840 o sur la pile du fil LVGL, meme
+                                         budget que la copie de habillage_pomper */
+    if (boucle_etat_copier(&e, sizeof(e))) {
+        klipper_temp_historique_pousser(&e);
+    }
 }
 
 /* Reconstruit le texte (deux lignes) de la ligne d'état à partir de l'état
@@ -102,6 +200,21 @@ static void rafraichir_etat_ecran(void)
     char texte[192];
     snprintf(texte, sizeof(texte), "%s\n%s", ligne1, ligne2);
     lv_label_set_text(label_etat, texte);
+}
+
+/* Chooser de l'écran de fond injecté dans l'habillage (bascule vivante
+ * repos<->impression, sous-projet 5 tâche 2) : hub au repos, accueil
+ * impression pendant une impression -- accueil_impression_actif() est le MÊME
+ * helper pur (accueil_choix.h) qu'utilise le simulateur, appliqué ici à
+ * l'état réel de la boucle applicative. L'état arrive opaque (`const void *`)
+ * de l'habillage générique : ce fichier (couche application) le recaste vers
+ * etat_klipper_t, le seul site qui connaît ce type dans la chaîne de bascule.
+ * `ctx` inutilisé (le choix ne dépend que de l'état). */
+static const ecran_desc_t *choix_accueil_klipper(const void *etat, void *ctx)
+{
+    (void)ctx;
+    return accueil_impression_actif((const etat_klipper_t *)etat) ? &ECRAN_ACCUEIL
+                                                                  : &ECRAN_ACCUEIL_HUB;
 }
 
 static void build_test_pattern(void)
@@ -203,8 +316,18 @@ void app_main(void)
      * avant quoi que ce soit d'autre. Une panne à n'importe quel étage
      * ultérieur (NVS, WiFi, écran, tactile, serveur HTTP) doit rester
      * rattrapable ; un sauvetage armé après coup ne protégerait pas contre
-     * l'étage qui a justement échoué. rescue_disarm() n'est appelé que
-     * depuis le gestionnaire de IP_EVENT_STA_GOT_IP, dans wifi.c. */
+     * l'étage qui a justement échoué.
+     *
+     * Contrat (revu ici même, voir le désarmement plus bas juste avant la
+     * boucle principale) : le sauvetage couvre les étages d'INITIALISATION,
+     * pas l'attente normale d'un réseau qui n'est pas encore monté. Il reste
+     * armé jusqu'à ce que ce firmware ait prouvé qu'il est sain -- soit
+     * parce que tous les étages risqués ci-dessous (NVS, WiFi, serveur HTTP,
+     * réglages/backend/boucle, écran/habillage) ont réussi et que la boucle
+     * principale s'apprête à tourner (voir rescue_disarm() plus bas), soit,
+     * plus tôt, parce que IP_EVENT_STA_GOT_IP a été reçu (wifi.c). Le premier
+     * des deux qui survient désarme ; les deux appellent aussi
+     * rescue_reset_boot_count(). */
     ESP_ERROR_CHECK(rescue_arm(CONFIG_KTOUCH_RESCUE_TIMEOUT_MS));
 
     ESP_LOGW(TAG, "demarrage numero %" PRIu32 " (limite avant bascule forcee : %d)",
@@ -216,6 +339,66 @@ void app_main(void)
     ESP_LOGI(TAG, "partition d'execution : %s (offset 0x%06" PRIx32 ")",
              partition_courante != NULL ? partition_courante->label : "?",
              partition_courante != NULL ? (uint32_t)partition_courante->address : 0);
+
+    /* Raison du reset précédent : LA ligne qui discrimine un crash logiciel
+     * d'un défaut d'alimentation quand la dalle reboote en boucle (voir
+     * raison_reset_nom() plus haut). Journalisée à CHAQUE boot, même sain
+     * (SW après un /revert, POWERON après une coupure) : une raison attendue
+     * qui manque est aussi un indice. */
+    esp_reset_reason_t raison_reset = esp_reset_reason();
+    const char *raison_reset_texte = raison_reset_nom(raison_reset);
+    ESP_LOGW(TAG, "raison du reset precedent : %s (%d)", raison_reset_texte, (int)raison_reset);
+    web_set_reset_reason(raison_reset_texte);
+
+    /* Boîte noire RTC (chasse aux WDT(7) muets du 2026-08-15, voir
+     * boite_noire.h) : les zones suspectes actives A L'INSTANT du dernier
+     * reset. 0 = aucune ; bit0 = sonde HTTP du parc, bit1 = clavier ouvert,
+     * bit2 = traitement d'un message WS. Journalisée seulement si non nulle
+     * OU si le reset est un crash -- un boot propre reste silencieux. */
+    uint32_t boite_noire = boite_noire_relever();
+    if (boite_noire != 0 || raison_reset == ESP_RST_PANIC || raison_reset == ESP_RST_WDT ||
+        raison_reset == ESP_RST_INT_WDT || raison_reset == ESP_RST_TASK_WDT) {
+        ESP_LOGW(TAG, "boite noire au reset : 0x%02" PRIx32 " (1=sonde 2=clavier 4=ws_rx)", boite_noire);
+    }
+
+    /* Empreinte ELF (SHA-256 tronqué) : deux builds peuvent porter la MÊME
+     * version git (constaté : un binaire par slot, tous deux estampillés
+     * "4d22d1e" -- l'un construit juste avant le commit du même nom, l'autre
+     * juste après) ; cette empreinte-ci est unique par binaire, c'est elle
+     * qui dit LEQUEL tourne. Exposée aussi dans /status (web.c). */
+    char empreinte_elf[17];
+    esp_app_get_elf_sha256(empreinte_elf, sizeof(empreinte_elf));
+    ESP_LOGW(TAG, "empreinte ELF : %s", empreinte_elf);
+
+#ifdef KTOUCH_COREDUMP_RESUME
+    /* Un coredump présent en flash = un crash antérieur pas encore écrasé
+     * par un plus récent. Le résumé journalisé ici situe la faute (tâche +
+     * PC + pile d'appels en adresses brutes, à résoudre sur PC avec
+     * xtensa-esp32s3-elf-addr2line contre l'ELF du build fautif -- d'où
+     * l'empreinte ELF juste au-dessus) ; le dump complet se rapatrie par
+     * GET /coredump (web.c). Structure sur la pile d'app_main (~150 octets),
+     * jamais de malloc si tôt dans le boot. */
+    esp_core_dump_summary_t resume_coredump;
+    if (esp_core_dump_get_summary(&resume_coredump) == ESP_OK) {
+        ESP_LOGW(TAG, "coredump present : tache '%s', PC 0x%08" PRIx32 ", %s",
+                 resume_coredump.exc_task, resume_coredump.exc_pc,
+                 resume_coredump.exc_bt_info.corrupted ? "pile corrompue" : "pile saine");
+        char pile_texte[16 * 11 + 1];
+        size_t pos = 0;
+        for (uint32_t i = 0; i < resume_coredump.exc_bt_info.depth &&
+                             i < sizeof(resume_coredump.exc_bt_info.bt) /
+                                 sizeof(resume_coredump.exc_bt_info.bt[0]); i++) {
+            int ecrit = snprintf(pile_texte + pos, sizeof(pile_texte) - pos, " %08" PRIx32,
+                                 resume_coredump.exc_bt_info.bt[i]);
+            if (ecrit <= 0 || (size_t)ecrit >= sizeof(pile_texte) - pos) {
+                break;
+            }
+            pos += (size_t)ecrit;
+        }
+        pile_texte[pos] = '\0';
+        ESP_LOGW(TAG, "coredump pile :%s", pile_texte);
+    }
+#endif
 
     /* Renseignés une fois pour la ligne d'état affichée à l'écran (voir
      * build_test_pattern()/rafraichir_etat_ecran()) : c'est le seul canal de
@@ -248,15 +431,30 @@ void app_main(void)
     }
 
     /* Un échec ici n'est volontairement pas fatal : c'est justement le cas
-     * que le sauvetage automatique couvre. Si le WiFi ne se connecte
-     * jamais, rescue_disarm() n'est jamais appelé et le minuteur armé plus
-     * haut rebasculera sur l'autre slot à l'échéance. */
+     * que le sauvetage automatique couvre. wifi_start() en échec (par
+     * opposition à une simple absence de réseau) laisse le sauvetage armé
+     * jusqu'à l'échéance, faute d'atteindre le point de désarmement plus bas
+     * (voir rescue_disarm() en fin de fonction) : c'est voulu, un WiFi qui ne
+     * démarre même pas est le signe d'un mauvais flash, pas d'un réseau qui
+     * tarde. */
     erreur = wifi_start();
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "wifi_start a echoue : %s ; le sauvetage automatique reste actif", esp_err_to_name(erreur));
     }
 
     web_set_boot_count(compteur_demarrages);
+
+    /* Feature "Impression depuis USB", tache B : montage MSC + scan --
+       NE démarre PLUS ici (fix RAM interne, voir la mémoire du projet) :
+       pt_usb_start() créait à ce point 2 tâches hôte USB (~8 Ko de RAM
+       INTERNE) juste avant que boucle_demarrer() plus bas ne cherche à
+       allouer la tâche WebSocket (16 Ko, elle aussi RAM interne) --
+       "Error create websocket task". Ce sous-système démarre désormais à la
+       PREMIÈRE ouverture de l'écran USB (voir usb_scan.h/ecran_usb.c), plus
+       au boot. Bonus documenté par usb_scan.h : repousse aussi le risque de
+       reboot par l'ESP_ERROR_CHECK interne de pt_usb_start() bien après que
+       WiFi/serveur HTTP/écran soient déjà debout, au lieu du tout premier
+       étage du boot. */
 
     /* Le serveur HTTP démarre ici, juste après le WiFi et AVANT l'écran :
      * c'est ce qui garantit que /revert et /log restent joignables même si
@@ -268,6 +466,90 @@ void app_main(void)
     erreur = web_start();
     if (erreur != ESP_OK) {
         ESP_LOGE(TAG, "web_start a echoue : %s", esp_err_to_name(erreur));
+    }
+
+    /* Réglages, sélection du backend puis démarrage de la boucle
+     * d'interrogation — placés ICI, délibérément après web_start() : le
+     * serveur HTTP (donc /log et /revert, et maintenant /state) est déjà
+     * debout avant qu'on touche à la NVS des réglages ou qu'on lance la
+     * tâche réseau de boucle.c. Un réglage illisible ou un backend qui
+     * échoue à démarrer reste ainsi diagnosticable à distance au lieu de
+     * priver l'appareil de son seul canal de secours si l'étage suivant
+     * tombait avec lui. Comme pour NVS et WiFi plus haut : aucun
+     * ESP_ERROR_CHECK ici, on journalise et on continue — un hôte non
+     * configuré est l'état normal d'un premier démarrage (voir
+     * reglages.h), pas une panne, et rien ci-dessous ne doit pouvoir
+     * redémarrer l'appareil. */
+    esp_err_t erreur_reglages = reglages_charger();
+    if (erreur_reglages != ESP_OK) {
+        JOURNAL_ALERTE(TAG, "reglages_charger a echoue (%s) ; reglages par defaut conserves",
+                       esp_err_to_name(erreur_reglages));
+    }
+
+    /* Gestion de parc (2026-08-15) : APRÈS reglages_charger() -- la
+     * migration de parc_charger() lit l'hôte historique pour peupler
+     * l'entrée 0 d'un appareil déjà configuré (voir parc_imprimantes.h). */
+    parc_charger();
+
+    if (!reglages_configures()) {
+        /* Premier démarrage, ou réglages jamais saisis : normal, pas une
+         * erreur. L'écran de première configuration (ECRAN_CONFIGURATION,
+         * empilé plus bas sous PT_LVGL_SCOPE_LOCK()) renseignera l'hôte ;
+         * en attendant qu'il le fasse, ne pas démarrer la boucle plutôt que
+         * de la lancer contre une adresse vide, qui échouerait à chaque
+         * cycle pour rien. Texte corrigé (revue tâche 8, round 1, Q6) :
+         * l'ancienne version annonçait cet écran "à venir au sous-jalon 2b"
+         * -- c'était vrai avant la tâche 8, plus depuis. */
+        JOURNAL_ALERTE(TAG, "aucun hote configure : la boucle d'interrogation ne demarre pas "
+                       "(en attente de l'ecran de configuration)");
+    } else {
+        /* Sélection du backend par le nom que porte CHAQUE descripteur
+         * lui-même (desc->nom), jamais par une chaîne recopiée ici : ainsi
+         * un futur renommage d'un backend ne peut pas faire diverger cette
+         * comparaison de la valeur réellement stockée dans les réglages. */
+        const backend_desc_t *desc_moonraker = backend_moonraker_desc();
+        const backend_desc_t *desc_factice = backend_factice_desc();
+        const char *nom_backend = reglages_backend();
+
+        const backend_desc_t *desc_choisi = NULL;
+        if (desc_moonraker != NULL && strcmp(nom_backend, desc_moonraker->nom) == 0) {
+            desc_choisi = desc_moonraker;
+        } else if (desc_factice != NULL && strcmp(nom_backend, desc_factice->nom) == 0) {
+            desc_choisi = desc_factice;
+        } else {
+            /* Nom inconnu : réglage corrompu, ou nom d'un backend retiré
+             * depuis. Repli documenté sur moonraker — le backend par défaut
+             * de reglages.h — plutôt qu'un choix silencieux ; le
+             * avertissement ci-dessous est ce qui rend ce repli visible
+             * dans /log au lieu de laisser deviner pourquoi la machine
+             * attendue ne répond jamais. */
+            JOURNAL_ALERTE(TAG, "backend '%s' inconnu ; repli sur '%s'",
+                           nom_backend, desc_moonraker != NULL ? desc_moonraker->nom : "?");
+            desc_choisi = desc_moonraker;
+        }
+
+        backend_hote_t hote;
+        reglages_hote(&hote);
+
+        /* Diagnostic RAM interne (fix lot Power/Console/Miniatures/USB, voir
+         * la mémoire du projet) : juste AVANT boucle_demarrer(), qui est ce
+         * qui déclenche la création de la tâche WebSocket (16 Ko de pile,
+         * RAM interne -- voir moonraker_ws.c ~l.860-882) côté backend
+         * Moonraker. Permet de confirmer dans /log, après ce fix, que la RAM
+         * interne libre est bien revenue au-dessus de ~20 Ko contigus (le
+         * symptôme d'origine était "Error create websocket task" faute de
+         * bloc contigu suffisant, pas faute de RAM totale). */
+        JOURNAL_INFO(TAG, "avant demarrage boucle/WS : RAM interne libre %u o (plus grand bloc contigu %u o)",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
+        if (desc_choisi != NULL) {
+            esp_err_t erreur_boucle = boucle_demarrer(desc_choisi, &hote);
+            if (erreur_boucle != ESP_OK) {
+                JOURNAL_ERREUR(TAG, "boucle_demarrer a echoue (%s) : /state restera a son etat initial",
+                               esp_err_to_name(erreur_boucle));
+            }
+        }
     }
 
     ESP_LOGI(TAG, "demarrage du firmware de preuve de vie");
@@ -291,6 +573,21 @@ void app_main(void)
         }
 
         PT_LVGL_SCOPE_LOCK() {
+            /* Feature "Miniatures gcode", tache B : enregistre le decodeur
+             * PNG une fois pour toute la duree de vie du firmware, AVANT
+             * toute construction d'ecran (pt_display_init() ci-dessus a deja
+             * appele lv_init() en interne -- voir esp_lvgl_port/le BSP
+             * vendorise -- donc la liste globale de decodeurs d'images
+             * existe deja ici). CONFIG_LV_USE_LODEPNG=y (firmware/sdkconfig[.
+             * defaults]) : sans lui, lv_lodepng_init() n'est meme pas
+             * declaree (voir lv_lodepng.h, entierement sous #if
+             * LV_USE_LODEPNG) -- le controleur (gate idf) verifie cette
+             * activation, voir le rapport de la tache B. Sous le meme verrou
+             * LVGL que build_test_pattern() juste en dessous : l'enregistrement
+             * d'un decodeur touche l'etat global LVGL (liste chainee des
+             * decodeurs), meme discipline que tout le reste de ce bloc. */
+            lv_lodepng_init();
+
             build_test_pattern();
 
             /* Le rappel est enregistré sur le périphérique d'entrée tactile
@@ -331,9 +628,196 @@ void app_main(void)
                 ESP_LOGW(TAG, "la mire reste affichee, seul le retour tactile est indisponible");
             }
             web_set_touch_available(touch_indev != NULL);
+
+            /* Tâche 8 (sous-jalon 2b) : choix de l'écran de départ, câblé ici
+             * plutôt que laissé à la tâche 10 parce que reglages_configures()
+             * est déjà connu à ce point (reglages_charger() a tourné plus
+             * haut) et que ce site est déjà sous PT_LVGL_SCOPE_LOCK() pour
+             * build_test_pattern() ci-dessus — le même verrou protège donc
+             * cette construction-ci sans rien inventer.
+             *
+             * Un écran d'accueil est TOUJOURS empilé en premier, jamais
+             * seulement ECRAN_CONFIGURATION seul (corrigé revue tâche 8,
+             * round 1, Q1 IMPORTANT) : navigation_accueil() (bouton Save de
+             * l'écran de configuration) est un `while (profondeur > 1)`, un
+             * no-op à profondeur 1 -- avec ECRAN_CONFIGURATION seul en fond
+             * de pile, Save n'aurait donc LITTÉRALEMENT aucun endroit où
+             * revenir : la bannière "Settings saved" s'affiche, l'écran ne
+             * bouge pas, et le bouton retour reste caché (profondeur == 1).
+             * Reproduit et confirmé par la revue avec la vraie topologie de
+             * ce fichier. Empiler l'accueil D'ABORD puis, si l'appareil
+             * n'est pas encore configuré, ECRAN_CONFIGURATION PAR-DESSUS lui
+             * donne un sens réel à Save (retour à l'accueil, déjà construit
+             * et grisé puisque la boucle ne démarre pas tant que l'hôte
+             * n'est pas configuré) et fait apparaître le bouton retour
+             * (profondeur > 1) pour qui veut jeter un œil à l'accueil en
+             * cours de configuration sans valider quoi que ce soit.
+             *
+             * Tâche 3 (jalon 3b), mis à jour tâche 7 (accueil-hub remplace
+             * l'idle) : ECRAN_ACCUEIL_HUB plutôt que ECRAN_ACCUEIL
+             * (impression) ici -- au tout premier démarrage la boucle
+             * applicative vient tout juste de naître (boucle_init()
+             * ci-dessous n'a pas encore tourné un seul cycle), l'état réel
+             * de la machine (impression en cours ou non) n'est donc pas
+             * encore connu et accueil_choix.h ne peut pas encore trancher.
+             * Le repos est l'état de démarrage le plus courant ET le plus
+             * sûr (aucun contrôle dangereux -- Cancel, E-STOP -- proposé
+             * hors ligne, contrairement à l'accueil impression) : il sert
+             * donc de défaut fixe, jamais recalculé ici. La bascule VIVANTE
+             * idle<->impression une fois la première donnée reçue est
+             * différée à la fin du plan 3b (voir task-3-brief.md) --
+             * accueil_choix.h existe déjà et est exercé par le simulateur
+             * (simulateur/main.c), mais rien ne l'appelle encore depuis
+             * cette boucle applicative. */
+            habillage_construire(lv_screen_active());
+            /* Bouton engrenage de la barre d'etat -> ecran de configuration
+             * (adresse imprimante), accessible depuis l'accueil a tout moment,
+             * pas seulement au premier demarrage. */
+            habillage_definir_ecran_reglages(&ECRAN_CONFIGURATION);
+            /* Comportement Klipper du rail persistant (Accueil/Home/Macros/STOP)
+             * + ids d'ecran servant au surlignage. L'habillage reste generique :
+             * il ne connait ni klipper_gcode.h ni ces ecrans, l'application les
+             * injecte ici (meme motif que habillage_definir_ecran_reglages
+             * ci-dessus). */
+            habillage_definir_action_rail(rail_action_klipper, NULL, ECRAN_ACCUEIL_HUB.id,
+                                          ECRAN_MACROS.id);
+            /* Bascule vivante repos<->impression du fond : l'habillage
+             * consulte ce chooser à chaque pompage (voir
+             * habillage_definir_choix_accueil()). Le choix AU BOOT ci-dessous
+             * reste ECRAN_ACCUEIL_HUB (état réel pas encore connu, défaut sûr
+             * -- voir le commentaire de l'empilement) ; la bascule prend le
+             * relais dès le premier état reçu de la boucle applicative. */
+            habillage_definir_choix_accueil(choix_accueil_klipper, NULL);
+            /* Canal de génération EXTERNE : le store des fichiers USB évolue
+             * SANS l'imprimante (scan au montage d'une clé) -- sans cet
+             * enregistrement, l'écran USB restait figé sur "Insert a USB
+             * key" Moonraker injoignable, y compris après la fin du scan
+             * (revue du 2026-08-14, L2 ; voir habillage.h). Même motif
+             * d'injection que les hooks ci-dessus : l'habillage ne connaît
+             * pas usb_fichiers.h, l'application branche. */
+            habillage_definir_generation_externe(generation_externe_klipper);
+            esp_err_t erreur_accueil = navigation_empiler(&ECRAN_ACCUEIL_HUB);
+            if (erreur_accueil != ESP_OK) {
+                JOURNAL_ERREUR(TAG, "navigation_empiler(accueil) a echoue (%s) : ecran de depart absent",
+                               esp_err_to_name(erreur_accueil));
+            }
+            /* Second empilement CONDITIONNÉ à la réussite du premier (revue
+             * tâche 8, round 2, minor) : les deux appels ne sont pas
+             * indépendants. Sans cette garde, un accueil refusé (à cause
+             * d'un NO_MEM au tout premier démarrage, par exemple — son
+             * contexte est le plus gros des deux écrans) suivi d'un
+             * ECRAN_CONFIGURATION plus petit qui, lui, réussirait, recrée
+             * EXACTEMENT le cul-de-sac Q1 corrigé plus haut : configuration
+             * seule à profondeur 1, sous un profil de panne différent (échec
+             * d'allocation partiel plutôt qu'un oubli de code). */
+            if (erreur_accueil == ESP_OK && !reglages_configures()) {
+                esp_err_t erreur_config = navigation_empiler(&ECRAN_CONFIGURATION);
+                if (erreur_config != ESP_OK) {
+                    JOURNAL_ERREUR(TAG, "navigation_empiler(configuration) a echoue (%s)",
+                                   esp_err_to_name(erreur_config));
+                }
+            } else if (erreur_accueil != ESP_OK) {
+                JOURNAL_ALERTE(TAG, "ecran de configuration non empile : l'accueil a deja echoue");
+            }
+
+            /* Tâche 10 : un premier habillage_pomper(), synchrone, peuple la
+             * barre d'état une fois à la construction (juste en dessous) ;
+             * un lv_timer récurrent (interface_timer_cb() plus haut) prend
+             * ensuite le relais pour la faire vivre (bandeau qui expire,
+             * heure, wifi). Créé ICI, sous le même PT_LVGL_SCOPE_LOCK() que
+             * le reste de cette construction, parce que lv_timer_create()
+             * n'est lui-même pas thread-safe vis-à-vis du fil LVGL — le
+             * créer hors du verrou risquerait de le faire courir pendant que
+             * build_test_pattern()/habillage_construire() ci-dessus modifient
+             * encore l'arbre d'objets. Une fois créé, son rappel s'exécute
+             * par construction sur le fil LVGL (voir interface_timer_cb()) :
+             * aucun verrou n'y est repris. Période de 200 ms : largement
+             * assez pour une réactivité sous la seconde sur le bandeau de
+             * notification, sans rivaliser avec la boucle de sondage à 1 Hz
+             * de boucle.c. Échec de création journalisé, jamais fatal (pas
+             * d'ESP_ERROR_CHECK) : lv_timer_create() rendant NULL sur un
+             * épuisement mémoire LVGL, l'interface reste alors figée sur son
+             * premier habillage_pomper() plutôt que de faire tomber le
+             * firmware pour un bandeau qui ne s'auto-masquera pas.
+             *
+             * La mire de build_test_pattern() ci-dessus n'est PAS retirée :
+             * comportement inchangé au niveau code (corrigé revue tâche 8,
+             * round 1, Q5 : ce paragraphe affirmait à tort que "l'habillage
+             * la couvre entièrement, fond opaque plein cadre" -- FAUX :
+             * g_contenu, la zone que habillage_construire() crée pour
+             * accueillir la navigation, est intégralement TRANSPARENTE
+             * (lv_obj_remove_style_all(), voir habillage.c). Ce qui couvre
+             * réellement la mire est la SOMME de la bande d'état opaque
+             * (44 px) et du fond opaque que CHAQUE écran empilé pose
+             * lui-même sur la totalité de sa propre zone (voir COULEUR_FOND
+             * dans ecran_accueil.c/ecran_configuration.c) -- une convention
+             * suivie par les deux écrans actuels, pas une garantie que
+             * habillage.c impose. Si navigation_empiler() échouait ici
+             * (pile pleine, allocation refusée -- voir les JOURNAL_ERREUR
+             * ci-dessus), rien ne serait empilé et la mire referait surface
+             * au travers de g_contenu transparent : un repli dégradé mais
+             * honnête (une mire lisible plutôt qu'un écran gris uniforme),
+             * pas un défaut à corriger. rafraichir_etat_ecran() continue de
+             * tourner sans changement dans la boucle 5 s plus bas quel que
+             * soit ce résultat — rien du diagnostic WiFi du jalon 1 n'est
+             * supprimé, il devient seulement invisible tant qu'un écran
+             * réel couvre effectivement l'affichage. */
+            habillage_pomper();
+
+            lv_timer_t *minuteur_interface = lv_timer_create(interface_timer_cb, 200, NULL);
+            if (minuteur_interface == NULL) {
+                JOURNAL_ALERTE(TAG, "lv_timer_create(interface) a echoue : rafraichissement "
+                               "periodique indisponible, l'interface reste figee sur son premier etat");
+            }
+
+            lv_timer_t *minuteur_temp = lv_timer_create(echantillon_temp_cb, 5000, NULL);
+            if (minuteur_temp == NULL) {
+                JOURNAL_ALERTE(TAG, "lv_timer_create(echantillon temp) a echoue : historique de "
+                               "temperature indisponible");
+            }
         }
 
         ESP_LOGI(TAG, "interface construite, le panneau doit etre allume");
+
+        /* Fix (jalon 3b, sous-projet 7 tâche 1) : désarmer le sauvetage ICI,
+         * une fois le firmware prouvé sain, plutôt que de compter
+         * uniquement sur IP_EVENT_STA_GOT_IP (wifi.c). Tous les étages
+         * risqués qui précèdent dans cette fonction -- NVS, wifi_start(),
+         * web_start(), réglages/choix du backend/boucle_demarrer(), et enfin
+         * pt_display_init() plus haut ainsi que la construction de l'écran/
+         * habillage ci-dessus (habillage_construire(), le premier
+         * habillage_pomper(), la création du minuteur d'interface) -- ont
+         * réussi ; la boucle principale ci-dessous s'apprête à prendre le
+         * relais. Ce point n'est atteint QUE dans la branche où
+         * pt_display_init() a réussi (ce bloc else) : si l'écran avait
+         * échoué (voir le if (erreur_affichage != ESP_OK) ci-dessus), on
+         * n'arriverait jamais ici et le sauvetage resterait armé -- c'est ce
+         * qui préserve sa protection contre un vrai mauvais flash (panique,
+         * PSRAM, init écran/WiFi qui échoue).
+         *
+         * Avant ce correctif, un firmware par ailleurs totalement sain mais
+         * démarré à froid sans réseau immédiatement disponible (routeur ou
+         * imprimante pas encore monté) restait épinglé sur le seul
+         * désarmement de wifi.c : le minuteur de rescue.c (rescue_arm() plus
+         * haut, ~CONFIG_KTOUCH_RESCUE_TIMEOUT_MS) rebasculait alors de slot
+         * OTA et redémarrait avant d'avoir laissé sa chance au réseau, et le
+         * firmware d'origine récupéré par la bascule se heurtait au même
+         * problème de réseau -- un ping-pong entre les deux slots jusqu'à ce
+         * que le réseau réponde enfin. rescue_reset_boot_count() ci-dessous
+         * remet aussi à zéro le compteur RTC (RESCUE_DEMARRAGES_MAX, en tête
+         * de cette fonction) : un firmware sain ne l'accumule plus non plus.
+         *
+         * Compromis assumé : un firmware sain qui ne rejoindra JAMAIS le
+         * WiFi (mauvais identifiants, par exemple) ne se rebascule plus tout
+         * seul une fois ce point atteint -- il retente indéfiniment sans
+         * jamais redémarrer. C'est corrigé par la saisie WiFi à l'écran
+         * (sous-projet en cours), pas par le sauvetage. Le désarmement sur
+         * IP_EVENT_STA_GOT_IP (wifi.c) reste en place, inchangé : il devient
+         * simplement, dans le cas courant, le premier des deux à survenir --
+         * redondant avec celui-ci mais inoffensif (rescue_disarm() et
+         * rescue_reset_boot_count() sont idempotents). */
+        rescue_disarm();
+        rescue_reset_boot_count();
     }
 
     while (true) {

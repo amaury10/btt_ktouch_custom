@@ -1,0 +1,126 @@
+#include "ota_image.h"
+
+#include <string.h>
+
+bool ota_image_entete_valide(const uint8_t *debut, size_t n, size_t taille_image,
+                             size_t taille_min, size_t taille_partition)
+{
+    if (debut == NULL || n == 0) {
+        return false;
+    }
+    if (debut[0] != 0xE9) {
+        return false;
+    }
+    if (taille_image < taille_min || taille_image > taille_partition) {
+        return false;
+    }
+    return true;
+}
+
+bool ota_backup_entete_serialiser(const ota_backup_entete_t *e, uint8_t *sortie, size_t taille)
+{
+    if (e == NULL || sortie == NULL || taille < OTA_BACKUP_ENTETE_TAILLE) {
+        return false;
+    }
+
+    /* Little-endian explicite, octet par octet -- identique hote/ESP quel
+     * que soit le boutisme natif du compilateur. */
+    sortie[0] = (uint8_t)(e->magic & 0xFFu);
+    sortie[1] = (uint8_t)((e->magic >> 8) & 0xFFu);
+    sortie[2] = (uint8_t)((e->magic >> 16) & 0xFFu);
+    sortie[3] = (uint8_t)((e->magic >> 24) & 0xFFu);
+
+    sortie[4] = (uint8_t)(e->taille & 0xFFu);
+    sortie[5] = (uint8_t)((e->taille >> 8) & 0xFFu);
+    sortie[6] = (uint8_t)((e->taille >> 16) & 0xFFu);
+    sortie[7] = (uint8_t)((e->taille >> 24) & 0xFFu);
+
+    for (size_t i = 0; i < 32; i++) {
+        sortie[8 + i] = e->sha256[i];
+    }
+
+    return true;
+}
+
+bool ota_backup_entete_parser(const uint8_t *src, size_t taille, ota_backup_entete_t *sortie)
+{
+    if (src == NULL || sortie == NULL || taille < OTA_BACKUP_ENTETE_TAILLE) {
+        return false;
+    }
+
+    uint32_t magic = (uint32_t)src[0] | ((uint32_t)src[1] << 8) |
+                      ((uint32_t)src[2] << 16) | ((uint32_t)src[3] << 24);
+    if (magic != OTA_BACKUP_MAGIC) {
+        return false;
+    }
+
+    uint32_t taille_image = (uint32_t)src[4] | ((uint32_t)src[5] << 8) |
+                             ((uint32_t)src[6] << 16) | ((uint32_t)src[7] << 24);
+
+    sortie->magic = magic;
+    sortie->taille = taille_image;
+    for (size_t i = 0; i < 32; i++) {
+        sortie->sha256[i] = src[8 + i];
+    }
+
+    return true;
+}
+
+bool ota_sha256_egal(const uint8_t a[32], const uint8_t b[32])
+{
+    uint8_t diff = 0;
+    for (size_t i = 0; i < 32; i++) {
+        diff |= a[i] ^ b[i];
+    }
+    return diff == 0;
+}
+
+size_t ota_taille_alignee(size_t taille, size_t taille_secteur)
+{
+    if (taille_secteur == 0) {
+        return 0;
+    }
+    size_t reste = taille % taille_secteur;
+    if (reste == 0) {
+        return taille;
+    }
+    return taille + (taille_secteur - reste);
+}
+
+/* Valeur d'un chiffre hexadecimal (0-9/a-f/A-F), -1 si hors alphabet. */
+static int ota_hex_chiffre(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+bool ota_hex_vers_sha256(const char *hex, uint8_t sortie[32])
+{
+    if (hex == NULL || sortie == NULL || strlen(hex) != 64) {
+        return false;
+    }
+
+    /* Accumule dans un tampon local d'abord : `sortie` ne doit jamais etre
+       modifie a moitie si un caractere invalide apparait tard dans la
+       chaine (ex. le 63e caractere) -- voir le contrat en tete de fichier. */
+    uint8_t tampon[32];
+    for (size_t i = 0; i < 32; i++) {
+        int poids_fort = ota_hex_chiffre(hex[i * 2]);
+        int poids_faible = ota_hex_chiffre(hex[i * 2 + 1]);
+        if (poids_fort < 0 || poids_faible < 0) {
+            return false;
+        }
+        tampon[i] = (uint8_t)((poids_fort << 4) | poids_faible);
+    }
+
+    memcpy(sortie, tampon, sizeof(tampon));
+    return true;
+}

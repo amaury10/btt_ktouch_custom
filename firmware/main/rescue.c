@@ -176,10 +176,35 @@ esp_err_t rescue_arm(uint32_t delai_ms)
 
 void rescue_disarm(void)
 {
-    if (minuteur != NULL) {
-        esp_timer_stop(minuteur);
-        esp_timer_delete(minuteur);
-        minuteur = NULL;
-        ESP_LOGI(TAG, "sauvetage desarme : le reseau repond");
+    /* Deux appelants CONCURRENTS existent depuis le sous-projet 7 : la tâche
+     * `main` (app_main.c, une fois l'initialisation terminée) et la tâche
+     * `sys_evt` de l'event loop par défaut (wifi.c, sur IP_EVENT_STA_GOT_IP).
+     * Sur cet ESP32-S3 SMP elles peuvent s'exécuter réellement en parallèle
+     * (deux cœurs) ou se préempter. Le check-then-act sur `minuteur` DOIT donc
+     * être atomique : sans verrou, les deux pourraient lire `minuteur != NULL`
+     * avant que l'une ne le remette à NULL, et appeler esp_timer_delete() DEUX
+     * FOIS sur le même handle -- esp_timer diffère la libération en réinsérant
+     * le timer dans sa liste interne, un second appel corromprait cette liste
+     * ou déréférencerait une structure déjà libérée (use-after-free), juste
+     * après les grosses allocations LVGL de la construction de l'interface :
+     * un plantage tas ici recréerait précisément le multi-reboot que ce fix
+     * élimine. On prend possession du handle sous section critique, puis on le
+     * manipule HORS verrou (esp_timer_stop/_delete ne doivent pas tourner sous
+     * portENTER_CRITICAL). */
+    static portMUX_TYPE verrou = portMUX_INITIALIZER_UNLOCKED;
+    esp_timer_handle_t local;
+    portENTER_CRITICAL(&verrou);
+    local = minuteur;
+    minuteur = NULL;
+    portEXIT_CRITICAL(&verrou);
+    if (local != NULL) {
+        esp_timer_stop(local);
+        esp_timer_delete(local);
+        /* Message volontairement neutre sur la CAUSE du désarmement : les deux
+         * appelants (wifi.c « le réseau répond » ; app_main.c fin d'init, où le
+         * réseau peut ne pas encore avoir répondu) journalisent déjà leur
+         * propre contexte juste avant -- un doublon ici confirmerait une cause
+         * pas toujours exacte. */
+        ESP_LOGI(TAG, "sauvetage desarme");
     }
 }

@@ -8,6 +8,12 @@
 
 #include "esp_err.h"
 
+/* Taille du tampon circulaire -- exportée pour que le consommateur HTTP
+ * (web.c, tampon d'instantané de /log) reste dimensionné EXACTEMENT dessus :
+ * les deux valeurs étaient dupliquées en littéral, et grossir l'une sans
+ * l'autre tronquerait /log en silence (revue du 2026-08-14, L10). */
+#define NETLOG_TAILLE (16 * 1024)
+
 esp_err_t netlog_init(void);
 
 /* Recopie dans `out` (taille `len`, toujours terminé par NUL) le contenu
