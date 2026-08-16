@@ -189,6 +189,40 @@ void parc_config_lire(parc_config_t *dest)
     VERROU_RENDRE();
 }
 
+esp_err_t parc_config_retirer(parc_config_t *config, uint8_t indice)
+{
+    if (config == NULL || config->nb == 0 || indice >= config->nb) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    /* Retrait de l'ACTIVE refuse tant qu'il reste d'autres imprimantes -- voir
+       le contrat detaille dans parc_imprimantes.h. Teste AVANT toute
+       modification : `*config` doit rester intacte sur ce refus. */
+    if (indice == config->actif && config->nb > 1) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    for (uint8_t i = indice; i + 1 < config->nb; i++) {
+        config->entrees[i] = config->entrees[i + 1];
+    }
+    config->nb--;
+    /* Case liberee remise a zero : sans ca, le nom d'une imprimante supprimee
+       survivrait dans entrees[nb] et reapparaitrait au prochain ajout, qui
+       ecrit dans cette case sans l'avoir nettoyee. */
+    memset(&config->entrees[config->nb], 0, sizeof(config->entrees[config->nb]));
+
+    /* `actif` ne bouge que si l'entree retiree le PRECEDAIT : apres le
+       decalage, l'imprimante active a recule d'un cran. Le cas indice ==
+       actif n'arrive ici que pour la derniere entree du parc (nb vaut alors
+       0), ou `actif` a 0 est deja correct. */
+    if (indice < config->actif) {
+        config->actif--;
+    }
+    if (config->actif >= config->nb) {
+        config->actif = 0;
+    }
+    return ESP_OK;
+}
+
 esp_err_t parc_config_definir(const parc_config_t *config)
 {
     if (config == NULL) {

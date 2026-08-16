@@ -110,6 +110,7 @@ capture confirmation           --scenario 6  --cycles $CY
 capture clavier-temperature    --scenario 14 --cycles $CY
 capture homing-confirmation    --scenario 13 --cycles $CY
 capture premier-demarrage-saisie --scenario 8 --cycles 0
+capture parc-actions           --scenario 10 --cycles $CY --ecran parc --parc-actions
 
 echo
 echo "$(ls -1 "$sortie"/*.png | wc -l) captures dans docs/captures/"

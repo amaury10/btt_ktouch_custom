@@ -54,6 +54,29 @@ void parc_config_lire(parc_config_t *dest);
  * ESP_ERR_INVALID_ARG si `config` est NULL. */
 esp_err_t parc_config_definir(const parc_config_t *config);
 
+/* Retire l'entrée `indice` de `*config` : décale les entrées suivantes d'un
+ * cran, décrémente `nb`, remet à zéro la case libérée, et décrémente `actif`
+ * si l'entrée retirée le PRÉCÉDAIT (sans quoi le marqueur d'imprimante active
+ * désignerait silencieusement une autre machine après le décalage).
+ *
+ * Fonction PURE : elle travaille sur la copie fournie, ne touche NI au store
+ * NI à la NVS -- l'appelant persiste ensuite avec parc_config_definir(), même
+ * schéma que l'ajout dans ecran_parc.c. C'est ce qui la rend testable
+ * (host-test/tests/test_parc.c).
+ *
+ * ESP_ERR_INVALID_ARG : `config` NULL, ou `indice` >= `config->nb` (donc tout
+ * indice sur un parc vide).
+ *
+ * ESP_ERR_INVALID_STATE : `indice` désigne l'imprimante ACTIVE alors que le
+ * parc en compte d'autres -- refus délibéré (décision du 2026-08-16) : la
+ * retirer imposerait de réécrire l'hôte de boot ET de redémarrer la dalle,
+ * effet de bord qu'un geste de suppression ne doit pas déclencher. L'appelant
+ * invite à basculer d'abord. `*config` n'est alors PAS modifiée.
+ * SEULE exception : l'active est la dernière entrée du parc -- la retirer vide
+ * le parc (`nb` = 0), il n'y a rien vers quoi rebasculer. L'hôte de boot n'est
+ * pas du ressort de cette fonction. */
+esp_err_t parc_config_retirer(parc_config_t *config, uint8_t indice);
+
 /* Publie l'état sondé de l'entrée `indice` (+1 génération). Indice hors
  * bornes ou `etat` NULL : no-op silencieux (la sonde borne déjà). */
 void parc_etat_publier(uint8_t indice, const parc_etat_t *etat);

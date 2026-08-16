@@ -620,6 +620,50 @@ static esp_err_t gestion_parc_hote(httpd_req_t *req)
     return httpd_resp_sendstr(req, "ok -- redemarrer pour appliquer si entree active\n");
 }
 
+/* POST /parc-supprimer?i=N : retire l'entrée N du parc. Pendant de
+ * /parc-hote ci-dessus, née le 2026-08-16 en même temps que l'appui long sur
+ * une tuile : avant, RIEN ne pouvait décrémenter `nb`, et un parc arrivé à
+ * PARC_MAX ne pouvait plus jamais accueillir d'imprimante.
+ *
+ * Applique parc_config_retirer() (apps/klipper/parc_imprimantes.c), la même
+ * fonction pure que l'écran -- jamais une seconde implémentation du décalage
+ * et du recalcul de `actif`. Son refus de retirer l'imprimante ACTIVE devient
+ * ici un 409 : ce n'est pas une requête malformée, c'est un état qui interdit
+ * l'opération. */
+static esp_err_t gestion_parc_supprimer(httpd_req_t *req)
+{
+    char parametre[8] = "";
+    char requete[32];
+    if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) == ESP_OK) {
+        (void)httpd_query_key_value(requete, "i", parametre, sizeof(parametre));
+    }
+    int indice = (parametre[0] != '\0') ? atoi(parametre) : -1;
+
+    parc_config_t config;
+    parc_config_lire(&config);
+    if (indice < 0 || indice >= (int)config.nb) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "parametre i invalide (0..nb-1)\n");
+    }
+
+    esp_err_t erreur = parc_config_retirer(&config, (uint8_t)indice);
+    if (erreur == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        return httpd_resp_sendstr(req,
+            "entree active : basculer sur une autre imprimante avant de la retirer\n");
+    }
+    if (erreur != ESP_OK) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "retrait refuse\n");
+    }
+    if (parc_config_definir(&config) != ESP_OK) {
+        return httpd_resp_send_500(req);
+    }
+    JOURNAL_INFO(TAG, "parc-supprimer : entree %d retiree, %u restante(s), active %u",
+                 indice, (unsigned)config.nb, (unsigned)config.actif);
+    return httpd_resp_sendstr(req, "ok\n");
+}
+
 static esp_err_t gestion_coredump(httpd_req_t *req)
 {
     size_t adresse = 0;
@@ -1168,6 +1212,9 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_parc_hote = {
         .uri = "/parc-hote", .method = HTTP_POST, .handler = gestion_parc_hote, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_parc_supprimer = {
+        .uri = "/parc-supprimer", .method = HTTP_POST, .handler = gestion_parc_supprimer, .user_ctx = NULL,
+    };
     static const httpd_uri_t route_coredump = {
         .uri = "/coredump", .method = HTTP_GET, .handler = gestion_coredump, .user_ctx = NULL,
     };
@@ -1188,6 +1235,7 @@ esp_err_t web_start(void)
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     enregistrer_route(serveur, &route_parc);
     enregistrer_route(serveur, &route_parc_hote);
+    enregistrer_route(serveur, &route_parc_supprimer);
     enregistrer_route(serveur, &route_coredump);
 #endif
 

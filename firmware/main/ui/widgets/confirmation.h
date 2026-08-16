@@ -70,6 +70,34 @@ void confirmation_ouvrir(const char *titre, const char *message,
  * ne nomme pourtant toujours pas. */
 bool confirmation_est_ouverte(void);
 
+/* Rappel d'un dialogue à DEUX actions : `choix` vaut -1 (annulation), 0
+ * (première action, `libelle_a`) ou 1 (seconde action, `libelle_b`). */
+typedef void (*confirmation_choix_rappel_t)(int choix, void *contexte);
+
+/* Ouvre un dialogue à TROIS issues : deux actions nommées plus une annulation
+ * fixe libellée "Cancel". Même modale, même singleton et mêmes garanties que
+ * confirmation_ouvrir_ex() ci-dessus (un seul dialogue à la fois, fermeture
+ * asynchrone, garde de réentrance) -- seul le nombre de boutons change.
+ *
+ * Existe pour les tuiles du parc d'imprimantes, qui offrent trois issues sur
+ * un appui long (éditer l'adresse / retirer / ne rien faire) ; le dialogue à
+ * deux issues ne pouvait pas les porter.
+ *
+ * Ordre des boutons dans le pied, identique au dialogue ordinaire :
+ * [0] Cancel, [1] `libelle_a`, [2] `libelle_b`.
+ *
+ * `destructif_b` vrai colore en rouge la SEULE seconde action et lui refuse
+ * tout état "par défaut" -- même règle, et même raison, que `destructif` de
+ * confirmation_ouvrir_ex(). La première action n'est jamais destructive : si
+ * les deux l'étaient, le dialogue n'aurait pas d'issue sûre.
+ *
+ * NULL pour un paramètre texte est traité comme chaîne vide, même politique
+ * que le reste de ui/. */
+void confirmation_ouvrir_choix(const char *titre, const char *message,
+                               const char *libelle_a, const char *libelle_b,
+                               bool destructif_b,
+                               confirmation_choix_rappel_t rappel, void *contexte);
+
 /* Fermeture : les deux boutons de pied sont les SEULES sorties. Un
  * effleurement du fond (hors de la boîte) et une touche ECHAP (clavier
  * physique/encodeur) ne ferment PAS le dialogue — délibérément :

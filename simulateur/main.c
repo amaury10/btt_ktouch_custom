@@ -482,6 +482,16 @@ static void demo_confirmation_rappel(bool confirme, void *contexte)
     (void)contexte;
 }
 
+/* Pendant du precedent pour le dialogue a DEUX actions (--parc-actions) :
+ * jamais invoque en mode capture (rien n'y simule le tactile), n'existe que
+ * pour satisfaire la signature -- confirmation_ouvrir_choix() refuse un
+ * rappel NULL, meme politique que les autres widgets modaux. */
+static void demo_choix_rappel(int choix, void *contexte)
+{
+    (void)choix;
+    (void)contexte;
+}
+
 /* Chooser de l'écran de fond injecté dans l'habillage (bascule vivante
  * repos<->impression, sous-projet 5 tâche 2) : le MÊME comportement que
  * choix_accueil_klipper() dans firmware/main/app_main.c -- hub au repos,
@@ -520,6 +530,12 @@ int main(int argc, char **argv)
      * Spoolman / Parc / Console / Power ne peuvent montrer que leur etat vide,
      * le backend factice ne produisant que etat_klipper_t. */
     bool demo = false;
+    /* --parc-actions : ouvre le menu d'actions d'une tuile du parc (editer
+     * l'adresse / retirer), celui qu'un appui long fait apparaitre. Mode
+     * capture uniquement : rien ne simule le tactile hors fenetre, donc la
+     * modale est ouverte directement -- meme technique que les scenarios
+     * 13/14 pour le homing et le clavier de temperature. */
+    bool parc_actions = false;
     app_t app = APP_ACCUEIL;
     /* Tache 6 (jalon 3a) : empile ECRAN_MACROS par-dessus ECRAN_ACCUEIL
      * (--ecran macros), et lance eventuellement une macro nommee avant la
@@ -601,6 +617,8 @@ int main(int argc, char **argv)
             sans_bandeau = true;
         } else if (strcmp(argv[i], "--demo") == 0) {
             demo = true;
+        } else if (strcmp(argv[i], "--parc-actions") == 0) {
+            parc_actions = true;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {
@@ -618,6 +636,13 @@ int main(int argc, char **argv)
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
     habillage_definir_generation_externe(generation_externe_sim);
+    /* Bouton engrenage de la barre d'etat -> ECRAN_CONFIGURATION, EXACTEMENT
+     * comme app_main.c le fait sur cible (« accessible depuis l'accueil a
+     * tout moment »). Le simulateur ne l'enregistrait pas : ses captures
+     * d'accueil montraient donc une barre d'etat SANS ce bouton, alors que
+     * l'appareil l'affiche -- une capture qui ment sur un controle reel, et
+     * la raison pour laquelle il etait introuvable dans le README. */
+    habillage_definir_ecran_reglages(&ECRAN_CONFIGURATION);
 
     /* Tache 3 (jalon 3b) : choix du backend et demarrage de la boucle
      * simulee DEPLACES ICI, avant l'empilement de tout ecran d'accueil --
@@ -944,6 +969,19 @@ int main(int argc, char **argv)
              * scenario 13 pour le homing) : plausible pour le scenario 10
              * dont ce cas herite l'etat (buse a 0, voir backend_factice.c). */
             clavier_ouvrir("Nozzle target", "210", CLAVIER_NUMERIQUE, demo_clavier_rappel, NULL);
+        }
+
+        /* --parc-actions : le menu qu'un appui long sur une tuile du parc
+         * ouvre (voir tuile_long_cb() dans ecran_parc.c). Litteraux inline,
+         * meme limite que les scenarios 13/14 juste au-dessus : rien ne
+         * simule le tactile en mode capture, donc la modale ne peut pas etre
+         * declenchee par le vrai chemin. Les valeurs reprennent la deuxieme
+         * imprimante peuplee par --demo (voir demo_stores_peupler()), celle
+         * qui n'est PAS active -- l'active refuse le retrait. */
+        if (parc_actions) {
+            confirmation_ouvrir_choix("Snapmaker U1", "192.168.1.42:7125",
+                                      "Edit address", "Remove", true,
+                                      demo_choix_rappel, NULL);
         }
 
         /* Un cycle de pompe LVGL suffit à laisser rendre l'écran une
