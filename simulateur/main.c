@@ -75,6 +75,7 @@
 #include "ecran_macros.h"
 #include "ecran_menu_reglages.h"
 #include "ecran_niveau_lit.h"
+#include "ecran_parc.h"
 #include "ecran_power.h"
 #include "ecran_reglage_fin.h"
 #include "ecran_reglages_wifi.h"
@@ -82,12 +83,19 @@
 #include "ecran_spoolman.h"
 #include "ecran_temperatures.h"
 #include "ecran_updater.h"
+#include "ecran_usb.h"
 #include "ecran_ventilateurs.h"
 #include "ecran_zcalibrate.h"
 #include "etat_klipper.h"
 #include "habillage.h"
 #include "hote_parse.h"
+#include "bed_mesh_store.h"
+#include "console_log.h"
 #include "klipper_temp_historique.h"
+#include "parc_imprimantes.h"
+#include "power_devices.h"
+#include "spoolman_store.h"
+#include "usb_fichiers.h"
 #include "moonraker_pc.h"
 #include "navigation.h"
 #include "source_etat.h"
@@ -232,6 +240,206 @@ static void echantillon_temp_sim(void)
  * etat_jouet_t n'a pas la taille de etat_klipper_t (voir jouet_pomper()
  * ci-dessus), ui_etat_instantane() y rendrait simplement faux, garde
  * explicite ici pour ne jamais compter sur cet echec silencieux. */
+/* --- --demo : peuple les stores INDEPENDANTS de l'imprimante ---------------
+ *
+ * Six ecrans (Bed Mesh, USB, Spoolman, Parc, Console, Power) ne lisent RIEN
+ * dans etat_klipper_t : chacun a son propre store, alimente sur cible par la
+ * tache WebSocket, le scan USB ou la NVS. Le backend factice, qui ne produit
+ * que etat_klipper_t, les laissait donc tous les six sur leur etat vide --
+ * "Insert a USB key", "No mesh", "No printers configured"... Ces ecrans
+ * etaient les seuls du firmware qu'aucune capture ne pouvait montrer en
+ * fonctionnement.
+ *
+ * Ce peuplement passe par les setters PUBLICS de chaque store, exactement
+ * ceux qu'appelle le vrai producteur -- jamais un acces direct aux variables
+ * internes, et surtout RIEN d'ajoute a etat_klipper_t (grossir cette
+ * structure fait deborder les piles WS/boucle/httpd sur cible : voir
+ * docs/dev et l'historique de ce depot). Les valeurs sont plausibles et
+ * FIXES : aucun tirage aleatoire, deux executions donnent deux captures
+ * identiques au pixel pres.
+ *
+ * Appele AVANT l'empilement de l'ecran demande : la garde `sequence` de
+ * habillage_pomper() garantit alors un mettre_a_jour() au premier pompage
+ * suivant, donc l'ecran affiche ces donnees des la premiere capture. */
+static void demo_stores_peupler(void)
+{
+    /* --- Bed Mesh : une grille 7x7 legerement bombee, comme un plateau
+     * reel dont le centre est plus haut que les bords. */
+    static bed_mesh_t mesh; /* ~2,6 Ko : statique, jamais la pile (contrat du .h) */
+    memset(&mesh, 0, sizeof(mesh));
+    mesh.present = true;
+    snprintf(mesh.profil, sizeof(mesh.profil), "default");
+    mesh.mesh_min_x = 20.0f;  mesh.mesh_min_y = 20.0f;
+    mesh.mesh_max_x = 280.0f; mesh.mesh_max_y = 280.0f;
+    mesh.nb_x = 7; mesh.nb_y = 7;
+    mesh.tronquee = false;
+    mesh.z_min = 0.0f; mesh.z_max = 0.0f;
+    for (uint8_t ligne = 0; ligne < mesh.nb_y; ligne++) {
+        for (uint8_t colonne = 0; colonne < mesh.nb_x; colonne++) {
+            /* Bombe : distance au centre (3,3) de la grille 7x7. */
+            float dx = (float)colonne - 3.0f;
+            float dy = (float)ligne - 3.0f;
+            float z = 0.16f - 0.018f * (dx * dx + dy * dy);
+            /* Une legere pente en X, pour que la carte ne soit pas
+             * parfaitement symetrique (un vrai plateau ne l'est jamais). */
+            z += 0.012f * dx;
+            mesh.z[ligne][colonne] = z;
+            if (z < mesh.z_min) mesh.z_min = z;
+            if (z > mesh.z_max) mesh.z_max = z;
+        }
+    }
+    bed_mesh_definir(&mesh);
+
+    bed_mesh_profils_t profils;
+    memset(&profils, 0, sizeof(profils));
+    profils.nb = 3;
+    snprintf(profils.noms[0], BED_MESH_PROFIL_NOM_MAX, "default");
+    snprintf(profils.noms[1], BED_MESH_PROFIL_NOM_MAX, "PEI-lisse");
+    snprintf(profils.noms[2], BED_MESH_PROFIL_NOM_MAX, "verre-60C");
+    bed_mesh_profils_definir(&profils);
+
+    /* --- USB : un repertoire avec des dossiers ET des .gcode, pour montrer
+     * que l'explorateur navigue une arborescence et pas une liste plate. */
+    usb_fichier_t usb[7];
+    memset(usb, 0, sizeof(usb));
+    snprintf(usb[0].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/calibration");
+    usb[0].est_dossier = true;
+    snprintf(usb[1].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/pieces-clients");
+    usb[1].est_dossier = true;
+    snprintf(usb[2].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/benchy.gcode");
+    usb[2].taille = 4238912u;
+    snprintf(usb[3].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/support-camera.gcode");
+    usb[3].taille = 1187430u;
+    snprintf(usb[4].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/cube-20mm.gcode");
+    usb[4].taille = 268301u;
+    snprintf(usb[5].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/vase-spirale.gcode");
+    usb[5].taille = 9945216u;
+    snprintf(usb[6].chemin, USB_FICHIER_CHEMIN_MAX, "/usb/tour-temperature.gcode");
+    usb[6].taille = 733184u;
+    usb_fichiers_definir(true, "/usb", usb, 7, false);
+
+    /* --- Spoolman : quatre bobines, dont une sans poids connu (le cas
+     * "? g" que le store distingue explicitement) et une presque vide. */
+    static spoolman_liste_t bobines;
+    memset(&bobines, 0, sizeof(bobines));
+    bobines.connue = true;
+    bobines.nb = 4;
+    bobines.bobines[0].id = 1;
+    snprintf(bobines.bobines[0].filament, SPOOLMAN_TEXTE_MAX, "Galaxy Black");
+    snprintf(bobines.bobines[0].fabricant, SPOOLMAN_TEXTE_MAX, "Prusament");
+    snprintf(bobines.bobines[0].matiere, SPOOLMAN_MATIERE_MAX, "PLA");
+    bobines.bobines[0].couleur = 0x1b1b1fu; bobines.bobines[0].couleur_connue = true;
+    bobines.bobines[0].restant_g = 742.0f;  bobines.bobines[0].restant_connu = true;
+    bobines.bobines[0].total_g = 1000.0f;
+    bobines.bobines[1].id = 2;
+    snprintf(bobines.bobines[1].filament, SPOOLMAN_TEXTE_MAX, "Rouge trafic");
+    snprintf(bobines.bobines[1].fabricant, SPOOLMAN_TEXTE_MAX, "Filamentum");
+    snprintf(bobines.bobines[1].matiere, SPOOLMAN_MATIERE_MAX, "PETG");
+    bobines.bobines[1].couleur = 0xc4342au; bobines.bobines[1].couleur_connue = true;
+    bobines.bobines[1].restant_g = 118.0f;  bobines.bobines[1].restant_connu = true;
+    bobines.bobines[1].total_g = 750.0f;
+    bobines.bobines[2].id = 3;
+    snprintf(bobines.bobines[2].filament, SPOOLMAN_TEXTE_MAX, "Bleu ciel");
+    snprintf(bobines.bobines[2].fabricant, SPOOLMAN_TEXTE_MAX, "Sunlu");
+    snprintf(bobines.bobines[2].matiere, SPOOLMAN_MATIERE_MAX, "PLA");
+    bobines.bobines[2].couleur = 0x3f8fd4u; bobines.bobines[2].couleur_connue = true;
+    bobines.bobines[2].restant_g = 455.0f;  bobines.bobines[2].restant_connu = true;
+    bobines.bobines[2].total_g = 1000.0f;
+    bobines.bobines[3].id = 4;
+    snprintf(bobines.bobines[3].filament, SPOOLMAN_TEXTE_MAX, "Naturel");
+    snprintf(bobines.bobines[3].fabricant, SPOOLMAN_TEXTE_MAX, "eSun");
+    snprintf(bobines.bobines[3].matiere, SPOOLMAN_MATIERE_MAX, "ABS");
+    bobines.bobines[3].couleur_connue = false; /* couleur inconnue */
+    bobines.bobines[3].restant_connu = false;  /* -> "? g" */
+    bobines.bobines[3].total_g = 0.0f;
+    spoolman_definir_liste(&bobines);
+    spoolman_definir_connecte(true);
+    spoolman_definir_actif(2); /* la PETG rouge est montee */
+
+    /* --- Power : quatre prises, dont une eteinte. */
+    power_devices_t prises;
+    memset(&prises, 0, sizeof(prises));
+    prises.nb = 4;
+    snprintf(prises.devices[0].nom, POWER_NOM_MAX, "printer");
+    prises.devices[0].allumee = true;  prises.devices[0].connue = true;
+    snprintf(prises.devices[1].nom, POWER_NOM_MAX, "caisson");
+    prises.devices[1].allumee = true;  prises.devices[1].connue = true;
+    snprintf(prises.devices[2].nom, POWER_NOM_MAX, "lumiere");
+    prises.devices[2].allumee = false; prises.devices[2].connue = true;
+    snprintf(prises.devices[3].nom, POWER_NOM_MAX, "filtre-air");
+    prises.devices[3].allumee = true;  prises.devices[3].connue = true;
+    power_devices_definir(&prises);
+
+    /* --- Console : un echange realiste, commandes tapees et reponses
+     * Klipper. console_log_ajouter() prend UNE ligne deja separee (contrat
+     * du .h), donc un appel par ligne, comme le fait moonraker_ws.c. */
+    console_log_ajouter(">> STATUS");
+    console_log_ajouter("Klipper state: ready");
+    console_log_ajouter(">> M115");
+    console_log_ajouter("FIRMWARE_NAME:Klipper FIRMWARE_VERSION:v0.12.0-345-g1f2a3b4");
+    console_log_ajouter(">> GET_POSITION");
+    console_log_ajouter("mcu: stepper_x:14400 stepper_y:14400 stepper_z:2000");
+    console_log_ajouter("toolhead: X:120.000 Y:100.000 Z:5.000 E:0.000");
+    console_log_ajouter(">> QUERY_PROBE");
+    console_log_ajouter("probe: open");
+    console_log_ajouter(">> M105");
+    console_log_ajouter("ok T:23.9 /0.0 B:23.2 /0.0");
+
+    /* --- Parc : trois imprimantes, dont une en cours d'impression et une
+     * injoignable -- les trois etats que l'ecran sait rendre. */
+    parc_config_t parc;
+    memset(&parc, 0, sizeof(parc));
+    parc.nb = 3;
+    parc.actif = 0;
+    snprintf(parc.entrees[0].nom, PARC_NOM_MAX, "CR-10 S5");
+    snprintf(parc.entrees[0].hote.adresse, BACKEND_HOTE_LONGUEUR_MAX, "192.168.1.41");
+    parc.entrees[0].hote.port = 7125;
+    snprintf(parc.entrees[1].nom, PARC_NOM_MAX, "Snapmaker U1");
+    snprintf(parc.entrees[1].hote.adresse, BACKEND_HOTE_LONGUEUR_MAX, "192.168.1.42");
+    parc.entrees[1].hote.port = 7125;
+    snprintf(parc.entrees[2].nom, PARC_NOM_MAX, "Voron 2.4");
+    snprintf(parc.entrees[2].hote.adresse, BACKEND_HOTE_LONGUEUR_MAX, "192.168.1.43");
+    parc.entrees[2].hote.port = 7125;
+    parc_config_definir(&parc);
+
+    parc_etat_t pe;
+    memset(&pe, 0, sizeof(pe));
+    pe.sonde = true; pe.atteignable = true;
+    snprintf(pe.etat, sizeof(pe.etat), "standby");
+    pe.buse = 23.9f; pe.lit = 23.2f; pe.progression_pct = 0;
+    parc_etat_publier(0, &pe);
+
+    memset(&pe, 0, sizeof(pe));
+    pe.sonde = true; pe.atteignable = true;
+    snprintf(pe.etat, sizeof(pe.etat), "printing");
+    pe.buse = 210.0f; pe.lit = 60.0f; pe.progression_pct = 40;
+    parc_etat_publier(1, &pe);
+
+    /* Sondee mais injoignable : l'ecran doit la distinguer d'une entree
+     * jamais sondee (sonde = false), d'ou les deux champs separes. */
+    memset(&pe, 0, sizeof(pe));
+    pe.sonde = true; pe.atteignable = false;
+    parc_etat_publier(2, &pe);
+}
+
+/* MEME somme que generation_externe_klipper() (firmware/main/app_main.c) : les
+ * stores independants de l'imprimante n'ont aucun autre moyen de reveiller
+ * habillage_pomper(), qui ne propage que sur changement de
+ * generation/liaison/sequence/generation_externe (ui/habillage.c).
+ *
+ * Ce simulateur ne branchait RIEN sur ce canal, alors que app_main.c le fait
+ * depuis le jalon USB : il ne reproduisait donc pas le comportement de
+ * l'appareil sur ce point precis, ce qui est exactement ce qu'il existe pour
+ * eviter (voir simulateur/README.md : « une capture montre les pixels que
+ * l'appareil pousserait vers sa dalle »). Garder les deux listes identiques :
+ * un store ajoute d'un cote et pas de l'autre remet le simulateur a mentir. */
+static uint32_t generation_externe_sim(void)
+{
+    return usb_fichiers_generation() + parc_generation() + bed_mesh_generation() +
+           klipper_temp_historique_generation() + spoolman_generation() +
+           console_log_generation() + power_devices_generation();
+}
+
 static void cycle_simule_avec_echantillon(app_t app)
 {
     source_etat_sim_cycle();
@@ -300,6 +508,18 @@ int main(int argc, char **argv)
      * l'impression se demande explicitement (--scenario 1). */
     int scenario = 0;
     bool echec = false;
+    /* --sans-bandeau : supprime le "host connected" que la boucle de capture
+     * pose sinon systematiquement des --cycles > 0. Ce bandeau existe pour
+     * les captures de revue (il PROUVE que la liaison est montee), mais il
+     * recouvre la rangee basse de l'ecran capture -- inacceptable pour les
+     * images de documentation, qui doivent montrer l'ecran entier. Sans
+     * effet en mode fenetre. */
+    bool sans_bandeau = false;
+    /* --demo : remplit les six stores independants de l'imprimante -- voir
+     * demo_stores_peupler(). Sans cette option, les ecrans Bed Mesh / USB /
+     * Spoolman / Parc / Console / Power ne peuvent montrer que leur etat vide,
+     * le backend factice ne produisant que etat_klipper_t. */
+    bool demo = false;
     app_t app = APP_ACCUEIL;
     /* Tache 6 (jalon 3a) : empile ECRAN_MACROS par-dessus ECRAN_ACCUEIL
      * (--ecran macros), et lance eventuellement une macro nommee avant la
@@ -344,7 +564,11 @@ int main(int argc, char **argv)
              * ecran_updater.h) -- "actions" (le sous-menu
              * Actions, refonte IHM KlipperScreen tache 2 -- ECRAN_ACTIONS,
              * voir ecran_actions.h), "homing" (le panneau Homing, refonte
-             * IHM KlipperScreen tache 3 -- ECRAN_HOMING, voir ecran_homing.h)
+             * IHM KlipperScreen tache 3 -- ECRAN_HOMING, voir ecran_homing.h),
+             * "usb" (l'explorateur de cle USB, ECRAN_USB) et "parc" (la vue
+             * parc d'imprimantes, ECRAN_PARC) -- ces deux derniers etaient
+             * compiles par simulateur/CMakeLists.txt sans etre atteignables
+             * ici, ce qui les rendait les seuls ecrans impossibles a capturer
              * -- toute autre retombe sur l'accueil seul (ecran_demande reste
              * NULL), meme politique defensive que --app. */
             const char *valeur = argv[++i];
@@ -371,6 +595,12 @@ int main(int argc, char **argv)
             else if (strcmp(valeur, "console") == 0)      ecran_demande = &ECRAN_CONSOLE;
             else if (strcmp(valeur, "actions") == 0)      ecran_demande = &ECRAN_ACTIONS;
             else if (strcmp(valeur, "homing") == 0)       ecran_demande = &ECRAN_HOMING;
+            else if (strcmp(valeur, "usb") == 0)          ecran_demande = &ECRAN_USB;
+            else if (strcmp(valeur, "parc") == 0)         ecran_demande = &ECRAN_PARC;
+        } else if (strcmp(argv[i], "--sans-bandeau") == 0) {
+            sans_bandeau = true;
+        } else if (strcmp(argv[i], "--demo") == 0) {
+            demo = true;
         } else if (strcmp(argv[i], "--macro") == 0 && i + 1 < argc) {
             macro_a_lancer = argv[++i];
         } else if (strcmp(argv[i], "--hote") == 0 && i + 1 < argc) {
@@ -387,6 +617,7 @@ int main(int argc, char **argv)
 
     lv_obj_t *racine = lv_screen_active();
     habillage_construire(racine);
+    habillage_definir_generation_externe(generation_externe_sim);
 
     /* Tache 3 (jalon 3b) : choix du backend et demarrage de la boucle
      * simulee DEPLACES ICI, avant l'empilement de tout ecran d'accueil --
@@ -496,6 +727,11 @@ int main(int argc, char **argv)
          * aucun endroit où revenir. Ces deux numéros ne correspondent à aucun
          * scénario du backend factice (voir backend_factice_scenario() plus bas,
          * qui les traite comme "tout autre numéro", exactement comme 5/6 déjà). */
+        /* --demo : AVANT tout empilement, pour que l'ecran demande trouve son
+         * store deja rempli des sa construction (voir demo_stores_peupler()). */
+        if (demo) {
+            demo_stores_peupler();
+        }
         ecran_config = (scenario == 7 || scenario == 8);
         if (ecran_config) {
             navigation_empiler(&ECRAN_CONFIGURATION);
@@ -621,7 +857,7 @@ int main(int argc, char **argv)
          * connected" ecrirait par-dessus (habillage_notifier() REMPLACE,
          * jamais n'empile, voir son commentaire dans habillage.h) avant
          * meme la capture. */
-        if (cycles > 0 && !(app == APP_ACCUEIL && scenario == 9) &&
+        if (cycles > 0 && !sans_bandeau && !(app == APP_ACCUEIL && scenario == 9) &&
             !(app == APP_ACCUEIL && macro_a_lancer != NULL)) {
             habillage_notifier(echec ? "connection lost" : "host connected", echec);
         }

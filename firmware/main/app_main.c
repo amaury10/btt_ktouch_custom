@@ -41,6 +41,7 @@
 #include "backend_factice.h"
 #include "backend_moonraker.h"
 #include "boucle.h"
+#include "console_log.h"    /* console_log_generation -- generation externe */
 #include "ecran_accueil.h"
 #include "ecran_accueil_hub.h"
 #include "ecran_configuration.h"
@@ -50,9 +51,11 @@
 #include "klipper_temp_historique.h"
 #include "navigation.h"
 #include "netlog.h"
+#include "power_devices.h"  /* power_devices_generation -- generation externe */
 #include "rail_actions.h"
 #include "reglages.h"
 #include "rescue.h"
+#include "spoolman_store.h" /* spoolman_generation -- generation externe */
 #include "web.h"
 #include "wifi.h"
 
@@ -95,10 +98,31 @@ static const char *raison_reset_nom(esp_reset_reason_t raison)
  * fichiers USB + parc (revue du 2026-08-15, L1 : le parc seul n'était pas
  * raccordé, l'écran Parc restait figé imprimante hors ligne, précisément le
  * cas d'usage de la bascule). Des compteurs monotones dont la somme change
- * dès que l'un bouge. */
+ * dès que l'un bouge.
+ *
+ * TOUT store indépendant doit figurer ici, sans exception : un store absent
+ * de cette somme n'a AUCUN moyen de réveiller habillage_pomper(), qui ne
+ * propage que sur changement de generation/liaison/sequence/generation_externe
+ * (ui/habillage.c). L'écran branché dessus reste alors figé tant que l'état
+ * Klipper ne bouge pas -- ce qui peut ne jamais arriver.
+ *
+ * Quatre stores manquaient (constaté en produisant les captures du README) :
+ *  - klipper_temp_historique : le graphe de l'accueil ne traçait AUCUNE courbe
+ *    face à une imprimante au repos dont l'état ne bougeait plus d'un cycle à
+ *    l'autre. Les séries du chart ne sont créées que par le rattrapage de
+ *    ecran_accueil_hub.c, qui vit dans mettre_a_jour() -- jamais rappelé, donc
+ *    jamais de courbe, définitivement. Masqué sur imprimante réelle (les
+ *    températures fluctuent, donc la génération de l'état bouge) ; mordait
+ *    imprimante éteinte avec Moonraker debout, et sur tout backend stable.
+ *  - spoolman / console_log / power_devices : même trou, jamais exercé jusqu'ici.
+ * C'est la troisième occurrence de ce défaut (USB, puis parc, puis ceux-ci) :
+ * ajouter un store indépendant SANS l'ajouter ici est le piège récurrent de
+ * ce fichier. */
 static uint32_t generation_externe_klipper(void)
 {
-    return usb_fichiers_generation() + parc_generation() + bed_mesh_generation();
+    return usb_fichiers_generation() + parc_generation() + bed_mesh_generation() +
+           klipper_temp_historique_generation() + spoolman_generation() +
+           console_log_generation() + power_devices_generation();
 }
 
 /* NULL tant que l'écran n'a pas été construit (pt_display_init() en échec,

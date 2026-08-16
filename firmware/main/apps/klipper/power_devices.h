@@ -64,3 +64,10 @@ void power_devices_lire(power_devices_t *dest);
  * est un no-op silencieux : cette fonction met à jour une prise CONNUE, elle
  * n'en crée jamais. `nom` NULL = no-op. */
 void power_devices_maj_un(const char *nom, bool allumee);
+
+/* Compteur monotone du store, lu sans copier la liste des prises. Existe pour
+ * generation_externe_klipper() (app_main.c), qui additionne les compteurs des
+ * stores INDEPENDANTS de l'imprimante -- voir le commentaire de ce hook et
+ * habillage.h. Meme contrat que bed_mesh_generation() / spoolman_generation() /
+ * usb_fichiers_generation(). */
+uint32_t power_devices_generation(void);

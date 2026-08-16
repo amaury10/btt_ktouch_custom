@@ -11,6 +11,8 @@ Le projet poursuit deux buts sur une base technique commune : redonner un
 firmware vivant et compilable aux possesseurs de l'appareil, et détourner
 celui-ci pour piloter un tracker astrophotographique.
 
+![Écran d'accueil](docs/captures/accueil.png)
+
 ## État — client Klipper complet, validé sur imprimantes réelles
 
 L'appareil fait tourner un firmware maison depuis un slot OTA, sans jamais
@@ -62,6 +64,52 @@ Vérifié sur matériel :
   sans rotation ni miroir ;
 - PSRAM octale à 80 MHz opérationnelle.
 
+## Aperçu de l'interface
+
+Les 32 images ci-dessous couvrent **tous les écrans du firmware**. Ce ne sont
+pas des maquettes : ce sont des captures 800×480 en RGB565 produites par
+[`simulateur/`](simulateur/), qui compile le code d'écran réel — les mêmes
+pixels que ceux poussés vers la dalle. Elles se régénèrent d'une commande,
+[`tools/captures-readme.sh`](tools/captures-readme.sh), ce qui les empêche de
+mentir après une évolution de l'interface.
+
+### Accueil et impression
+
+| | | |
+|:-:|:-:|:-:|
+| ![Accueil](docs/captures/accueil.png)<br>**Accueil** — chauffants, historique de température, position | ![Accueil multi-outils](docs/captures/accueil-multi-outils.png)<br>**Changeur d'outils** — quatre extrudeurs, une courbe par chauffant | ![Impression](docs/captures/impression.png)<br>**Impression en cours** — progression, temps restant, arrêt d'urgence |
+| ![Fichiers](docs/captures/fichiers.png)<br>**Fichiers** — la liste gcode servie par Moonraker | | |
+
+### Actions et mouvement
+
+| | | |
+|:-:|:-:|:-:|
+| ![Actions](docs/captures/actions.png)<br>**Actions** — le sous-menu des commandes machine | ![Déplacer](docs/captures/deplacer.png)<br>**Déplacer** — jog X/Y/Z, pas et vitesse réglables | ![Prise d'origine](docs/captures/homing.png)<br>**Prise d'origine** — par axe ou globale |
+| ![Macros](docs/captures/macros.png)<br>**Macros** — les macros Klipper, paginées | ![Températures](docs/captures/temperatures.png)<br>**Températures** — cibles cochables et préréglages matière | ![Extrudeur](docs/captures/extruder.png)<br>**Extrudeur** — extrusion et rétraction manuelles |
+| ![Ventilateurs](docs/captures/ventilateurs.png)<br>**Ventilateurs** — curseur et paliers rapides | ![Réglage fin](docs/captures/reglage-fin.png)<br>**Réglage fin** — offset Z, vitesse et débit en cours d'impression | ![Console](docs/captures/console.png)<br>**Console** — gcode envoyé, réponses Klipper |
+
+### Calibration et réglages
+
+| | | |
+|:-:|:-:|:-:|
+| ![Configuration](docs/captures/menu-configuration.png)<br>**Configuration** — le sommaire des réglages | ![Calibration Z](docs/captures/zcalibrate.png)<br>**Calibration Z** — sonde ou butée, pas au centième | ![Niveau du lit](docs/captures/niveau-lit.png)<br>**Niveau du lit** — vis, Z-tilt, QGL |
+| ![Carte du lit](docs/captures/bed-mesh.png)<br>**Carte du lit** — heatmap, bornes chiffrées, profils | ![Input shaper](docs/captures/input-shaper.png)<br>**Input shaper** — type et fréquence par axe | ![Limites](docs/captures/limites.png)<br>**Limites** — vitesse et accélérations machine |
+| ![Rétraction](docs/captures/retraction.png)<br>**Rétraction** — rétraction firmware | ![Spoolman](docs/captures/spoolman.png)<br>**Spoolman** — bobines, matière, restant, bobine chargée | |
+
+### Système
+
+| | | |
+|:-:|:-:|:-:|
+| ![WiFi](docs/captures/wifi.png)<br>**WiFi** — scan et connexion depuis l'écran | ![Prises](docs/captures/power.png)<br>**Prises** — les sorties pilotées par Moonraker | ![Clé USB](docs/captures/usb.png)<br>**Clé USB** — navigation dossier par dossier |
+| ![Parc](docs/captures/parc.png)<br>**Parc** — plusieurs imprimantes, état sondé, bascule | ![Mise à jour](docs/captures/updater.png)<br>**Mise à jour** — slot OTA actif et version | ![Premier démarrage](docs/captures/premier-demarrage.png)<br>**Premier démarrage** — appareil non configuré |
+
+### Claviers et dialogues
+
+| | | |
+|:-:|:-:|:-:|
+| ![Clavier texte](docs/captures/clavier-texte.png)<br>**Clavier texte** — saisie d'adresse | ![Pavé numérique](docs/captures/clavier-temperature.png)<br>**Pavé numérique** — consigne de température | ![Confirmation](docs/captures/confirmation.png)<br>**Confirmation destructive** — annulation d'impression |
+| ![Confirmation de homing](docs/captures/homing-confirmation.png)<br>**Confirmation de homing** — axe déjà référencé | ![Saisie au premier démarrage](docs/captures/premier-demarrage-saisie.png)<br>**Saisie de l'hôte** — au premier démarrage | |
+
 ## Comment ce firmware peut être réversible sans câble
 
 L'appareil de développement n'est atteignable **qu'en WiFi** : `esptool` est hors
@@ -91,6 +139,7 @@ au stock tout seul, deux fois.
 | [`tools/ktouch/`](tools/ktouch/) | Bibliothèque Python (standard uniquement) : images ESP32, table de partitions, `otadata` |
 | [`tools/moonraker-record/`](tools/moonraker-record/) | Enregistreur de sessions Moonraker réelles, qui alimente les fixtures de rejeu des tests — voir [`tools/moonraker-record/README.md`](tools/moonraker-record/README.md) |
 | `ktouch-cli.py` | Lanceur : `verify`, `otadata`, `make-otadata`, `image` |
+| [`docs/captures/`](docs/captures/) | Les captures d'écran de ce README, régénérables par [`tools/captures-readme.sh`](tools/captures-readme.sh) |
 | [`docs/hardware/`](docs/hardware/) | Pinout vérifié, partitionnement, procédure d'installation et de retour |
 | [`docs/dev/`](docs/dev/) | Notes de développement, dont la mise en place d'un Klipper simulé pour les tests |
 | [`CHANGELOG.md`](CHANGELOG.md) | Notes de version : ce que fait le firmware, ce qui est vérifié, et ses limites connues |

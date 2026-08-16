@@ -52,6 +52,19 @@ static float g_progression_scenario1 = 0.0f;
  * tirer de nombre aléatoire (même politique que g_progression_scenario1). */
 static uint8_t g_outil_actif_u1 = 0;
 
+/* « Respiration » thermique du scenario 10 (« CR-10 »), meme mecanique de
+ * compteur statique que g_outil_actif_u1 ci-dessus et sans plus de tirage
+ * aleatoire. Une imprimante reelle au repos ne rend JAMAIS deux fois la meme
+ * temperature au dixieme pres : son thermistor oscille. Ce scenario, lui,
+ * rendait un etat rigoureusement identique a chaque cycle -- or
+ * etat_store_valider() (core/etat_store.c) compare au memcmp et n'incremente
+ * PAS sa generation quand rien n'a change, si bien qu'aucun ecran n'etait
+ * jamais rafraichi. C'est ce qui a fait decouvrir le trou de
+ * generation_externe_klipper() (app_main.c) ; le corriger ne suffit pas a
+ * rendre ce scenario fidele, d'ou cette oscillation. */
+static uint8_t g_respiration_cr10 = 0;
+static const float FACTICE_CR10_RESPIRATION[4] = { 0.0f, 0.2f, 0.1f, -0.1f };
+
 /* Nombre d'extrudeurs modélisés par le scénario 11 (« U1 ») : un changeur
  * d'outils à quatre têtes. Nommé plutôt que répété en dur, pour que la
  * boucle qui remplit `extrudeurs[]` et le modulo qui fait tourner
@@ -225,6 +238,7 @@ void backend_factice_reinit(void)
      * départ propre appelle ceci d'abord. */
     g_progression_scenario1 = 0.0f;
     g_outil_actif_u1 = 0;
+    g_respiration_cr10 = 0;
 }
 
 static esp_err_t backend_factice_demarrer(void *etat, const backend_hote_t *hote)
@@ -373,6 +387,21 @@ static esp_err_t backend_factice_rafraichir(void *etat)
          * c'est le scenario le plus proche des scenarios 0-4 du 2b, juste
          * avec des macros non vides. */
         snprintf(nouveau.etat, sizeof(nouveau.etat), "standby");
+        /* Temperatures ambiantes, pas le 0.0 que laissait le preambule : une
+         * imprimante au repos lit la piece ou elle se trouve, jamais le zero
+         * absolu. Constate en produisant les captures du README -- l'accueil
+         * affichait "0.0/0.0", fidele au backend mais faux sur une machine
+         * reelle, ce qui donnait a l'ecran l'air en panne. Meme valeur
+         * ambiante que le scenario 11 ci-dessous, pour que les deux paliers
+         * racontent la meme piece. Aucune assertion de
+         * host-test/tests/test_backend_factice.c ne porte sur ces champs pour
+         * ce scenario ; les scenarios 13/14, qui se declarent "IDENTIQUES au
+         * 10", en heritent -- c'est voulu. */
+        nouveau.extrudeurs[0].actuelle = 24.0f + FACTICE_CR10_RESPIRATION[g_respiration_cr10 % 4u];
+        nouveau.extrudeurs[0].consigne = 0.0f;
+        nouveau.plateau.actuelle = 23.0f + FACTICE_CR10_RESPIRATION[(g_respiration_cr10 + 2u) % 4u];
+        nouveau.plateau.consigne = 0.0f;
+        g_respiration_cr10 = (uint8_t)((g_respiration_cr10 + 1u) % 4u);
         nouveau.nb_macros = sizeof(g_macros_cr10) / sizeof(g_macros_cr10[0]);
         for (uint8_t i = 0; i < nouveau.nb_macros; i++) {
             snprintf(nouveau.macros[i], KLIPPER_MACRO_NOM_MAX, "%s", g_macros_cr10[i]);
@@ -389,6 +418,28 @@ static esp_err_t backend_factice_rafraichir(void *etat)
         nouveau.position[0] = 120.0f;
         nouveau.position[1] = 100.0f;
         nouveau.position[2] = 5.0f;
+        /* Limites machine, retraction firmware et input shaper : des valeurs
+         * de CR-10 plausibles. Ces champs existent deja dans etat_klipper_t
+         * (aucune croissance de la structure -- contrainte dure, voir son
+         * en-tete et l'historique des debordements de pile), mais aucun
+         * scenario du backend factice ne les avait jamais peuples : les ecrans
+         * Limits / Retraction / Input Shaper n'affichaient donc que des "-" et
+         * "(not set)", ce qui les rendait impossibles a montrer en
+         * fonctionnement (constate en produisant les captures du README). */
+        nouveau.limite_velocity = 300.0f;
+        nouveau.limite_accel = 3000.0f;
+        nouveau.limite_square_corner = 5.0f;
+        nouveau.limite_accel_to_decel = 1500.0f;
+        nouveau.retr_length = 6.5f;
+        nouveau.retr_speed = 45.0f;
+        /* Non nul volontairement : ce champ traite 0 comme "absent/non recu"
+         * (voir etat_klipper.h), la ligne resterait donc a "-". */
+        nouveau.retr_unretract_extra = 0.2f;
+        nouveau.retr_unretract_speed = 40.0f;
+        snprintf(nouveau.shaper_type_x, sizeof(nouveau.shaper_type_x), "mzv");
+        snprintf(nouveau.shaper_type_y, sizeof(nouveau.shaper_type_y), "ei");
+        nouveau.shaper_freq_x = 41.4f;
+        nouveau.shaper_freq_y = 36.2f;
         break;
 
     case 11: {

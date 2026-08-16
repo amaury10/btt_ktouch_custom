@@ -203,6 +203,24 @@ le cas depuis que `simulateur/main.c` empile l'écran réel.)
   l'action, jamais ses arguments). Comme `--scenario 9`, laisse de côté le
   bandeau "host connected" (voir plus bas) pour que la bannière survive
   jusqu'à la capture.
+- `--sans-bandeau` : supprime le bandeau « host connected » que la boucle de
+  capture pose sinon systématiquement dès `--cycles > 0` (voir plus bas). Ce
+  bandeau PROUVE que la liaison est montée, ce qui sert à une revue, mais il
+  **recouvre la rangée basse** de l'écran capturé : inutilisable pour une image
+  de documentation, qui doit montrer l'écran entier. Sans effet en mode fenêtre.
+- `--demo` : peuple les six stores **indépendants de l'imprimante** — carte du
+  lit, fichiers USB, bobines Spoolman, parc d'imprimantes, scrollback de console
+  et prises pilotées. Ces écrans ne lisent rien dans `etat_klipper_t` : ils ont
+  chacun leur store, alimenté sur cible par la tâche WebSocket, le scan USB ou
+  la NVS. Le backend factice ne produisant que `etat_klipper_t`, ils ne
+  pouvaient jusqu'ici être capturés que dans leur état vide (« Insert a USB
+  key », « No mesh », « No printers configured »). Le peuplement passe par les
+  setters PUBLICS de chaque store, exactement ceux qu'appelle le vrai
+  producteur, et n'ajoute RIEN à `etat_klipper_t` (grossir cette structure fait
+  déborder les piles WS/boucle/httpd sur cible). Les valeurs sont FIXES,
+  aucun tirage aléatoire : deux exécutions montrent les mêmes données. (La
+  barre d'état, elle, affiche l'heure courante — deux captures prises à des
+  minutes différentes ne sont donc pas identiques au bit près.)
 - `--echec` : remplace `backend_factice` par un backend jouet local à
   `simulateur/main.c` qui échoue systématiquement (`ESP_FAIL` à chaque
   rafraîchissement). Sert à faire progresser `liaison_t` vers `DEGRADEE` (3
