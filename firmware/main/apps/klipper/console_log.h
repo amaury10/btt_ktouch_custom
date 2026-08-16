@@ -71,3 +71,12 @@ void console_log_lire(console_log_t *dest);
  * zéro (sans signification au-delà de `nb == 0`, même convention que
  * `console_log_ajouter()` ci-dessus) -- seul le compte change. */
 void console_log_effacer(void);
+
+/* Compteur monotone du store, lu SANS copier le scrollback entier (`console_log_t`
+ * pese KLIPPER_CONSOLE_LIGNES lignes : le lire juste pour son compteur couterait
+ * une copie complete sur la pile de l'appelant a chaque pompe d'habillage).
+ * Existe pour generation_externe_klipper() (app_main.c), qui additionne les
+ * compteurs des stores INDEPENDANTS de l'imprimante -- voir le commentaire de
+ * ce hook et habillage.h. Meme contrat que bed_mesh_generation() /
+ * spoolman_generation() / usb_fichiers_generation(). */
+uint32_t console_log_generation(void);

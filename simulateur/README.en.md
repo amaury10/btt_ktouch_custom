@@ -202,6 +202,23 @@ both modes displayed a throwaway demo screen — no longer the case now that
   the action's name, never its arguments). Like `--scenario 9`, it skips the
   "host connected" banner (see below) so that the banner survives until the
   screenshot.
+- `--sans-bandeau`: suppresses the "host connected" banner that the screenshot
+  loop otherwise always posts once `--cycles > 0` (see below). That banner
+  PROVES the link is up, which is useful for a review, but it **covers the
+  bottom row** of the captured screen: unusable for a documentation image,
+  which must show the whole screen. No effect in window mode.
+- `--demo`: populates the six stores that are **independent of the printer** —
+  bed mesh, USB files, Spoolman spools, printer fleet, console scrollback and
+  power outlets. Those screens read nothing from `etat_klipper_t`: each has its
+  own store, fed on target by the WebSocket task, the USB scan or NVS. Since
+  the fake backend only produces `etat_klipper_t`, they could until now only be
+  captured in their empty state ("Insert a USB key", "No mesh", "No printers
+  configured"). The population goes through each store's PUBLIC setters,
+  exactly the ones the real producer calls, and adds NOTHING to
+  `etat_klipper_t` (growing that struct overflows the WS/loop/httpd stacks on
+  target). The values are FIXED, no randomness: two runs show the same data.
+  (The status bar, however, shows the current time — so two screenshots taken
+  minutes apart are not byte-identical.)
 - `--echec`: replaces `backend_factice` with a toy backend local to
   `simulateur/main.c` that fails systematically (`ESP_FAIL` on every
   refresh). Used to drive `liaison_t` towards `DEGRADEE` (3 failures) then

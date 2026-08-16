@@ -1,0 +1,5 @@
+# Meme piege que simulateur/.gitattributes et host-test/ : avec
+# core.autocrlf=true cote Windows, un script shell serait reecrit en CRLF au
+# prochain `git checkout` et deviendrait inexecutable sous WSL
+# ("bad interpreter: /usr/bin/env^M").
+*.sh text eol=lf

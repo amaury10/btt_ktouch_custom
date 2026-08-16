@@ -159,3 +159,19 @@ void console_log_effacer(void)
     store->generation++;
     VERROU_RENDRE();
 }
+
+uint32_t console_log_generation(void)
+{
+    console_log_t *store = store_obtenir();
+    if (store == NULL) {
+        /* Store pas encore alloue : 0, une valeur STABLE. Rendre autre chose
+         * ferait bouger la somme de generation_externe_klipper() sans qu'aucun
+         * store n'ait change. */
+        return 0;
+    }
+    uint32_t generation;
+    VERROU_PRENDRE();
+    generation = store->generation;
+    VERROU_RENDRE();
+    return generation;
+}

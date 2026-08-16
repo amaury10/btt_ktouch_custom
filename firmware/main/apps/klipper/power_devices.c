@@ -59,6 +59,15 @@ void power_devices_lire(power_devices_t *dest)
     VERROU_RENDRE();
 }
 
+uint32_t power_devices_generation(void)
+{
+    uint32_t generation;
+    VERROU_PRENDRE();
+    generation = g_store.generation;
+    VERROU_RENDRE();
+    return generation;
+}
+
 void power_devices_maj_un(const char *nom, bool allumee)
 {
     if (nom == NULL) {
