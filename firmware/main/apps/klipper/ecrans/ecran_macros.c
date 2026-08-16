@@ -28,7 +28,13 @@
 #include "habillage.h"
 #include "source_etat.h"
 
-#define LARGEUR_CONTENU 800
+/* 742, PAS 800 : la zone de contenu commence APRES le rail (RAIL_LARGEUR = 58,
+ * voir habillage.c) -- les 800 px sont ceux de la dalle, pas ceux dont cet
+ * ecran dispose. Avec 800, BOUTON_LARGEUR valait 760 pour une zone large de
+ * 742 : les boutons debordaient de 20 px a droite (rognes au bord de la dalle)
+ * et la pagination etait centree sur 457 au lieu de 429. Constate en produisant
+ * les captures du README. Les 23 autres ecrans utilisaient deja 742. */
+#define LARGEUR_CONTENU 742
 #define HAUTEUR_CONTENU 436
 
 #define MARGE 20

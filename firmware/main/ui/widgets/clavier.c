@@ -74,6 +74,23 @@ static void appliquer_theme_sombre(lv_obj_t *clavier, lv_obj_t *textarea)
     lv_obj_set_style_bg_color(clavier, lv_color_hex(COULEUR_TOUCHE_PRESSEE), LV_PART_ITEMS | LV_STATE_PRESSED);
     lv_obj_set_style_bg_color(clavier, lv_color_hex(COULEUR_TOUCHE_PRESSEE), LV_PART_ITEMS | LV_STATE_CHECKED);
 
+    /* Espacement inter-colonnes REDUIT (defaut du theme LVGL : ~11 px).
+     *
+     * Pourquoi : la carte numerique standard de LVGL (lv_keyboard.c, mode
+     * LV_KEYBOARD_MODE_NUMBER) donne 5 unites de large a ses quatre rangees,
+     * mais les trois premieres n'ont que 4 touches (donc 3 inter-espaces) et
+     * la derniere en a 5 (donc 4). A largeur totale W et espacement g, le
+     * debut de la colonne k vaut k*(W+2g)/5 en haut contre k*(W+g)/5 en bas :
+     * les bords verticaux derivent de k*g/5. Avec g=11 cela faisait 2/4/7 px,
+     * visible a l'oeil sur la derniere rangee.
+     *
+     * L'alignement EXACT n'est pas atteignable autrement : il demanderait des
+     * facteurs de largeur non entiers (16,05 pour une somme de 79, au-dela du
+     * maximum de 15 d'un lv_buttonmatrix_ctrl_t). Seul g=0 annulerait la
+     * derive, au prix de touches jointives -- mauvais compromis sur une dalle
+     * tactile. g=6 la ramene a ~1/2/4 px en gardant la separation visuelle. */
+    lv_obj_set_style_pad_column(clavier, 6, LV_PART_MAIN);
+
     /* Textarea : champ sombre, texte clair, bordure discrete. */
     lv_obj_set_style_bg_color(textarea, lv_color_hex(COULEUR_CHAMP), LV_PART_MAIN);
     lv_obj_set_style_text_color(textarea, lv_color_hex(COULEUR_TEXTE_PRINCIPAL), LV_PART_MAIN);

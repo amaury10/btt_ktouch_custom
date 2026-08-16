@@ -18,7 +18,11 @@
 #include "navigation.h"
 #include "source_reglages.h"
 
-#define LARGEUR_CONTENU 800
+/* 742, PAS 800 : meme correction que ecran_macros.c -- la zone de contenu
+ * commence APRES le rail (RAIL_LARGEUR = 58, voir habillage.c). Avec 800, les
+ * boutons ancres a droite (Edit, WiFi, calcules depuis LARGEUR_CONTENU - MARGE)
+ * etaient pousses 58 px trop loin et rognes au bord de la dalle. */
+#define LARGEUR_CONTENU 742
 #define HAUTEUR_CONTENU 436
 
 #define MARGE 24

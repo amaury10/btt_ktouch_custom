@@ -10,6 +10,12 @@
 # Les PNG font 800x480 en RGB565, exactement le format que la dalle recoit :
 # ce sont les pixels de l'appareil, pas une maquette (voir simulateur/README.md).
 #
+# ATTENTION avant de committer : la barre d'etat affiche l'HEURE COURANTE, donc
+# CHAQUE execution modifie les 32 PNG, meme ceux dont l'ecran n'a pas bouge. Ne
+# committer que les captures dont le CONTENU a reellement change (git checkout --
+# sur les autres), sinon chaque regeneration ajoute ~1 Mo de binaires a
+# l'historique pour un changement d'horloge.
+#
 # Usage, depuis PowerShell :
 #   wsl -d Debian -- bash "/mnt/e/.../tools/captures-readme.sh"
 # ou, depuis un shell WSL, a la racine du depot :
