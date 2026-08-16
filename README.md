@@ -93,6 +93,7 @@ au stock tout seul, deux fois.
 | `ktouch-cli.py` | Lanceur : `verify`, `otadata`, `make-otadata`, `image` |
 | [`docs/hardware/`](docs/hardware/) | Pinout vérifié, partitionnement, procédure d'installation et de retour |
 | [`docs/dev/`](docs/dev/) | Notes de développement, dont la mise en place d'un Klipper simulé pour les tests |
+| [`CHANGELOG.md`](CHANGELOG.md) | Notes de version : ce que fait le firmware, ce qui est vérifié, et ses limites connues |
 
 Pour compiler, il faut ESP-IDF v5.5.5 et renseigner son réseau WiFi ; tout est
 dans [`firmware/README.md`](firmware/README.md). Pour l'outillage Python,

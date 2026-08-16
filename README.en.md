@@ -92,6 +92,7 @@ stock on its own, twice.
 | `ktouch-cli.py` | Launcher: `verify`, `otadata`, `make-otadata`, `image` |
 | [`docs/hardware/`](docs/hardware/) | Verified pinout, partitioning, installation and revert procedures |
 | [`docs/dev/`](docs/dev/) | Development notes, including how to set up a simulated Klipper for the tests |
+| [`CHANGELOG.en.md`](CHANGELOG.en.md) | Release notes: what the firmware does, what has been verified, and its known limitations |
 
 Building requires ESP-IDF v5.5.5 and your WiFi network details; everything is in
 [`firmware/README.en.md`](firmware/README.en.md). For the Python tooling, run
