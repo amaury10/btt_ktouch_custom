@@ -70,6 +70,44 @@ void confirmation_ouvrir(const char *titre, const char *message,
  * ne nomme pourtant toujours pas. */
 bool confirmation_est_ouverte(void);
 
+/* Rappel d'un dialogue à plusieurs actions : `choix` vaut -1 (annulation) ou
+ * l'indice de l'action retenue -- 0 pour `libelle_a`, 1 pour `libelle_b`,
+ * 2 pour `libelle_c`. */
+typedef void (*confirmation_choix_rappel_t)(int choix, void *contexte);
+
+/* Ouvre un dialogue à DEUX ou TROIS actions nommées, plus une annulation fixe
+ * libellée "Cancel". Même modale, même singleton et mêmes garanties que
+ * confirmation_ouvrir_ex() ci-dessus (un seul dialogue à la fois, fermeture
+ * asynchrone, garde de réentrance) -- seul le nombre de boutons change.
+ *
+ * Existe pour les tuiles du parc d'imprimantes, qui offrent plusieurs issues
+ * sur un appui long (renommer / éditer l'adresse / retirer / ne rien faire) ;
+ * le dialogue à deux issues ne pouvait pas les porter.
+ *
+ * `libelle_c` NULL : dialogue à deux actions (trois boutons). Non NUL : une
+ * troisième action, donc quatre boutons -- et la boîte s'élargit, quatre
+ * boutons ne tenant pas dans la largeur qui en accueille trois (voir
+ * LARGEUR_MIN_BOITE / LARGEUR_BOITE_3_ACTIONS dans le .c).
+ *
+ * Ordre des boutons dans le pied, identique au dialogue ordinaire :
+ * [0] Cancel, [1] `libelle_a`, [2] `libelle_b`, [3] `libelle_c` si présent.
+ *
+ * `destructif_dernier` vrai colore en rouge la DERNIÈRE action présente
+ * (`libelle_c` s'il existe, sinon `libelle_b`) et lui refuse tout état "par
+ * défaut" -- même règle, et même raison, que `destructif` de
+ * confirmation_ouvrir_ex(). Les actions précédentes ne sont jamais
+ * destructives : si plusieurs l'étaient, le dialogue n'aurait pas d'issue
+ * sûre évidente.
+ *
+ * NULL pour `titre`/`message`/`libelle_a`/`libelle_b` est traité comme chaîne
+ * vide, même politique que le reste de ui/ -- `libelle_c` NULL, lui, est
+ * SIGNIFIANT (pas de troisième action), jamais une chaîne vide. */
+void confirmation_ouvrir_choix(const char *titre, const char *message,
+                               const char *libelle_a, const char *libelle_b,
+                               const char *libelle_c,
+                               bool destructif_dernier,
+                               confirmation_choix_rappel_t rappel, void *contexte);
+
 /* Fermeture : les deux boutons de pied sont les SEULES sorties. Un
  * effleurement du fond (hors de la boîte) et une touche ECHAP (clavier
  * physique/encodeur) ne ferment PAS le dialogue — délibérément :

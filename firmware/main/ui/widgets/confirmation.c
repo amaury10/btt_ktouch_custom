@@ -5,6 +5,8 @@
  * commentaire de tête de confirmation.h sur le refus du second appel). */
 #include "confirmation.h"
 
+#include <stdint.h> /* intptr_t -- numero d'issue passe en user_data de bouton */
+
 #include "journal.h"
 #include "lvgl.h"
 
@@ -32,6 +34,9 @@ static const char *TAG = "confirmation";
  * tout en restant nettement plus étroite que l'écran (800 px) pour qu'un
  * dialogue reste visuellement une boîte, pas une pleine page. */
 #define LARGEUR_MIN_BOITE 440
+/* Largeur d'une boite portant TROIS actions (donc quatre boutons) : les 440 px
+ * ci-dessus n'en accueillent que trois -- voir confirmation_ouvrir_choix(). */
+#define LARGEUR_BOITE_3_ACTIONS 580
 
 /* Écart horizontal explicite entre les deux boutons du pied, EN PLUS de la
  * largeur minimale ci-dessus : SPACE_EVENLY seul dégénère à un écart nul dès
@@ -43,7 +48,12 @@ static const char *TAG = "confirmation";
 static struct {
     bool      ouvert;
     lv_obj_t *mbox;
+    /* Exactement UN des deux rappels est non NUL : `rappel` pour un dialogue
+     * a deux issues (confirmation_ouvrir/_ex), `rappel_choix` pour un
+     * dialogue a deux ACTIONS (confirmation_ouvrir_choix). Le singleton et
+     * toute la plomberie de fermeture sont partages. */
     confirmation_rappel_t rappel;
+    confirmation_choix_rappel_t rappel_choix;
     void     *contexte;
 } g_confirmation;
 
@@ -51,7 +61,10 @@ static struct {
  * cet ordre (voir le commentaire de evenement_clavier() dans clavier.c pour
  * la même règle appliquée au clavier — fermeture programmée et état remis à
  * zéro AVANT l'appel, jamais après). */
-static void fermer_et_rappeler(bool confirme)
+/* `choix` : -1 annulation, 0 premiere action, 1 seconde action. Un dialogue a
+ * deux issues n'utilise que -1 et 0, et les rend a son appelant sous forme de
+ * booleen (confirme = choix >= 0) -- son contrat public est inchange. */
+static void fermer_et_rappeler(int choix)
 {
     /* Garde de réentrance : un double clic sur le même bouton avant que la
      * destruction asynchrone ci-dessous n'ait tourné ne doit pas appeler le
@@ -63,12 +76,14 @@ static void fermer_et_rappeler(bool confirme)
 
     lv_obj_t *mbox                = g_confirmation.mbox;
     confirmation_rappel_t rappel  = g_confirmation.rappel;
+    confirmation_choix_rappel_t rappel_choix = g_confirmation.rappel_choix;
     void     *contexte            = g_confirmation.contexte;
 
-    g_confirmation.ouvert   = false;
-    g_confirmation.mbox     = NULL;
-    g_confirmation.rappel   = NULL;
-    g_confirmation.contexte = NULL;
+    g_confirmation.ouvert       = false;
+    g_confirmation.mbox         = NULL;
+    g_confirmation.rappel       = NULL;
+    g_confirmation.rappel_choix = NULL;
+    g_confirmation.contexte     = NULL;
 
     /* lv_msgbox_close_async(), jamais lv_msgbox_close() : cette fonction est
      * appelée depuis l'événement LV_EVENT_CLICKED du bouton qu'on est en
@@ -81,20 +96,29 @@ static void fermer_et_rappeler(bool confirme)
     lv_msgbox_close_async(mbox);
 
     if (rappel != NULL) {
-        rappel(confirme, contexte);
+        rappel(choix >= 0, contexte);
+    } else if (rappel_choix != NULL) {
+        rappel_choix(choix, contexte);
     }
 }
 
 static void bouton_annuler_cb(lv_event_t *e)
 {
     (void)e;
-    fermer_et_rappeler(false);
+    fermer_et_rappeler(-1);
 }
 
 static void bouton_action_cb(lv_event_t *e)
 {
     (void)e;
-    fermer_et_rappeler(true);
+    fermer_et_rappeler(0);
+}
+
+/* Dialogue a deux actions : le numero de l'issue voyage dans le user_data du
+ * bouton, plutot qu'un rappel distinct par bouton. */
+static void bouton_choix_cb(lv_event_t *e)
+{
+    fermer_et_rappeler((int)(intptr_t)lv_event_get_user_data(e));
 }
 
 void confirmation_ouvrir_ex(const char *titre, const char *message,
@@ -170,6 +194,75 @@ void confirmation_ouvrir_ex(const char *titre, const char *message,
     g_confirmation.rappel   = rappel;
     g_confirmation.contexte = contexte;
     g_confirmation.ouvert   = true;
+}
+
+void confirmation_ouvrir_choix(const char *titre, const char *message,
+                               const char *libelle_a, const char *libelle_b,
+                               const char *libelle_c,
+                               bool destructif_dernier,
+                               confirmation_choix_rappel_t rappel, void *contexte)
+{
+    if (rappel == NULL) {
+        JOURNAL_ERREUR(TAG, "confirmation_ouvrir_choix : rappel NULL, refuse");
+        return;
+    }
+    if (g_confirmation.ouvert) {
+        JOURNAL_ALERTE(TAG, "confirmation_ouvrir_choix appele alors qu'un dialogue est deja ouvert ; ignore");
+        return;
+    }
+
+    /* Meme construction que confirmation_ouvrir_ex() -- voir ses commentaires
+       pour le pourquoi de chaque etape (largeur minimale posee avant le
+       centrage, fond assombri explicitement contre le theme LVGL). */
+    g_confirmation.mbox = lv_msgbox_create(NULL);
+    /* Quatre boutons ne tiennent pas dans la largeur qui en accueille trois
+       (mesure sur docs/captures/parc-actions.png : ~357 px de boutons et
+       d'ecarts pour trois, ~472 pour quatre, dans une boite de 440). */
+    lv_obj_set_width(g_confirmation.mbox,
+                     libelle_c != NULL ? LARGEUR_BOITE_3_ACTIONS : LARGEUR_MIN_BOITE);
+
+    lv_obj_t *fond = lv_obj_get_parent(g_confirmation.mbox);
+    lv_obj_set_style_bg_color(fond, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(fond, LV_OPA_60, 0);
+
+    lv_msgbox_add_title(g_confirmation.mbox, titre != NULL ? titre : "");
+    lv_msgbox_add_text(g_confirmation.mbox, message != NULL ? message : "");
+
+    /* Ordre du pied : [0] Cancel, [1] libelle_a, [2] libelle_b, [3] libelle_c -- contrat
+       public (voir confirmation.h) sur lequel test_clavier.c s'appuie pour
+       retrouver les boutons. */
+    lv_obj_t *bouton_annuler = lv_msgbox_add_footer_button(g_confirmation.mbox, "Cancel");
+    lv_obj_add_event_cb(bouton_annuler, bouton_choix_cb, LV_EVENT_CLICKED, (void *)(intptr_t)-1);
+
+    lv_obj_t *bouton_a =
+        lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_a != NULL ? libelle_a : "");
+    lv_obj_add_event_cb(bouton_a, bouton_choix_cb, LV_EVENT_CLICKED, (void *)(intptr_t)0);
+
+    lv_obj_t *bouton_b =
+        lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_b != NULL ? libelle_b : "");
+    lv_obj_add_event_cb(bouton_b, bouton_choix_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
+
+    /* Derniere action presente : c'est ELLE que `destructif_dernier` colore,
+       jamais une action intermediaire. */
+    lv_obj_t *bouton_dernier = bouton_b;
+    if (libelle_c != NULL) {
+        lv_obj_t *bouton_c = lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_c);
+        lv_obj_add_event_cb(bouton_c, bouton_choix_cb, LV_EVENT_CLICKED, (void *)(intptr_t)2);
+        bouton_dernier = bouton_c;
+    }
+
+    lv_obj_set_style_pad_column(lv_obj_get_parent(bouton_annuler), ECART_BOUTONS_PIED, 0);
+
+    if (destructif_dernier) {
+        lv_obj_set_style_bg_color(bouton_dernier, lv_color_hex(COULEUR_ROUGE_DESTRUCTIF), 0);
+        /* Mise en avant posee sur l'ANNULATION, jamais sur l'action
+           destructive -- meme regle et meme raison que confirmation_ouvrir_ex(). */
+        lv_obj_add_state(bouton_annuler, LV_STATE_FOCUS_KEY);
+    }
+
+    g_confirmation.rappel_choix = rappel;
+    g_confirmation.contexte     = contexte;
+    g_confirmation.ouvert       = true;
 }
 
 void confirmation_ouvrir(const char *titre, const char *message,

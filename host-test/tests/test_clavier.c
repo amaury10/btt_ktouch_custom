@@ -452,8 +452,144 @@ static void section_confirmation(void)
     VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 0);
 }
 
+/* --- dialogue a DEUX actions (gestion de parc, 2026-08-16) --------------- *
+ * Le dialogue de confirmation ordinaire n'a que deux issues (action /
+ * annulation) ; une tuile du parc en demande trois : editer l'adresse,
+ * retirer l'imprimante, ou ne rien faire. */
+static struct {
+    int appels;
+    int dernier_choix;
+} g_trace_choix;
+
+static void rappel_choix(int choix, void *contexte)
+{
+    (void)contexte;
+    g_trace_choix.appels++;
+    g_trace_choix.dernier_choix = choix;
+}
+
+static void section_confirmation_choix(void)
+{
+    /* Pied a TROIS boutons, dans le meme ordre que le dialogue ordinaire :
+       l'annulation en premier, puis les actions dans l'ordre des libelles. */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("CR-10 S5", "192.168.1.41:7125",
+                              "Edit address", "Remove", NULL, true, rappel_choix, NULL);
+    lv_obj_t *mbox = dernier_msgbox();
+    VERIFIER(mbox != NULL);
+    lv_obj_t *pied = lv_msgbox_get_footer(mbox);
+    VERIFIER(pied != NULL);
+    VERIFIER(lv_obj_get_child_count(pied) == 3);
+
+    lv_obj_t *bouton_annuler = lv_obj_get_child(pied, 0);
+    lv_obj_t *bouton_a       = lv_obj_get_child(pied, 1);
+    lv_obj_t *bouton_b       = lv_obj_get_child(pied, 2);
+
+    /* `destructif_b` ne colore que la SECONDE action et lui refuse la mise en
+       avant : "Remove" ne doit jamais etre ce qu'un effleurement declenche. */
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(bouton_b, 0), lv_color_hex(0xE74C3C)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(bouton_a, 0), lv_color_hex(0xE74C3C)));
+    VERIFIER(!lv_obj_has_state(bouton_b, LV_STATE_FOCUS_KEY));
+
+    /* Annulation -> -1. */
+    lv_obj_send_event(bouton_annuler, LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.appels == 1);
+    VERIFIER(g_trace_choix.dernier_choix == -1);
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 0);
+
+    /* Premiere action -> 0. */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("CR-10 S5", "192.168.1.41:7125",
+                              "Edit address", "Remove", NULL, true, rappel_choix, NULL);
+    pied = lv_msgbox_get_footer(dernier_msgbox());
+    lv_obj_send_event(lv_obj_get_child(pied, 1), LV_EVENT_CLICKED, NULL);
+    /* Destruction seulement PROGRAMMEE, comme le dialogue ordinaire. */
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.appels == 1);
+    VERIFIER(g_trace_choix.dernier_choix == 0);
+
+    /* Seconde action -> 1. */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("CR-10 S5", "192.168.1.41:7125",
+                              "Edit address", "Remove", NULL, true, rappel_choix, NULL);
+    pied = lv_msgbox_get_footer(dernier_msgbox());
+    lv_obj_send_event(lv_obj_get_child(pied, 2), LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.appels == 1);
+    VERIFIER(g_trace_choix.dernier_choix == 1);
+
+    /* Deux clics avant pompage : un seul rappel (meme garde de reentrance que
+       le dialogue ordinaire). */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("X", "y", "A", "B", NULL, false, rappel_choix, NULL);
+    pied = lv_msgbox_get_footer(dernier_msgbox());
+    lv_obj_send_event(lv_obj_get_child(pied, 2), LV_EVENT_CLICKED, NULL);
+    lv_obj_send_event(lv_obj_get_child(pied, 2), LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.appels == 1);
+
+    /* Un dialogue de choix bloque un second dialogue, comme l'ordinaire. */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("X", "y", "A", "B", NULL, false, rappel_choix, NULL);
+    confirmation_ouvrir_choix("Z", "w", "C", "D", NULL, false, rappel_choix, NULL);
+    VERIFIER(lv_obj_get_child_count(lv_layer_top()) == 1);
+    VERIFIER(confirmation_est_ouverte());
+    pied = lv_msgbox_get_footer(dernier_msgbox());
+    lv_obj_send_event(lv_obj_get_child(pied, 0), LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.appels == 1);
+    VERIFIER(!confirmation_est_ouverte());
+
+    /* --- TROIS actions (renommage du parc, 2026-08-16) -------------------
+     * `libelle_c` non NUL ajoute un quatrieme bouton. `destructif_dernier`
+     * porte alors sur la TROISIEME action, pas la deuxieme : c'est toujours
+     * la derniere qui est l'action dangereuse ("Remove"). */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("Snapmaker U1", "192.168.1.42:7125",
+                              "Rename", "Edit address", "Remove", true, rappel_choix, NULL);
+    mbox = dernier_msgbox();
+    pied = lv_msgbox_get_footer(mbox);
+    VERIFIER(lv_obj_get_child_count(pied) == 4);
+
+    /* La boite s'elargit : les quatre boutons ne tiennent pas dans les 440 px
+     * qui suffisent a trois (mesure faite sur docs/captures/parc-actions.png :
+     * ~357 px de boutons + ecarts pour trois, ~472 pour quatre). */
+    VERIFIER(lv_obj_get_style_width(mbox, 0) > 440);
+
+    VERIFIER(lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(pied, 3), 0),
+                         lv_color_hex(0xE74C3C)));
+    VERIFIER(!lv_color_eq(lv_obj_get_style_bg_color(lv_obj_get_child(pied, 2), 0),
+                          lv_color_hex(0xE74C3C)));
+
+    /* Troisieme action -> 2. */
+    lv_obj_send_event(lv_obj_get_child(pied, 3), LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.appels == 1);
+    VERIFIER(g_trace_choix.dernier_choix == 2);
+
+    /* Premiere action d'un dialogue a trois -> 0 (le renommage). */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("Snapmaker U1", "192.168.1.42:7125",
+                              "Rename", "Edit address", "Remove", true, rappel_choix, NULL);
+    pied = lv_msgbox_get_footer(dernier_msgbox());
+    lv_obj_send_event(lv_obj_get_child(pied, 1), LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+    VERIFIER(g_trace_choix.dernier_choix == 0);
+
+    /* Deux actions : la boite garde sa largeur d'origine. */
+    memset(&g_trace_choix, 0, sizeof(g_trace_choix));
+    confirmation_ouvrir_choix("X", "y", "A", "B", NULL, false, rappel_choix, NULL);
+    VERIFIER(lv_obj_get_style_width(dernier_msgbox(), 0) == 440);
+    pied = lv_msgbox_get_footer(dernier_msgbox());
+    lv_obj_send_event(lv_obj_get_child(pied, 0), LV_EVENT_CLICKED, NULL);
+    lv_timer_handler();
+}
+
 void suite_clavier(void)
 {
     section_clavier();
     section_confirmation();
+    section_confirmation_choix();
 }

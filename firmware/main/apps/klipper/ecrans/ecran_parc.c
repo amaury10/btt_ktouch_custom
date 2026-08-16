@@ -119,12 +119,170 @@ static void tuile_cb(lv_event_t *e)
     if (indice >= ctx->config.nb) {
         return;
     }
+    /* LVGL envoie LV_EVENT_CLICKED au relachement MEME quand
+       LV_EVENT_LONG_PRESSED vient de partir : sans cette garde, un appui long
+       ouvrirait le menu d'actions puis, au relachement, tenterait d'ouvrir
+       "Switch printer?" par-dessus (refuse avec une alerte au journal par le
+       singleton de confirmation.c -- sur, mais bruyant et trompeur). */
+    if (confirmation_est_ouverte()) {
+        return;
+    }
     if (indice == ctx->config.actif) {
         return; /* déjà active : rien à faire */
     }
     ctx->indice_attente = indice;
     confirmation_ouvrir("Switch printer?", ctx->config.entrees[indice].nom, "Switch",
                         /*destructif=*/false, rappel_confirmer_bascule, ctx);
+}
+
+/* --- appui long sur une tuile : editer l'adresse / retirer --------------- *
+ * Le tap simple bascule (voir tuile_cb ci-dessus) ; l'appui long ouvre les
+ * deux autres issues. C'est le SEUL chemin de suppression du firmware, et le
+ * seul moyen de corriger l'adresse d'une imprimante depuis l'ecran. */
+
+static void rappel_editer_adresse(const char *valeur, void *contexte)
+{
+    ecran_parc_ctx_t *ctx = contexte;
+    if (ctx == NULL || valeur == NULL || valeur[0] == '\0') {
+        return; /* annule/vide : abandon silencieux, comme partout */
+    }
+    backend_hote_t hote;
+    char erreur[64];
+    if (!ecran_configuration_valider(valeur, &hote, erreur, sizeof(erreur))) {
+        habillage_notifier(erreur, true);
+        return;
+    }
+
+    parc_config_t config;
+    parc_config_lire(&config);
+    uint8_t indice = ctx->indice_attente;
+    if (indice >= config.nb) {
+        return; /* la config a change sous le clavier : ne rien faire */
+    }
+    config.entrees[indice].hote = hote;
+    if (parc_config_definir(&config) != ESP_OK) {
+        habillage_notifier("Edit failed (store unavailable)", true);
+        return;
+    }
+
+    /* Imprimante ACTIVE : l'hote de boot est LA source de verite (voir
+       parc_imprimantes.h et l'ordre de rappel_confirmer_bascule ci-dessus).
+       Sans cette seconde ecriture, la nouvelle adresse ne prendrait effet
+       qu'apres un aller-retour de bascule -- l'edition paraitrait sans effet.
+       Pas de redemarrage automatique : la dalle parle encore a l'ancienne
+       adresse jusqu'au prochain demarrage, et le message le dit. */
+    if (indice == config.actif) {
+        if (ui_reglages_definir_hote(&hote) != ESP_OK) {
+            habillage_notifier("Address saved for the list only", true);
+            return;
+        }
+        habillage_notifier("Address saved (restart applies it)", false);
+        return;
+    }
+    habillage_notifier("Address saved", false);
+}
+
+/* Renommage : le nom n'est qu'un libelle d'affichage, il n'a AUCUN pendant
+ * dans les reglages de boot (contrairement a l'adresse) -- rien d'autre a
+ * ecrire, et le cas "imprimante active" ne se pose pas. */
+static void rappel_renommer(const char *valeur, void *contexte)
+{
+    ecran_parc_ctx_t *ctx = contexte;
+    if (ctx == NULL || valeur == NULL || valeur[0] == '\0') {
+        return; /* annule/vide : abandon silencieux, comme partout */
+    }
+
+    parc_config_t config;
+    parc_config_lire(&config);
+    uint8_t indice = ctx->indice_attente;
+    if (indice >= config.nb) {
+        return; /* la config a change sous le clavier */
+    }
+    /* Troncature SIGNALEE, jamais silencieuse : PARC_NOM_MAX vaut 24 et le
+       clavier accepte davantage -- sans ce message l'utilisateur verrait son
+       nom ampute sans comprendre pourquoi. */
+    bool tronque = (strlen(valeur) >= PARC_NOM_MAX);
+    /* "%.*s" borne la SOURCE en plus de la destination : un "%s" nu declenche
+       -Werror=format-truncation cote ESP-IDF (valeur peut faire
+       CLAVIER_VALEUR_MAX octets, le champ 24). Troncature voulue, ecrite. */
+    snprintf(config.entrees[indice].nom, PARC_NOM_MAX, "%.*s", PARC_NOM_MAX - 1, valeur);
+    if (parc_config_definir(&config) != ESP_OK) {
+        habillage_notifier("Rename failed (store unavailable)", true);
+        return;
+    }
+    habillage_notifier(tronque ? "Renamed (name shortened)" : "Renamed", tronque);
+}
+
+static void rappel_action_tuile(int choix, void *contexte)
+{
+    ecran_parc_ctx_t *ctx = contexte;
+    if (ctx == NULL || choix < 0) {
+        return; /* annulation */
+    }
+    uint8_t indice = ctx->indice_attente;
+    parc_config_t config;
+    parc_config_lire(&config);
+    if (indice >= config.nb) {
+        return; /* la config a change sous le dialogue */
+    }
+
+    if (choix == 0) {
+        /* Renommer : clavier preverni du nom courant. */
+        clavier_ouvrir("Printer name", config.entrees[indice].nom, CLAVIER_TEXTE,
+                       rappel_renommer, ctx);
+        return;
+    }
+
+    if (choix == 1) {
+        /* Editer l'adresse : clavier preverni de la valeur courante, meme
+           format "adresse:port" que celui qu'attend ecran_configuration_valider(). */
+        char courant[BACKEND_HOTE_LONGUEUR_MAX + 8];
+        snprintf(courant, sizeof(courant), "%s:%u",
+                 config.entrees[indice].hote.adresse,
+                 (unsigned)config.entrees[indice].hote.port);
+        clavier_ouvrir("Printer address", courant, CLAVIER_TEXTE, rappel_editer_adresse, ctx);
+        return;
+    }
+
+    /* Retrait. parc_config_retirer() refuse l'active tant qu'il reste
+       d'autres imprimantes (voir son contrat) : on traduit ce refus en
+       consigne, plutot qu'en echec muet. */
+    esp_err_t erreur = parc_config_retirer(&config, indice);
+    if (erreur == ESP_ERR_INVALID_STATE) {
+        habillage_notifier("Switch to another printer first", true);
+        return;
+    }
+    if (erreur != ESP_OK) {
+        habillage_notifier("Remove failed", true);
+        return;
+    }
+    if (parc_config_definir(&config) != ESP_OK) {
+        habillage_notifier("Remove failed (store unavailable)", true);
+        return;
+    }
+    habillage_notifier("Printer removed", false);
+}
+
+static void tuile_long_cb(lv_event_t *e)
+{
+    ecran_parc_emplacement_t *info = lv_event_get_user_data(e);
+    if (info == NULL || info->ctx == NULL) {
+        return;
+    }
+    ecran_parc_ctx_t *ctx = info->ctx;
+    uint8_t indice = info->indice;
+    if (indice >= ctx->config.nb || confirmation_est_ouverte()) {
+        return;
+    }
+    ctx->indice_attente = indice;
+
+    char message[BACKEND_HOTE_LONGUEUR_MAX + 8];
+    snprintf(message, sizeof(message), "%s:%u",
+             ctx->config.entrees[indice].hote.adresse,
+             (unsigned)ctx->config.entrees[indice].hote.port);
+    confirmation_ouvrir_choix(ctx->config.entrees[indice].nom, message,
+                              "Rename", "Edit address", "Remove",
+                              /*destructif_dernier=*/true, rappel_action_tuile, ctx);
 }
 
 /* --- ajout d'une imprimante (clavier nom puis adresse) ------------------- */
@@ -331,6 +489,9 @@ static void ecran_parc_construire(lv_obj_t *parent, void *contexte)
         ctx->emplacements[i].ctx = ctx;
         ctx->emplacements[i].indice = i;
         lv_obj_add_event_cb(ctx->tuiles[i], tuile_cb, LV_EVENT_CLICKED, &ctx->emplacements[i]);
+        /* Appui long : editer l'adresse / retirer (voir tuile_long_cb). Meme
+           user_data que le clic, les deux rappels lisent le meme emplacement. */
+        lv_obj_add_event_cb(ctx->tuiles[i], tuile_long_cb, LV_EVENT_LONG_PRESSED, &ctx->emplacements[i]);
     }
 
     lv_obj_t *label_ajouter = NULL;

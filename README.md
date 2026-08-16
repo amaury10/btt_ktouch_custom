@@ -66,7 +66,7 @@ Vérifié sur matériel :
 
 ## Aperçu de l'interface
 
-Les 32 images ci-dessous couvrent **tous les écrans du firmware**. Ce ne sont
+Les 33 images ci-dessous couvrent **tous les écrans du firmware**. Ce ne sont
 pas des maquettes : ce sont des captures 800×480 en RGB565 produites par
 [`simulateur/`](simulateur/), qui compile le code d'écran réel — les mêmes
 pixels que ceux poussés vers la dalle. Elles se régénèrent d'une commande,
@@ -108,7 +108,7 @@ mentir après une évolution de l'interface.
 | | | |
 |:-:|:-:|:-:|
 | ![Clavier texte](docs/captures/clavier-texte.png)<br>**Clavier texte** — saisie d'adresse | ![Pavé numérique](docs/captures/clavier-temperature.png)<br>**Pavé numérique** — consigne de température | ![Confirmation](docs/captures/confirmation.png)<br>**Confirmation destructive** — annulation d'impression |
-| ![Confirmation de homing](docs/captures/homing-confirmation.png)<br>**Confirmation de homing** — axe déjà référencé | ![Saisie au premier démarrage](docs/captures/premier-demarrage-saisie.png)<br>**Saisie de l'hôte** — au premier démarrage | |
+| ![Confirmation de homing](docs/captures/homing-confirmation.png)<br>**Confirmation de homing** — axe déjà référencé | ![Saisie au premier démarrage](docs/captures/premier-demarrage-saisie.png)<br>**Saisie de l'hôte** — au premier démarrage | ![Actions sur une tuile](docs/captures/parc-actions.png)<br>**Actions sur une imprimante** — appui long : renommer, éditer l'adresse ou retirer |
 
 ## Comment ce firmware peut être réversible sans câble
 
