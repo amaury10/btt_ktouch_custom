@@ -106,7 +106,7 @@ going stale after an interface change.
 | | | |
 |:-:|:-:|:-:|
 | ![Text keyboard](docs/captures/clavier-texte.png)<br>**Text keyboard** — host address entry | ![Numeric keypad](docs/captures/clavier-temperature.png)<br>**Numeric keypad** — temperature target | ![Confirmation](docs/captures/confirmation.png)<br>**Destructive confirmation** — cancelling a print |
-| ![Homing confirmation](docs/captures/homing-confirmation.png)<br>**Homing confirmation** — axis already homed | ![First-boot entry](docs/captures/premier-demarrage-saisie.png)<br>**Host entry** — at first boot | ![Printer tile actions](docs/captures/parc-actions.png)<br>**Printer actions** — long press: edit the address or remove |
+| ![Homing confirmation](docs/captures/homing-confirmation.png)<br>**Homing confirmation** — axis already homed | ![First-boot entry](docs/captures/premier-demarrage-saisie.png)<br>**Host entry** — at first boot | ![Printer tile actions](docs/captures/parc-actions.png)<br>**Printer actions** — long press: rename, edit the address or remove |
 
 ## How this firmware can be reversible without a cable
 

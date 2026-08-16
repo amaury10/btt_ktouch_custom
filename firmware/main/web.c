@@ -620,6 +620,56 @@ static esp_err_t gestion_parc_hote(httpd_req_t *req)
     return httpd_resp_sendstr(req, "ok -- redemarrer pour appliquer si entree active\n");
 }
 
+/* POST /parc-nom?i=N : renomme l'entrée N du parc (corps de requête = le
+ * nouveau nom). Pendant de /parc-hote. Le nom n'est qu'un libellé d'affichage
+ * -- aucun pendant dans les réglages de boot, donc rien d'autre à écrire, même
+ * pour l'entrée active. Tronqué à PARC_NOM_MAX-1 par snprintf, et la réponse
+ * le DIT plutôt que de laisser croire que le nom est passé entier. */
+static esp_err_t gestion_parc_nom(httpd_req_t *req)
+{
+    char parametre[8] = "";
+    char requete[32];
+    if (httpd_req_get_url_query_str(req, requete, sizeof(requete)) == ESP_OK) {
+        (void)httpd_query_key_value(requete, "i", parametre, sizeof(parametre));
+    }
+    int indice = (parametre[0] != '\0') ? atoi(parametre) : -1;
+
+    char corps[96];
+    int longueur = httpd_req_recv(req, corps, sizeof(corps) - 1);
+    if (longueur <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "corps attendu : nouveau nom\n");
+    }
+    corps[longueur] = '\0';
+    while (longueur > 0 && (corps[longueur - 1] == '\n' || corps[longueur - 1] == '\r')) {
+        corps[--longueur] = '\0';
+    }
+    if (corps[0] == '\0') {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "nom vide refuse\n");
+    }
+
+    parc_config_t config;
+    parc_config_lire(&config);
+    if (indice < 0 || indice >= (int)config.nb) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        return httpd_resp_sendstr(req, "parametre i invalide (0..nb-1)\n");
+    }
+
+    bool tronque = (strlen(corps) >= PARC_NOM_MAX);
+    /* "%.*s" borne explicitement la source, pas seulement la destination : un
+       "%s" nu declenche -Werror=format-truncation (le compilateur voit un
+       corps de 96 octets vers un champ de 24). La troncature est VOULUE ici,
+       autant l'ecrire. */
+    snprintf(config.entrees[indice].nom, PARC_NOM_MAX, "%.*s", PARC_NOM_MAX - 1, corps);
+    if (parc_config_definir(&config) != ESP_OK) {
+        return httpd_resp_send_500(req);
+    }
+    JOURNAL_INFO(TAG, "parc-nom : entree %d -> %s%s", indice,
+                 config.entrees[indice].nom, tronque ? " (tronque)" : "");
+    return httpd_resp_sendstr(req, tronque ? "ok -- nom tronque\n" : "ok\n");
+}
+
 /* POST /parc-supprimer?i=N : retire l'entrée N du parc. Pendant de
  * /parc-hote ci-dessus, née le 2026-08-16 en même temps que l'appui long sur
  * une tuile : avant, RIEN ne pouvait décrémenter `nb`, et un parc arrivé à
@@ -1212,6 +1262,9 @@ esp_err_t web_start(void)
     static const httpd_uri_t route_parc_hote = {
         .uri = "/parc-hote", .method = HTTP_POST, .handler = gestion_parc_hote, .user_ctx = NULL,
     };
+    static const httpd_uri_t route_parc_nom = {
+        .uri = "/parc-nom", .method = HTTP_POST, .handler = gestion_parc_nom, .user_ctx = NULL,
+    };
     static const httpd_uri_t route_parc_supprimer = {
         .uri = "/parc-supprimer", .method = HTTP_POST, .handler = gestion_parc_supprimer, .user_ctx = NULL,
     };
@@ -1235,6 +1288,7 @@ esp_err_t web_start(void)
 #if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH
     enregistrer_route(serveur, &route_parc);
     enregistrer_route(serveur, &route_parc_hote);
+    enregistrer_route(serveur, &route_parc_nom);
     enregistrer_route(serveur, &route_parc_supprimer);
     enregistrer_route(serveur, &route_coredump);
 #endif

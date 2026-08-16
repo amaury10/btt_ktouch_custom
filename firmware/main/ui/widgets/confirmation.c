@@ -34,6 +34,9 @@ static const char *TAG = "confirmation";
  * tout en restant nettement plus étroite que l'écran (800 px) pour qu'un
  * dialogue reste visuellement une boîte, pas une pleine page. */
 #define LARGEUR_MIN_BOITE 440
+/* Largeur d'une boite portant TROIS actions (donc quatre boutons) : les 440 px
+ * ci-dessus n'en accueillent que trois -- voir confirmation_ouvrir_choix(). */
+#define LARGEUR_BOITE_3_ACTIONS 580
 
 /* Écart horizontal explicite entre les deux boutons du pied, EN PLUS de la
  * largeur minimale ci-dessus : SPACE_EVENLY seul dégénère à un écart nul dès
@@ -195,7 +198,8 @@ void confirmation_ouvrir_ex(const char *titre, const char *message,
 
 void confirmation_ouvrir_choix(const char *titre, const char *message,
                                const char *libelle_a, const char *libelle_b,
-                               bool destructif_b,
+                               const char *libelle_c,
+                               bool destructif_dernier,
                                confirmation_choix_rappel_t rappel, void *contexte)
 {
     if (rappel == NULL) {
@@ -211,7 +215,11 @@ void confirmation_ouvrir_choix(const char *titre, const char *message,
        pour le pourquoi de chaque etape (largeur minimale posee avant le
        centrage, fond assombri explicitement contre le theme LVGL). */
     g_confirmation.mbox = lv_msgbox_create(NULL);
-    lv_obj_set_width(g_confirmation.mbox, LARGEUR_MIN_BOITE);
+    /* Quatre boutons ne tiennent pas dans la largeur qui en accueille trois
+       (mesure sur docs/captures/parc-actions.png : ~357 px de boutons et
+       d'ecarts pour trois, ~472 pour quatre, dans une boite de 440). */
+    lv_obj_set_width(g_confirmation.mbox,
+                     libelle_c != NULL ? LARGEUR_BOITE_3_ACTIONS : LARGEUR_MIN_BOITE);
 
     lv_obj_t *fond = lv_obj_get_parent(g_confirmation.mbox);
     lv_obj_set_style_bg_color(fond, lv_color_hex(0x000000), 0);
@@ -220,7 +228,7 @@ void confirmation_ouvrir_choix(const char *titre, const char *message,
     lv_msgbox_add_title(g_confirmation.mbox, titre != NULL ? titre : "");
     lv_msgbox_add_text(g_confirmation.mbox, message != NULL ? message : "");
 
-    /* Ordre du pied : [0] Cancel, [1] libelle_a, [2] libelle_b -- contrat
+    /* Ordre du pied : [0] Cancel, [1] libelle_a, [2] libelle_b, [3] libelle_c -- contrat
        public (voir confirmation.h) sur lequel test_clavier.c s'appuie pour
        retrouver les boutons. */
     lv_obj_t *bouton_annuler = lv_msgbox_add_footer_button(g_confirmation.mbox, "Cancel");
@@ -234,10 +242,19 @@ void confirmation_ouvrir_choix(const char *titre, const char *message,
         lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_b != NULL ? libelle_b : "");
     lv_obj_add_event_cb(bouton_b, bouton_choix_cb, LV_EVENT_CLICKED, (void *)(intptr_t)1);
 
+    /* Derniere action presente : c'est ELLE que `destructif_dernier` colore,
+       jamais une action intermediaire. */
+    lv_obj_t *bouton_dernier = bouton_b;
+    if (libelle_c != NULL) {
+        lv_obj_t *bouton_c = lv_msgbox_add_footer_button(g_confirmation.mbox, libelle_c);
+        lv_obj_add_event_cb(bouton_c, bouton_choix_cb, LV_EVENT_CLICKED, (void *)(intptr_t)2);
+        bouton_dernier = bouton_c;
+    }
+
     lv_obj_set_style_pad_column(lv_obj_get_parent(bouton_annuler), ECART_BOUTONS_PIED, 0);
 
-    if (destructif_b) {
-        lv_obj_set_style_bg_color(bouton_b, lv_color_hex(COULEUR_ROUGE_DESTRUCTIF), 0);
+    if (destructif_dernier) {
+        lv_obj_set_style_bg_color(bouton_dernier, lv_color_hex(COULEUR_ROUGE_DESTRUCTIF), 0);
         /* Mise en avant posee sur l'ANNULATION, jamais sur l'action
            destructive -- meme regle et meme raison que confirmation_ouvrir_ex(). */
         lv_obj_add_state(bouton_annuler, LV_STATE_FOCUS_KEY);

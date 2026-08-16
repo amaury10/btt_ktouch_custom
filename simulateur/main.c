@@ -980,7 +980,7 @@ int main(int argc, char **argv)
          * qui n'est PAS active -- l'active refuse le retrait. */
         if (parc_actions) {
             confirmation_ouvrir_choix("Snapmaker U1", "192.168.1.42:7125",
-                                      "Edit address", "Remove", true,
+                                      "Rename", "Edit address", "Remove", true,
                                       demo_choix_rappel, NULL);
         }
 

@@ -182,6 +182,37 @@ static void rappel_editer_adresse(const char *valeur, void *contexte)
     habillage_notifier("Address saved", false);
 }
 
+/* Renommage : le nom n'est qu'un libelle d'affichage, il n'a AUCUN pendant
+ * dans les reglages de boot (contrairement a l'adresse) -- rien d'autre a
+ * ecrire, et le cas "imprimante active" ne se pose pas. */
+static void rappel_renommer(const char *valeur, void *contexte)
+{
+    ecran_parc_ctx_t *ctx = contexte;
+    if (ctx == NULL || valeur == NULL || valeur[0] == '\0') {
+        return; /* annule/vide : abandon silencieux, comme partout */
+    }
+
+    parc_config_t config;
+    parc_config_lire(&config);
+    uint8_t indice = ctx->indice_attente;
+    if (indice >= config.nb) {
+        return; /* la config a change sous le clavier */
+    }
+    /* Troncature SIGNALEE, jamais silencieuse : PARC_NOM_MAX vaut 24 et le
+       clavier accepte davantage -- sans ce message l'utilisateur verrait son
+       nom ampute sans comprendre pourquoi. */
+    bool tronque = (strlen(valeur) >= PARC_NOM_MAX);
+    /* "%.*s" borne la SOURCE en plus de la destination : un "%s" nu declenche
+       -Werror=format-truncation cote ESP-IDF (valeur peut faire
+       CLAVIER_VALEUR_MAX octets, le champ 24). Troncature voulue, ecrite. */
+    snprintf(config.entrees[indice].nom, PARC_NOM_MAX, "%.*s", PARC_NOM_MAX - 1, valeur);
+    if (parc_config_definir(&config) != ESP_OK) {
+        habillage_notifier("Rename failed (store unavailable)", true);
+        return;
+    }
+    habillage_notifier(tronque ? "Renamed (name shortened)" : "Renamed", tronque);
+}
+
 static void rappel_action_tuile(int choix, void *contexte)
 {
     ecran_parc_ctx_t *ctx = contexte;
@@ -196,6 +227,13 @@ static void rappel_action_tuile(int choix, void *contexte)
     }
 
     if (choix == 0) {
+        /* Renommer : clavier preverni du nom courant. */
+        clavier_ouvrir("Printer name", config.entrees[indice].nom, CLAVIER_TEXTE,
+                       rappel_renommer, ctx);
+        return;
+    }
+
+    if (choix == 1) {
         /* Editer l'adresse : clavier preverni de la valeur courante, meme
            format "adresse:port" que celui qu'attend ecran_configuration_valider(). */
         char courant[BACKEND_HOTE_LONGUEUR_MAX + 8];
@@ -243,8 +281,8 @@ static void tuile_long_cb(lv_event_t *e)
              ctx->config.entrees[indice].hote.adresse,
              (unsigned)ctx->config.entrees[indice].hote.port);
     confirmation_ouvrir_choix(ctx->config.entrees[indice].nom, message,
-                              "Edit address", "Remove", /*destructif_b=*/true,
-                              rappel_action_tuile, ctx);
+                              "Rename", "Edit address", "Remove",
+                              /*destructif_dernier=*/true, rappel_action_tuile, ctx);
 }
 
 /* --- ajout d'une imprimante (clavier nom puis adresse) ------------------- */

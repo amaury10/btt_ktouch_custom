@@ -108,7 +108,7 @@ mentir après une évolution de l'interface.
 | | | |
 |:-:|:-:|:-:|
 | ![Clavier texte](docs/captures/clavier-texte.png)<br>**Clavier texte** — saisie d'adresse | ![Pavé numérique](docs/captures/clavier-temperature.png)<br>**Pavé numérique** — consigne de température | ![Confirmation](docs/captures/confirmation.png)<br>**Confirmation destructive** — annulation d'impression |
-| ![Confirmation de homing](docs/captures/homing-confirmation.png)<br>**Confirmation de homing** — axe déjà référencé | ![Saisie au premier démarrage](docs/captures/premier-demarrage-saisie.png)<br>**Saisie de l'hôte** — au premier démarrage | ![Actions sur une tuile](docs/captures/parc-actions.png)<br>**Actions sur une imprimante** — appui long : éditer l'adresse ou retirer |
+| ![Confirmation de homing](docs/captures/homing-confirmation.png)<br>**Confirmation de homing** — axe déjà référencé | ![Saisie au premier démarrage](docs/captures/premier-demarrage-saisie.png)<br>**Saisie de l'hôte** — au premier démarrage | ![Actions sur une tuile](docs/captures/parc-actions.png)<br>**Actions sur une imprimante** — appui long : renommer, éditer l'adresse ou retirer |
 
 ## Comment ce firmware peut être réversible sans câble
 
