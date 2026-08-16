@@ -2,6 +2,89 @@
 
 # Journal des versions
 
+## v0.9.1 — gestion de parc utilisable, et une interface qui ne ment plus
+
+Version de consolidation : aucune nouvelle sous-partie du firmware, mais le
+parc d'imprimantes devient réellement administrable et trois défauts d'affichage
+disparaissent. 8 commits depuis `v0.9.0`.
+
+### Gérer son parc depuis l'écran
+
+Jusqu'ici, une imprimante ajoutée au parc y restait pour toujours : les seuls
+chemins d'écriture ne faisaient qu'**augmenter** le compteur d'entrées. Une fois
+les 6 emplacements occupés, « Add printer » répondait « Printer list is full »
+sans qu'aucun moyen n'existe de libérer une place. L'adresse n'était modifiable
+que par requête HTTP, et le nom pas du tout.
+
+Un **appui long sur une tuile** ouvre désormais un menu : **Rename**,
+**Edit address**, **Remove**. Le tap simple continue de basculer d'imprimante.
+
+Retirer l'imprimante **active** est refusé tant que d'autres existent — l'écran
+invite à basculer d'abord. Ce n'est pas une limite technique : la retirer
+imposerait de réécrire l'hôte de démarrage **et** de redémarrer la dalle, un
+effet de bord qu'un geste de suppression ne doit pas déclencher. Seule
+exception, l'active seule dans le parc : la retirer vide simplement la liste.
+
+Éditer l'adresse de l'imprimante active réécrit aussi l'hôte de démarrage, qui
+en est la source de vérité — sans quoi la modification n'aurait pris effet
+qu'après un aller-retour de bascule et aurait semblé sans effet.
+
+Deux points HTTP accompagnent l'écran, sur le modèle de `/parc-hote` :
+`POST /parc-nom?i=N` et `POST /parc-supprimer?i=N`.
+
+### Un graphe de température qui se remplit vraiment
+
+Sur une imprimante dont l'état ne bouge plus, l'accueil ne traçait **aucune**
+courbe, et définitivement. La propagation vers l'écran n'est déclenchée que par
+le changement d'un compteur, et quatre magasins indépendants — historique de
+température, Spoolman, console, prises — n'y étaient pas raccordés. Tant que
+l'état Klipper ne bougeait pas, l'écran n'était jamais rafraîchi.
+
+Sur une imprimante réelle, dont les températures fluctuent, le défaut restait
+masqué. Il mordait imprimante éteinte avec Moonraker debout. C'est la troisième
+occurrence de cette même classe d'oubli ; le commentaire du code la nomme
+désormais explicitement.
+
+### Trois défauts d'affichage
+
+- **Macros** et **écran de configuration** : les boutons débordaient du bord
+  droit de la dalle. Deux écrans sur vingt-cinq calculaient leur largeur sur les
+  800 px du panneau au lieu des 742 réellement disponibles à droite du rail.
+- **Clavier numérique** : la dernière rangée était décalée de 6 px. La carte
+  standard de LVGL donne 4 touches aux trois premières rangées et 5 à la
+  dernière, pour une même largeur — l'écart entre les colonnes est structurel.
+  Réduit de moitié ; l'annuler complètement collerait les touches.
+
+### Documentation
+
+Le README, en français et en anglais, montre désormais **les 33 écrans du
+firmware**. Ce ne sont pas des maquettes : ce sont des captures 800×480 en
+RGB565 produites par le simulateur, qui compile le code d'écran réel. Elles se
+régénèrent d'une commande (`tools/captures-readme.sh`).
+
+Au passage, le simulateur n'enregistrait pas l'écran de configuration : ses
+captures d'accueil montraient une barre d'état **sans** le bouton engrenage que
+l'appareil affiche pourtant. C'est ce qui rendait l'écran d'adresse imprimante
+introuvable pour qui découvrait le projet par le README.
+
+### Vérifié sur matériel
+
+Retrait d'une imprimante, refus de retirer l'active, édition d'adresse et
+renommage exercés sur la dalle réelle le 16 août 2026, contre une CR-10 S5.
+
+Suites automatiques : 4405 vérifications C côté hôte, 66 tests Python, build
+ESP-IDF sans avertissement.
+
+### Limites connues (en plus de celles de v0.9.0)
+
+- Une clé USB déjà branchée au démarrage met environ 5 s à être montée ; en
+  rebranchement à chaud, un incident intermittent peut porter ce délai à ~15 s,
+  pendant lesquelles l'écran affiche « Insert a USB key » alors que la clé est
+  là. Le BSP n'expose aucun état intermédiaire permettant de dire la vérité.
+- Les points HTTP du parc ne sont compilés que si le vidage de coredump en
+  flash est activé — le `#if` correspondant les englobe sans rapport évident.
+- Le clavier numérique garde ~3 px de désalignement sur sa dernière rangée.
+
 ## v0.9.0 — première version publiable
 
 Premier firmware complet pour la **BIGTREETECH K-Touch 5 pouces**, un écran

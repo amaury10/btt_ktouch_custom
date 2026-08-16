@@ -2,6 +2,88 @@
 
 # Release notes
 
+## v0.9.1 — a manageable printer fleet, and an interface that stops lying
+
+A consolidation release: no new subsystem, but the printer fleet becomes
+genuinely manageable and three display defects disappear. 8 commits since
+`v0.9.0`.
+
+### Managing the fleet from the screen
+
+Until now, a printer added to the fleet stayed there forever: the only write
+paths ever **increased** the entry count. Once the 6 slots were taken, "Add
+printer" answered "Printer list is full" with no way whatsoever to free one.
+The address could only be changed over HTTP, and the name not at all.
+
+A **long press on a tile** now opens a menu: **Rename**, **Edit address**,
+**Remove**. A short tap still switches printers.
+
+Removing the **active** printer is refused while others exist — the screen asks
+you to switch first. This is not a technical limitation: removing it would mean
+rewriting the boot host **and** restarting the panel, a side effect a delete
+gesture must not trigger. The one exception is the active printer being the last
+one: removing it simply empties the list.
+
+Editing the active printer's address also rewrites the boot host, which is the
+source of truth — otherwise the change would only take effect after switching
+away and back, and would appear to do nothing.
+
+Two HTTP endpoints accompany the screen, modelled on `/parc-hote`:
+`POST /parc-nom?i=N` and `POST /parc-supprimer?i=N`.
+
+### A temperature graph that actually fills
+
+On a printer whose state stopped changing, the home screen drew **no** curve at
+all, permanently. Propagation to the screen is triggered only by a counter
+changing, and four independent stores — temperature history, Spoolman, console,
+power outlets — were not wired into it. As long as the Klipper state did not
+move, the screen was never refreshed.
+
+On a real printer, whose temperatures fluctuate, the defect stayed hidden. It
+bit with the printer powered off and Moonraker still up. This is the third
+occurrence of that same class of omission; the code comment now names it
+explicitly.
+
+### Three display defects
+
+- **Macros** and the **configuration screen**: buttons ran past the right edge
+  of the panel. Two screens out of twenty-five computed their width from the
+  panel's 800 px instead of the 742 actually available to the right of the rail.
+- **Numeric keypad**: the last row was off by 6 px. LVGL's stock map gives 4
+  keys to the first three rows and 5 to the last, for the same total width — the
+  drift between columns is structural. Halved; removing it entirely would make
+  the keys touch.
+
+### Documentation
+
+The README, in French and English, now shows **all 33 screens of the firmware**.
+These are not mock-ups: they are 800×480 RGB565 captures produced by the
+simulator, which compiles the real screen code. A single command regenerates
+them (`tools/captures-readme.sh`).
+
+Along the way, the simulator was not registering the configuration screen: its
+home captures showed a status bar **without** the gear button the device does
+display. That is what made the printer-address screen impossible to find for
+anyone discovering the project through the README.
+
+### Verified on hardware
+
+Removing a printer, refusing to remove the active one, editing an address and
+renaming were exercised on the real panel on 16 August 2026, against a CR-10 S5.
+
+Automated suites: 4405 host-side C assertions, 66 Python tests, ESP-IDF build
+with no warnings.
+
+### Known limitations (in addition to those of v0.9.0)
+
+- A USB key already plugged in at power-on takes about 5 s to mount; on a hot
+  re-plug, an intermittent incident can stretch that to ~15 s, during which the
+  screen reads "Insert a USB key" while the key is in fact there. The BSP
+  exposes no intermediate state that would let it tell the truth.
+- The fleet HTTP endpoints are only compiled when coredump-to-flash is enabled —
+  the surrounding `#if` sweeps them in for no evident reason.
+- The numeric keypad keeps ~3 px of misalignment on its last row.
+
 ## v0.9.0 — first publishable release
 
 First complete firmware for the **BIGTREETECH K-Touch 5-inch**, an ESP32-S3
