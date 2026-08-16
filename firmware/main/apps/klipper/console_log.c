@@ -83,6 +83,18 @@ static console_log_t *store_obtenir(void)
     g_store = tampon;
     return g_store;
 }
+
+/* Rend le store SANS jamais l'allouer -- NULL tant que rien n'a ete journalise.
+ * Existe pour console_log_generation() seule : cette fonction est appelee a
+ * chaque pompe d'habillage (~200 ms, voir generation_externe_klipper() dans
+ * app_main.c), donc passer par store_obtenir() ferait allouer le scrollback
+ * AU DEMARRAGE meme si l'utilisateur n'ouvre jamais la Console -- precisement
+ * la reservation permanente que l'allocation paresseuse ci-dessus existe pour
+ * eviter. */
+static console_log_t *store_existant(void)
+{
+    return g_store;
+}
 #else
 #define VERROU_PRENDRE() ((void)0)
 #define VERROU_RENDRE()  ((void)0)
@@ -90,6 +102,10 @@ static console_log_t g_store_hote;
 static console_log_t *store_obtenir(void)
 {
     return &g_store_hote;
+}
+static console_log_t *store_existant(void)
+{
+    return &g_store_hote; /* instance statique : toujours la, rien a allouer */
 }
 #endif
 
@@ -162,11 +178,12 @@ void console_log_effacer(void)
 
 uint32_t console_log_generation(void)
 {
-    console_log_t *store = store_obtenir();
+    /* store_existant(), PAS store_obtenir() : n'alloue jamais -- voir son
+     * commentaire. Store absent = rien n'a jamais ete journalise = 0, une
+     * valeur STABLE. Rendre autre chose ferait bouger la somme de
+     * generation_externe_klipper() sans qu'aucun store n'ait change. */
+    console_log_t *store = store_existant();
     if (store == NULL) {
-        /* Store pas encore alloue : 0, une valeur STABLE. Rendre autre chose
-         * ferait bouger la somme de generation_externe_klipper() sans qu'aucun
-         * store n'ait change. */
         return 0;
     }
     uint32_t generation;
